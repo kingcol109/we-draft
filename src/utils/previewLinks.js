@@ -7,9 +7,13 @@
 //
 // previewLinks/{token}  { playerId, slug, name, fits: [{ abbr, logo }],
 //                         posOf, classOf, number, active, createdAt, imageWidth,
-//                         imageHeight } — anyone can get() one by its token,
-//                         nobody but an admin can list them (firestore.rules),
-//                         so only the link's holder can open it.
+//                         imageHeight, opens, firstOpenedAt, lastOpenedAt }
+//                         — anyone can get() one by its token, nobody but an
+//                         admin can list them (firestore.rules), so only the
+//                         link's holder can open it. Each visit by someone
+//                         who isn't an admin adds 1 to opens (once per
+//                         browser session); the rules let a visitor change
+//                         nothing else.
 // previewImages/{token} { jpeg (base64) } — the pitch graphic, admin-only;
 //                         api/preview-og.js serves it as the link's preview
 //                         image (middleware.js hands it to link-preview bots).
@@ -21,8 +25,9 @@
 // class, under a SAMPLE watermark. The token is kept for the visit
 // (sessionStorage, per slug), so clicking around and back still works.
 import { createContext, useContext, useEffect, useState } from "react";
-import { collection, doc, getDoc, getDocs, query, serverTimestamp, setDoc, updateDoc, where } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, increment, query, serverTimestamp, setDoc, updateDoc, where } from "firebase/firestore";
 import { db } from "../firebase";
+import { useIsAdmin } from "./prospectYears";
 
 export const PreviewContext = createContext(null);
 // The open preview link ({ token, fits, posOf, classOf, … }) or null.
@@ -59,7 +64,26 @@ export function usePreviewLink(slug) {
       .catch(() => { if (live) setState({ status: "none", link: null }); });
     return () => { live = false; };
   }, [slug]);
+
+  // Count the open — not for admins, and once per browser session.
+  const { isAdmin, authReady } = useIsAdmin();
+  const link = state.status === "ok" ? state.link : null;
+  useEffect(() => {
+    if (!link || !authReady || isAdmin) return;
+    recordOpen(link);
+  }, [link, authReady, isAdmin]);
   return state;
+}
+
+const counted = (token) => { try { return sessionStorage.getItem(`wdPreviewOpened:${token}`) === "1"; } catch { return false; } };
+function recordOpen(link) {
+  if (counted(link.token)) return;
+  try { sessionStorage.setItem(`wdPreviewOpened:${link.token}`, "1"); } catch { /* storage blocked */ }
+  updateDoc(doc(db, "previewLinks", link.token), {
+    opens: increment(1),
+    lastOpenedAt: serverTimestamp(),
+    ...(link.firstOpenedAt ? {} : { firstOpenedAt: serverTimestamp() }),
+  }).catch(() => { /* a missed count isn't worth bothering the visitor */ });
 }
 
 export const previewUrl = (slug, token) => `https://we-draft.com/player/${slug}?preview=${token}`;
@@ -86,6 +110,13 @@ export async function createPreviewLink({ player, fits, posOf, classOf, number, 
     active: true, createdAt: serverTimestamp(),
   });
   return token;
+}
+
+// Admin: every link, newest first (the Pitch tab's overview).
+export async function listAllPreviewLinks() {
+  const s = await getDocs(collection(db, "previewLinks"));
+  return s.docs.map((d) => ({ token: d.id, ...d.data() }))
+    .sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
 }
 
 // Admin: this player's links, newest first.

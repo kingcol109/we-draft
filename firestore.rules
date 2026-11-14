@@ -375,6 +375,15 @@ service cloud.firestore {
     match /previewLinks/{token} {
       allow get: if true;
       allow list, write: if isAdmin();
+      // An open (utils/previewLinks.js recordOpen): anyone may add exactly 1
+      // to opens and stamp lastOpenedAt — and firstOpenedAt, only the first
+      // time — on an active link. Nothing else.
+      allow update: if resource.data.get("active", true) != false
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["opens", "lastOpenedAt", "firstOpenedAt"])
+        && request.resource.data.opens == resource.data.get("opens", 0) + 1
+        && request.resource.data.lastOpenedAt == request.time
+        && (!("firstOpenedAt" in request.resource.data.diff(resource.data).affectedKeys())
+            || (!("firstOpenedAt" in resource.data) && request.resource.data.firstOpenedAt == request.time));
     }
     match /previewImages/{token} {
       allow read, write: if isAdmin();

@@ -27,7 +27,7 @@ import { renderShareImage } from "../utils/exportImages";
 import { useSchools } from "./DraftArchiveList";
 import PitchGraphic from "./PitchGraphic";
 import { PITCH_MESSAGES, fillPitch, pitchText, hasNoPublicPage } from "../utils/pitchMessages";
-import { createPreviewLink, listPreviewLinks, previewUrl, revokePreviewLink } from "../utils/previewLinks";
+import { createPreviewLink, listAllPreviewLinks, listPreviewLinks, previewUrl, revokePreviewLink } from "../utils/previewLinks";
 
 const BLUE = "#0055a5";
 const GREEN = "#2e7d32";
@@ -710,6 +710,69 @@ function PitchMessage({ n, title, text }) {
 // (children). A player's account saves like Connect does (contact-save ->
 // Pending in Instagram Accounts); an unpromoted recruit's goes on their
 // recruits doc (InstagramHandle), which promotion carries over.
+// "Opened 3× · first Nov 15 · last Nov 16, 8:42 PM" / "Not opened yet".
+// Admin views don't count (utils/previewLinks.js).
+const fmtDay = (ts) => (ts?.toDate ? ts.toDate().toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "");
+const fmtOpen = (ts) => (ts?.toDate ? ts.toDate().toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "");
+const opensText = (l) => (l.opens
+  ? `Opened ${l.opens}× · first ${fmtDay(l.firstOpenedAt)} · last ${fmtOpen(l.lastOpenedAt)}`
+  : "Not opened yet");
+
+// Every preview link at a glance (Pitch tab, nobody picked): player, made,
+// opens, first / last opened — most recently opened first, then unopened by
+// newest. Admin views never count.
+function PreviewLinksOverview() {
+  const [links, setLinks] = useState(null);
+  const [err, setErr] = useState("");
+  const load = () => { setErr(""); listAllPreviewLinks().then(setLinks).catch((e) => { setLinks([]); setErr(e.message); }); };
+  useEffect(load, []);
+  const rows = (links || []).slice().sort((a, b) =>
+    (b.lastOpenedAt?.toMillis?.() || 0) - (a.lastOpenedAt?.toMillis?.() || 0)
+    || (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
+  const live = rows.filter((l) => l.active !== false);
+  const opened = live.filter((l) => l.opens > 0);
+  const th = { textAlign: "left", padding: "6px 8px", fontSize: "11px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.06em", borderBottom: "2px solid #e3e8ef", whiteSpace: "nowrap" };
+  const td = { padding: "6px 8px", fontSize: "13px", fontWeight: 700, color: "#333", borderBottom: "1px solid #f0f2f5", whiteSpace: "nowrap" };
+  return (
+    <div style={{ marginBottom: "18px", maxWidth: "846px" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", marginBottom: "6px" }}>
+        <span style={{ fontSize: "12px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.08em" }}>Preview links</span>
+        <button type="button" onClick={load} style={small(GRAY)}>Refresh</button>
+      </div>
+      {links === null ? <div style={{ fontSize: "13px", color: "#999", fontWeight: 700 }}>Loading…</div>
+        : !rows.length ? <div style={{ fontSize: "13px", color: "#999", fontWeight: 700 }}>No preview links yet. Pick a player and use Create + copy link.</div>
+        : (
+          <>
+            <div style={{ fontSize: "13px", fontWeight: 800, color: "#555", marginBottom: "6px" }}>
+              {opened.length} of {live.length} active link{live.length === 1 ? "" : "s"} opened · {live.reduce((n, l) => n + (l.opens || 0), 0)} opens in all (admin views not counted)
+            </div>
+            <div style={{ overflowX: "auto", border: "1px solid #e3e8ef", borderRadius: "10px", background: "#fff" }}>
+              <table style={{ borderCollapse: "collapse", width: "100%" }}>
+                <thead><tr><th style={th}>Player</th><th style={th}>Made</th><th style={th}>Opens</th><th style={th}>First opened</th><th style={th}>Last opened</th><th style={th} /></tr></thead>
+                <tbody>
+                  {rows.map((l) => {
+                    const off = l.active === false;
+                    return (
+                      <tr key={l.token} style={{ opacity: off ? 0.5 : 1 }}>
+                        <td style={td}>{l.name || l.slug}{off && <span style={{ marginLeft: "6px", fontSize: "11px", color: "#999" }}>revoked</span>}</td>
+                        <td style={td}>{fmtDay(l.createdAt)}</td>
+                        <td style={{ ...td, color: l.opens ? GREEN : "#999", fontWeight: 900 }}>{l.opens || 0}</td>
+                        <td style={td}>{fmtOpen(l.firstOpenedAt) || "—"}</td>
+                        <td style={td}>{fmtOpen(l.lastOpenedAt) || "—"}</td>
+                        <td style={td}>{!off && <a href={previewUrl(l.slug, l.token)} target="_blank" rel="noopener noreferrer" style={{ ...small(GRAY), textDecoration: "none" }}>Open</a>}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      {err && <div style={{ fontSize: "12px", fontWeight: 800, color: RED, marginTop: "4px" }}>{err}</div>}
+    </div>
+  );
+}
+
 // Private preview links for this player (utils/previewLinks.js): their page
 // for whoever has the link, showing the graphic's sample scouting report,
 // with the graphic as the link's preview image in the DM. Each Create makes
@@ -770,6 +833,9 @@ function PreviewLinks({ person, preview, label }) {
                 {off && <span style={{ fontSize: "11px" }}>revoked</span>}
               </div>
             );
+          }).flatMap((row, i) => {
+            const l = links[i];
+            return [row, <div key={`${l.token}-opens`} style={{ fontSize: "11px", fontWeight: 700, color: l.opens ? GREEN : "#999", marginTop: "1px" }}>{opensText(l)}</div>];
           })}
         </>
       )}
@@ -1034,6 +1100,7 @@ function PitchTab({ players, contactByPlayer }) {
         </>
       ) : (
         <>
+          <PreviewLinksOverview />
           <div style={{ padding: "24px", textAlign: "center", color: "#999", fontWeight: 700, border: "1px dashed #ccc", borderRadius: "8px", marginBottom: "18px", maxWidth: "846px", boxSizing: "border-box" }}>
             Search a player to get their pitch: the sample profile graphic (their school's look, their headshot and number when they're in the system), then each DM with their first name filled in, ready to copy.
           </div>
