@@ -128,4 +128,16 @@ export function eligibilityInfo(p, now = new Date()) {
   return `${name} has ${n(left, "season")} of college eligibility left after this season. This means he can declare for the NFL Draft as early as ${Math.max(ry + 3, C)}, and as late as ${ry + 5}.`;
 }
 
+// Seasons of college eligibility a player has left starting with `season`
+// (default: the season the open portal feeds, activePortalSeason) — the
+// Transfer Portal's ELIG column. Five seasons: RecruitYear through
+// RecruitYear + 4. Without a recruit year, the seasons until their draft
+// class (Eligible) stand in, flagged estimated. null when neither is known.
+export function seasonsLeft(p, season = activePortalSeason()) {
+  const ry = yr(p?.RecruitYear);
+  if (ry) return { n: Math.max(0, ry + 5 - season), est: false };
+  const E = yr(p?.Eligible);
+  return E ? { n: Math.max(0, E - season), est: true } : null;
+}
+
 export const ELIGIBILITY_DISCLAIMER = "College eligibility is a tricky thing that varies case by case. We-Draft.com uses the player's recruiting class year and the new 5 for 5 rule to estimate eligibility.";

@@ -259,6 +259,20 @@ service cloud.firestore {
     }
     // High school team pages' current college players, one doc per school
     // (server/highSchools/alumniIndex.js — built by scripts, Admin SDK).
+    // Transfer stars (2–6) for every college player — public read (stars
+    // and their basis only, never PFF numbers); written by the builder
+    // (server/portal/stars.js, Admin SDK) and the admin's overrides
+    // (components/AdminPortalGrades.jsx, _overrides).
+    match /portalStars/{doc} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    // The Portal Sim's compact player pool (server/portalSim/pool.js) —
+    // public read (roles are number-free; no PFF values).
+    match /portalSimPool/{doc} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
     match /hsAlumni/{doc} {
       allow read: if true;
       allow write: if isAdmin();

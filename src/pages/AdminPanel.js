@@ -24,6 +24,8 @@ import VideoConcepts from "../components/VideoConcepts";
 import DraftOrderEditor from "../components/DraftOrderEditor";
 import CfbUniverseSearch from "../components/CfbUniverseSearch";
 import AdminTransferPortal from "../components/AdminTransferPortal";
+import AdminPortalGrades from "../components/AdminPortalGrades";
+import AdminPortalSim from "../components/AdminPortalSim";
 import AdminEligibility, { classChange } from "../components/AdminEligibility";
 import { activePortalSeason, currentDraftClass, classTag, firstClassFor } from "../utils/eligibility";
 import AdminSubPositions from "../components/AdminSubPositions";
@@ -322,11 +324,20 @@ const PLAYER_GROUPS = [
     ],
   },
   {
-    // Class changes and transfers (components/AdminEligibility.jsx,
-    // AdminTransferPortal.js) — every change waits on an admin click.
+    // Class changes (components/AdminEligibility.jsx) — every change waits
+    // on an admin click.
     key: "offseason", label: "Offseason Manager", tabs: [
       { key: "eligibility", label: "Eligibility Manager" },
-      { key: "portal", label: "Transfer Portal" },
+    ],
+  },
+  {
+    // The Transfer Portal: transfer stars for every player
+    // (components/AdminPortalGrades.jsx) and the CFBD portal sync with its
+    // recommended player updates (AdminTransferPortal.js).
+    key: "transfer", label: "Transfer Portal", tabs: [
+      { key: "grades", label: "Grades" },
+      { key: "portal", label: "Portal Sync" },
+      { key: "portalSim", label: "Portal Sim" },
     ],
   },
   {
@@ -706,7 +717,7 @@ function PlayerDataSection() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [playerDataTab, setPlayerDataTab] = useState("players");
   // Each PLAYER_GROUPS group's last-used sub-tab.
-  const [groupTab, setGroupTab] = useState({ data: "players", offseason: "eligibility", content: "historical" });
+  const [groupTab, setGroupTab] = useState({ data: "players", offseason: "eligibility", transfer: "grades", content: "historical" });
   // Transfer Portal — "committed to" school typed while resolving a
   // player's portal status (see handleResolvePortal). Its own piece of
   // state rather than part of formState since it isn't a normal editable
@@ -1263,10 +1274,16 @@ function PlayerDataSection() {
         // (utils/eligibility.js activePortalSeason: Jan 2027 is the 2027
         // portal, so 2026).
         PortalSeasonYear: String(activePortalSeason() - 1),
+        // The portal cycle (the season it feeds) — the public Transfer
+        // Portal (pages/TransferPortal.jsx) lists a cycle's entries, commits
+        // and withdrawals by it.
+        PortalCycle: String(activePortalSeason()),
       };
-      await updateDoc(doc(db, "players", selectedPlayer.id), fields);
-      setAllPlayers((prev) => prev.map((p) => (p.id === selectedPlayer.id ? { ...p, ...fields } : p)));
-      setSelectedPlayer((prev) => ({ ...prev, ...fields }));
+      // A new cycle starts clean: no commit / withdrawal from an older one.
+      await updateDoc(doc(db, "players", selectedPlayer.id), { ...fields, PortalCommittedAt: deleteField(), PortalWithdrawnAt: deleteField() });
+      const strip = (p) => { const next = { ...p, ...fields }; delete next.PortalCommittedAt; delete next.PortalWithdrawnAt; return next; };
+      setAllPlayers((prev) => prev.map((p) => (p.id === selectedPlayer.id ? strip(p) : p)));
+      setSelectedPlayer((prev) => strip(prev));
       setSaveMessage("Moved into the Transfer Portal.");
     } catch (e) {
       console.error("Admin enter-portal error:", e);
@@ -1322,6 +1339,39 @@ function PlayerDataSection() {
     }
   };
 
+  // Withdrew from the portal and stays at their school — a real move (shown
+  // on the public Transfer Portal's updates, with the same school in From
+  // and To), unlike Cancel below, which undoes a mistake.
+  const handleWithdrawPortal = async () => {
+    if (!selectedPlayer || isNew) return;
+    setSaving(true);
+    setSaveMessage("");
+    try {
+      const fields = {
+        InPortal: false,
+        PortalWithdrawnAt: serverTimestamp(),
+        PortalCycle: selectedPlayer.PortalCycle || String(activePortalSeason()),
+        PortalOriginalSchool: deleteField(),
+        PortalSeasonYear: deleteField(),
+        updatedAt: serverTimestamp(),
+      };
+      await updateDoc(doc(db, "players", selectedPlayer.id), fields);
+      const local = (p) => {
+        const next = { ...p, InPortal: false, PortalWithdrawnAt: new Date(), PortalCycle: fields.PortalCycle };
+        delete next.PortalOriginalSchool; delete next.PortalSeasonYear;
+        return next;
+      };
+      setAllPlayers((prev) => prev.map((p) => (p.id === selectedPlayer.id ? local(p) : p)));
+      setSelectedPlayer((prev) => local(prev));
+      setSaveMessage(`Withdrew from the portal — stays at ${selectedPlayer.School || "their school"}.`);
+    } catch (e) {
+      console.error("Admin withdraw-portal error:", e);
+      setSaveMessage("Failed to update — check console.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // Backs out of a portal move made by mistake — leaves School/PriorSchool
   // untouched, just clears the in-portal state itself.
   const handleCancelPortal = async () => {
@@ -1334,18 +1384,19 @@ function PlayerDataSection() {
         PortalEnteredAt: deleteField(),
         PortalOriginalSchool: deleteField(),
         PortalSeasonYear: deleteField(),
+        PortalCycle: deleteField(),
       };
       await updateDoc(doc(db, "players", selectedPlayer.id), fields);
       const localFields = { InPortal: false };
       setAllPlayers((prev) => prev.map((p) => {
         if (p.id !== selectedPlayer.id) return p;
         const next = { ...p, ...localFields };
-        delete next.PortalEnteredAt; delete next.PortalOriginalSchool; delete next.PortalSeasonYear;
+        delete next.PortalEnteredAt; delete next.PortalOriginalSchool; delete next.PortalSeasonYear; delete next.PortalCycle;
         return next;
       }));
       setSelectedPlayer((prev) => {
         const next = { ...prev, ...localFields };
-        delete next.PortalEnteredAt; delete next.PortalOriginalSchool; delete next.PortalSeasonYear;
+        delete next.PortalEnteredAt; delete next.PortalOriginalSchool; delete next.PortalSeasonYear; delete next.PortalCycle;
         return next;
       });
       setSaveMessage("Removed from the Transfer Portal.");
@@ -1385,7 +1436,10 @@ function PlayerDataSection() {
         PriorSchool: selectedPlayer.PortalOriginalSchool || selectedPlayer.School || "",
         PriorSchoolYear: selectedPlayer.PortalSeasonYear || String(activePortalSeason() - 1),
         InPortal: false,
-        PortalEnteredAt: deleteField(),
+        // PortalEnteredAt stays and PortalCommittedAt is stamped — the
+        // public Transfer Portal lists this cycle's committed transfers too.
+        PortalCommittedAt: serverTimestamp(),
+        PortalCycle: selectedPlayer.PortalCycle || String(activePortalSeason()),
         PortalOriginalSchool: deleteField(),
         PortalSeasonYear: deleteField(),
         updatedAt: serverTimestamp(),
@@ -1399,13 +1453,13 @@ function PlayerDataSection() {
       setAllPlayers((prev) => prev.map((p) => {
         if (p.id !== selectedPlayer.id) return p;
         const next = { ...p, ...localFields };
-        delete next.PortalEnteredAt; delete next.PortalOriginalSchool; delete next.PortalSeasonYear;
+        delete next.PortalOriginalSchool; delete next.PortalSeasonYear;
         (move?.removed || []).forEach((k) => delete next[k]);
         return next;
       }));
       setSelectedPlayer((prev) => {
         const next = { ...prev, ...localFields };
-        delete next.PortalEnteredAt; delete next.PortalOriginalSchool; delete next.PortalSeasonYear;
+        delete next.PortalOriginalSchool; delete next.PortalSeasonYear;
         (move?.removed || []).forEach((k) => delete next[k]);
         return next;
       });
@@ -1508,6 +1562,10 @@ function PlayerDataSection() {
         />
       ) : playerDataTab === "portal" ? (
         <AdminTransferPortal allPlayers={allPlayers} setAllPlayers={setAllPlayers} />
+      ) : playerDataTab === "grades" ? (
+        <AdminPortalGrades allPlayers={allPlayers} />
+      ) : playerDataTab === "portalSim" ? (
+        <AdminPortalSim />
       ) : playerDataTab === "eligibility" ? (
         <AdminEligibility allPlayers={allPlayers} setAllPlayers={setAllPlayers} />
       ) : playerDataTab === "recruits" ? (
@@ -1908,8 +1966,22 @@ function PlayerDataSection() {
                         </button>
                         <button
                           type="button"
+                          onClick={handleWithdrawPortal}
+                          disabled={saving}
+                          title={`Withdrew from the portal — stays at ${selectedPlayer.School || "their school"} (shows on the public portal's updates)`}
+                          style={{
+                            background: "#fff", color: "#b45309", border: "2px solid #b45309",
+                            borderRadius: "6px", padding: "8px 12px", fontWeight: 900, fontSize: "12px",
+                            textTransform: "uppercase", letterSpacing: "0.04em", cursor: saving ? "default" : "pointer",
+                          }}
+                        >
+                          Withdrew
+                        </button>
+                        <button
+                          type="button"
                           onClick={handleCancelPortal}
                           disabled={saving}
+                          title="Undo a mistake — removes every trace of this portal entry"
                           style={{
                             background: "#fff", color: "#999", border: "2px solid #ddd",
                             borderRadius: "6px", padding: "8px 12px", fontWeight: 900, fontSize: "12px",
@@ -13372,6 +13444,9 @@ function HighSchoolSchoolsPane() {
     try {
       const payload = {
         Name: trimmedName,
+        // The /hs/:slug page finds its school by this (one indexed query),
+        // so it's rewritten on every save — a rename moves the page.
+        Slug: toHsSlug(trimmedName, formState.State || ""),
         City: formState.City.trim(),
         State: formState.State || "",
         Mascot: formState.Mascot.trim(),
@@ -13438,10 +13513,15 @@ function HighSchoolSchoolsPane() {
           <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
             High Schools
           </div>
+          {/* The HS leaderboards (pages/HighSchoolRankings.jsx) — not linked
+              anywhere public yet. */}
+          <a href="/hs/rankings" target="_blank" rel="noopener noreferrer"
+            style={{ marginLeft: "auto", color: "#fff", fontWeight: 900, fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.06em", textDecoration: "underline", textUnderlineOffset: "3px", whiteSpace: "nowrap" }}>
+            HS Rankings ↗
+          </a>
           <button
             onClick={startNewSchool}
-            style={{
-              marginLeft: "auto", background: GOLD, color: "#fff", border: "none",
+            style={{ background: GOLD, color: "#fff", border: "none",
               borderRadius: "6px", padding: "6px 12px", fontWeight: 900, fontSize: "12px",
               textTransform: "uppercase", letterSpacing: "0.04em", cursor: "pointer",
             }}
@@ -13525,12 +13605,10 @@ function HighSchoolSchoolsPane() {
           <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
             {isNewSchool ? (formState?.Name || "New High School") : (selectedSchool ? (selectedSchool.Name || "Edit High School") : "Select a High School")}
           </div>
-          {/* Only a Ranking-3 school actually has a page — see
-              HighSchoolTeamPage.js's own "not available" gate for
-              everything else. Not linked from anywhere public; this is
-              purely an admin convenience, same as the "View player page ↗"
-              link elsewhere in this panel. */}
-          {!isNewSchool && formState?.Ranking === 3 && formState?.Name && (
+          {/* Every school with a logo has a page (HighSchoolTeamPage.js).
+              Not linked from anywhere public yet — the admin is the only way
+              in, along with the HS Rankings link. */}
+          {!isNewSchool && formState?.Logo1 && formState?.Name && (
             <a
               href={`/hs/${toHsSlug(formState.Name, formState.State)}`}
               target="_blank"

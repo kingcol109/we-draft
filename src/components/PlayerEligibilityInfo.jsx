@@ -231,17 +231,20 @@ function Stop({ name, sub, span, current, brand, label, to, accolades, fallback,
       {!last && <div aria-hidden="true" style={{ position: "absolute", left: size / 2 - 1.5, top: size / 2, bottom: -(GAP + size / 2), width: 3, borderRadius: 2, background: "#e6ebf2" }} />}
       {to ? <Link to={to} style={{ display: "flex", flexShrink: 0, borderRadius: "50%", position: "relative", zIndex: 1 }}>{marker}</Link> : marker}
       <div style={{ flex: 1, minWidth: 0 }}>
-        {/* The name line is as tall as the logo, so the name sits at the
-            logo's vertical middle; the years follow the name on mobile and
-            sit at the right edge on desktop. */}
-        <div style={{ minHeight: size, display: "flex", alignItems: "center", flexWrap: "wrap", gap: isMobile ? "0 8px" : "0 10px" }}>
-          <span style={{ minWidth: 0, fontSize: isMobile ? 14 : 16, lineHeight: `${nameLine}px`, fontWeight: 900, color: "#1a1f2b", textTransform: "uppercase", letterSpacing: "0.02em" }}>
-            {to ? <Link to={to} style={{ color: "inherit" }}>{name}</Link> : name}
+        {/* Padded down so the name sits at the logo's vertical middle, with
+            the location and accolade lines tucked right under it (not under
+            the logo's full height). The tag hugs the name; the years follow
+            it on mobile and sit at the right edge on desktop. */}
+        <div style={{ paddingTop: (size - nameLine) / 2, display: "flex", alignItems: "center", flexWrap: "wrap", gap: isMobile ? "0 8px" : "0 10px" }}>
+          <span style={{ minWidth: 0, display: "inline-flex", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+            <span style={{ fontSize: isMobile ? 14 : 16, lineHeight: `${nameLine}px`, fontWeight: 900, color: "#1a1f2b", textTransform: "uppercase", letterSpacing: "0.02em" }}>
+              {to ? <Link to={to} style={{ color: "inherit" }}>{name}</Link> : name}
+            </span>
+            {label && <span style={{ fontSize: 9, lineHeight: "12px", fontWeight: 900, color: "#6b7685", background: "#eef1f5", borderRadius: 4, padding: "2px 5px", letterSpacing: "0.06em", textTransform: "uppercase" }}>{label}</span>}
           </span>
-          {label && <span style={{ fontSize: 9, fontWeight: 900, color: "#6b7685", background: "#eef1f5", borderRadius: 4, padding: "2px 6px", letterSpacing: "0.06em" }}>{label}</span>}
           {span && <span style={{ marginLeft: isMobile ? 0 : "auto", fontSize: isMobile ? 14 : 17, lineHeight: `${nameLine}px`, fontWeight: 900, color: current ? c1 : "#4a5466", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", letterSpacing: "0.01em" }}>{span}</span>}
         </div>
-        {sub && <div style={{ marginTop: -4, fontSize: 12, fontWeight: 600, color: "#7a8594" }}>{sub}</div>}
+        {sub && <div style={{ marginTop: 2, fontSize: 12, fontWeight: 600, color: "#7a8594" }}>{sub}</div>}
         {(accolades || []).map((a) => <Accolade key={a.key} title={a.title} icon={a.icon} isMobile={isMobile}>{a.text}</Accolade>)}
       </div>
     </div>

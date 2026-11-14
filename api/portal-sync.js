@@ -7,6 +7,9 @@
 //   POST { action: "cfbdIndex" }  Eligibility Manager "Refresh CFBD data"
 //                                 (components/AdminEligibility.jsx) —
 //                                 server/offseason/cfbdIndex.js, no CFBD calls.
+//   POST { action: "stars" }      Transfer Portal → Grades "Rebuild"
+//                                 (components/AdminPortalGrades.jsx) —
+//                                 server/portal/stars.js, no outside calls.
 // Neither writes to players; the admin applies every change.
 //
 // Auth: the caller's Firebase ID token (Authorization: Bearer <token>),
@@ -40,6 +43,10 @@ module.exports = async function handler(req, res) {
     const user = (await db.collection("users").doc(uid).get()).data();
     if (user?.role !== "admin") return res.status(403).json({ error: "admins only" });
 
+    if (req.body?.action === "stars") {
+      const { buildPortalStars } = require("../server/portal/stars");
+      return res.status(200).json(await buildPortalStars(db));
+    }
     if (req.body?.action === "cfbdIndex") {
       const { buildCfbdIndex } = require("../server/offseason/cfbdIndex");
       return res.status(200).json(await buildCfbdIndex(db));

@@ -135,9 +135,10 @@ export default function AdminTransferPortal({ allPlayers, setAllPlayers }) {
     setBusyKey(rowKey(r)); setMessage("");
     try {
       if (rec.action === "enter") {
-        const fields = { InPortal: true, PortalEnteredAt: serverTimestamp(), PortalOriginalSchool: p.School || r.entry.originSchool || "", PortalSeasonYear: String(year - 1) };
-        await updateDoc(doc(db, "players", p.id), fields);
-        patchPlayer(p.id, { ...fields, PortalEnteredAt: new Date() });
+        const fields = { InPortal: true, PortalEnteredAt: serverTimestamp(), PortalOriginalSchool: p.School || r.entry.originSchool || "", PortalSeasonYear: String(year - 1), PortalCycle: String(year) };
+        // A new cycle starts clean: no commit / withdrawal from an older one.
+        await updateDoc(doc(db, "players", p.id), { ...fields, PortalCommittedAt: deleteField(), PortalWithdrawnAt: deleteField() });
+        patchPlayer(p.id, { ...fields, PortalEnteredAt: new Date() }, ["PortalCommittedAt", "PortalWithdrawnAt"]);
         setMessage(`${p.First} ${p.Last} moved into the Transfer Portal.`);
       } else if (rec.action === "resolve") {
         const bump = p.Eligible === currentDraftClass();
@@ -148,7 +149,10 @@ export default function AdminTransferPortal({ allPlayers, setAllPlayers }) {
           // The last season played at the old school.
           PriorSchoolYear: p.PortalSeasonYear || String(year - 1),
           InPortal: false,
-          PortalEnteredAt: deleteField(), PortalOriginalSchool: deleteField(), PortalSeasonYear: deleteField(),
+          // PortalEnteredAt stays and PortalCommittedAt is stamped: the
+          // public Transfer Portal (pages/TransferPortal.jsx) lists this
+          // cycle's committed transfers too, with both dates.
+          PortalCommittedAt: serverTimestamp(), PortalCycle: p.PortalCycle || String(year), PortalOriginalSchool: deleteField(), PortalSeasonYear: deleteField(),
           updatedAt: serverTimestamp(),
           ...(move ? move.fields : {}),
         };
@@ -156,7 +160,7 @@ export default function AdminTransferPortal({ allPlayers, setAllPlayers }) {
         patchPlayer(p.id, {
           School: fields.School, PriorSchool: fields.PriorSchool, PriorSchoolYear: fields.PriorSchoolYear, InPortal: false,
           ...(move ? move.local : {}),
-        }, ["PortalEnteredAt", "PortalOriginalSchool", "PortalSeasonYear", ...(move ? move.removed : [])]);
+        }, ["PortalOriginalSchool", "PortalSeasonYear", ...(move ? move.removed : [])]);
         setMessage(`${p.First} ${p.Last} → ${rec.newSchool}${move ? ` · moved to the ${move.local.Eligible} class (slug updates Feb 1)` : ""}.`);
       }
     } catch (e) {

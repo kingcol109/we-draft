@@ -163,7 +163,7 @@ export default function TeamRoster({ roster, color1, color2, isMobile, dark = fa
                 <span style={{ background: th.chip(color1), boxShadow: `inset 0 0 0 1px ${th.chipLine}`, color: "#fff", fontSize: isMobile ? "10px" : "11px", fontWeight: 900, padding: "3px 0", borderRadius: "4px", width: "100%", textAlign: "center" }}>{p.pos}</span>
               )}
             </div>
-            <div style={{ ...cellBox(col.yr), textAlign: "center", fontSize: "13px", fontWeight: 800, color: th.sub }}>{classOf(p.yr)}</div>
+            <div style={{ ...cellBox(col.yr), textAlign: "center", fontSize: "13px", fontWeight: 800, color: th.sub }} title={p.yrEst ? "Estimated from recruiting class" : undefined}>{classOf(p.yr)}</div>
             {!hideStars && (
               <div title={recruitTip(p) || undefined} style={{ ...cellBox(col.stars), textAlign: "center", whiteSpace: "nowrap", color: STAR_GOLD, fontSize: isMobile ? "12px" : "13px", fontWeight: 900, letterSpacing: isMobile ? 0 : "1px" }}>
                 {p.stars ? (isMobile ? `${p.stars}★` : "★".repeat(p.stars)) : <span style={{ color: "#ccd2da" }}>–</span>}

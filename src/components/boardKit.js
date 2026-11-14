@@ -235,3 +235,145 @@ export function ArchiveDropdown({ eligibleYear, onSelect, archiveYears }) {
     </div>
   );
 }
+
+// ── Grades and sizes, shared by the Community Board and the Transfer
+// Portal (pages/TransferPortal.jsx). ──
+export const gradeScale = {
+  "Early First Round": 1, "Middle First Round": 2, "Late First Round": 3,
+  "Second Round": 4, "Third Round": 5, "Fourth Round": 6,
+  "Fifth Round": 7, "Sixth Round": 8, "Seventh Round": 9, UDFA: 10,
+};
+
+export const gradeDisplay = (g) => {
+  const map = {
+    "Watchlist":          { short: "W",   bg: "#5F5E5A", border: "#444441" },
+    "Early First Round":  { short: "1st", bg: "#3B6D11", border: "#27500A" },
+    "Middle First Round": { short: "1st", bg: "#3B6D11", border: "#27500A" },
+    "Late First Round":   { short: "1st", bg: "#3B6D11", border: "#27500A" },
+    "Second Round":       { short: "2nd", bg: "#0F6E56", border: "#085041" },
+    "Third Round":        { short: "3rd", bg: "#185FA5", border: "#0C447C" },
+    "Fourth Round":       { short: "4th", bg: "#BA7517", border: "#854F0B" },
+    "Fifth Round":        { short: "5th", bg: "#BA7517", border: "#854F0B" },
+    "Sixth Round":        { short: "6th", bg: "#993C1D", border: "#712B13" },
+    "Seventh Round":      { short: "7th", bg: "#993C1D", border: "#712B13" },
+    "UDFA":               { short: "U",   bg: "#A32D2D", border: "#791F1F" },
+  };
+  return map[g] || null;
+};
+
+export const GradeBadge = ({ grade, small = false }) => {
+  const w = small ? "48px" : "64px";
+  const h = small ? "40px" : "52px";
+  const numSz = small ? "14px" : "18px";
+  const lblSz = small ? "5.5px" : "7px";
+  const gd = gradeDisplay(grade);
+  if (!gd) {
+    return (
+      <div style={{
+        display: "inline-flex", alignItems: "center", justifyContent: "center",
+        width: w, height: h, border: "2px solid #ddd", borderRadius: "5px",
+        color: "#ccc", fontSize: small ? "14px" : "18px", fontWeight: 900,
+      }}>—</div>
+    );
+  }
+  const isFirstRound = ["Early First Round", "Middle First Round", "Late First Round"].includes(grade);
+  const qualifier = isFirstRound ? grade.replace(" First Round", "").toUpperCase() : null;
+  return (
+    <div className="wdb-grade" style={{
+      display: "inline-flex", flexDirection: "column", alignItems: "center",
+      justifyContent: "center", backgroundColor: gd.bg, border: "2px solid " + gd.border,
+      borderRadius: "5px", width: w, height: h, flexShrink: 0, gap: "1px",
+    }}>
+      {qualifier && <span style={{ fontSize: small ? "6px" : "7.5px", fontWeight: 900, color: "rgba(255,255,255,0.9)", textTransform: "uppercase", letterSpacing: "0.06em", lineHeight: 1, textAlign: "center" }}>{qualifier}</span>}
+      <span style={{ fontSize: numSz, fontWeight: 900, color: "#fff", lineHeight: 1, letterSpacing: "-0.02em", textAlign: "center" }}>{gd.short}</span>
+      <span style={{ fontSize: lblSz, fontWeight: 800, color: "rgba(255,255,255,0.85)", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "center", lineHeight: 1.1 }}>{grade === "Watchlist" ? "LIST" : "ROUND"}</span>
+    </div>
+  );
+};
+
+export const PlusBadge = ({ onClick, loading, small = false, user, login, label }) => {
+  const w = small ? "48px" : "64px";
+  const h = small ? "40px" : "52px";
+  const [hovered, setHovered] = useState(false);
+
+  const handleClick = () => {
+    if (loading) return;
+    if (!user) { login(); return; }
+    onClick();
+  };
+
+  return (
+    <div style={{ position: "relative", display: "inline-flex", flexShrink: 0 }}>
+      <div
+        className="wdb-plus"
+        role="button"
+        tabIndex={0}
+        aria-label={label || "Add to board"}
+        onClick={handleClick}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleClick(); } }}
+        onFocus={() => setHovered(true)}
+        onBlur={() => setHovered(false)}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        style={{
+          display: "inline-flex", alignItems: "center", justifyContent: "center",
+          width: w, height: h, border: "2px solid " + BLUE, borderRadius: "5px",
+          cursor: loading ? "default" : "pointer",
+          backgroundColor: hovered ? "#e6f0fa" : "#fff",
+          color: BLUE, fontSize: small ? "18px" : "22px", fontWeight: 900,
+          opacity: loading ? 0.4 : 1, transition: "background 0.15s",
+        }}
+      >
+        +
+      </div>
+      {hovered && !loading && (
+        <div style={{
+          position: "absolute",
+          bottom: "calc(100% + 6px)",
+          left: "50%",
+          transform: "translateX(-50%)",
+          background: "#222",
+          color: "#fff",
+          fontSize: "11px",
+          fontWeight: 800,
+          padding: "4px 8px",
+          borderRadius: "4px",
+          whiteSpace: "nowrap",
+          pointerEvents: "none",
+          zIndex: 999,
+        }}>
+          Add to Board
+          <div style={{
+            position: "absolute",
+            top: "100%", left: "50%",
+            transform: "translateX(-50%)",
+            width: 0, height: 0,
+            borderLeft: "5px solid transparent",
+            borderRight: "5px solid transparent",
+            borderTop: "5px solid #222",
+          }} />
+        </div>
+      )}
+    </div>
+  );
+};
+
+// No community grade yet shows the Watchlist badge (same convention as
+// PlayerProfile.js). Display only — sorting and the Comm Grade filter still
+// treat the player as ungraded.
+export const displayCommGrade = (g) => (gradeScale[g] ? g : "Watchlist");
+
+export const formatHeight = (inches) => {
+  if (!inches) return "-";
+  const ft = Math.floor(inches / 12);
+  const inch = Math.round((inches % 12) * 10) / 10;
+  return ft + "'" + inch + "\"";
+};
+
+export const parseHeight = (val) => {
+  if (!val) return NaN;
+  if (typeof val === "number") return val;
+  const match = String(val).match(/^(\d+)'([\d.]+)"/);
+  if (match) return parseInt(match[1], 10) * 12 + parseFloat(match[2]);
+  return NaN;
+};

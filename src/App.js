@@ -54,6 +54,12 @@ const StaffPage = lazy(() => import("./pages/StaffPage"));
 // file's own top comment): noindexed and never linked from anywhere else
 // on the site, reachable only via a direct URL.
 const HighSchoolTeamPage = lazy(() => import("./pages/HighSchoolTeamPage"));
+// /portalsim (/portalsim/:team) — the Portal Sim (admin-only for now: AdminRoute).
+const PortalSim = lazy(() => import("./pages/PortalSim"));
+// /portal, /portal/:position, /portal/updates, /portal/:team(/:tab) — the Transfer Portal.
+const TransferPortal = lazy(() => import("./pages/TransferPortal"));
+// /hs/rankings — the high school leaderboards (also unlisted; admin link).
+const HighSchoolRankings = lazy(() => import("./pages/HighSchoolRankings"));
 
 // Mock Draft
 const MockDraftHub = lazy(() => import("./pages/MockDraftHub"));
@@ -213,6 +219,13 @@ function MainLayout() {
             {/* Redirect old /player2 URLs to canonical /player URLs */}
             <Route path="/player2/:slug" element={<RedirectPlayer2 />} />
             <Route path="/team/:teamId" element={<TeamPage />} />
+            <Route path="/portalsim" element={<AdminRoute><PortalSim /></AdminRoute>} />
+            <Route path="/portalsim/:team" element={<AdminRoute><PortalSim /></AdminRoute>} />
+            <Route path="/portal" element={<TransferPortal />} />
+            <Route path="/portal/updates" element={<TransferPortal view="updates" />} />
+            <Route path="/portal/:position" element={<TransferPortal />} />
+            <Route path="/portal/:position/:tab" element={<TransferPortal />} />
+            <Route path="/hs/rankings" element={<HighSchoolRankings />} />
             <Route path="/hs/:slug" element={<HighSchoolTeamPage />} />
             <Route path="/nfl/:teamId/:tab?" element={<NFLTeamPage />} />
             <Route path="/staff/:slug/:tab?" element={<StaffPage />} />

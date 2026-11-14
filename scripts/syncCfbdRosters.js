@@ -28,7 +28,7 @@
 // stale pre-2027 Eligible counts as 2027).
 //
 // Afterwards rebuilds offseason/cfbd (server/offseason/cfbdIndex.js) and the
-// high school pages' hsAlumni docs (server/highSchools/alumniIndex.js) — the
+// high school pages' hsAlumni docs (server/highSchools/hsIndex.js) — the
 // Offseason Manager's recruit years and roster schools, from what was just
 // written. Nothing here touches players docs.
 //
@@ -41,7 +41,8 @@ const { FieldValue } = require("firebase-admin/firestore");
 const { cfbd, getCallCount } = require("../server/live/cfbdClient");
 const { buildCfbdIndex } = require("../server/offseason/cfbdIndex");
 const { normName } = require("../server/live/store");
-const { buildHsAlumni, buildHsCfbCounts } = require("../server/highSchools/alumniIndex");
+const { buildHsCfbCounts } = require("../server/highSchools/alumniIndex");
+const { buildHsIndex } = require("../server/highSchools/hsIndex");
 
 const SEASON = 2026;
 const DRY = process.argv.includes("--dry");
@@ -229,10 +230,22 @@ async function run() {
   const ops = [];
   let players = 0;
   const unmapped = [];
+  // CFBD sometimes sends a placeholder class year — every player on a team
+  // year 1 (146 of 316 teams in Nov 2026), so the Roster tab showed all FR.
+  // A team whose players all share one year gets each player's class
+  // estimated from his high school recruiting class instead (yrEst: 1);
+  // no recruiting record → no class.
+  const estYear = (r) => {
+    const rc = (hsRecruitOf(r) || recruitOf(r))?.year;
+    return rc ? Math.min(5, Math.max(1, SEASON - rc + 1)) : undefined;
+  };
+  let estTeams = 0;
   for (const [team, list] of byTeam) {
     const school = schoolByCfbdName.get(team);
     if (!school) { unmapped.push(team); continue; }
     players += list.length;
+    const placeholderYr = list.length > 20 && new Set(list.map((r) => r.year)).size === 1;
+    if (placeholderYr) estTeams++;
     ops.push((b) => b.set(db.collection("cfbRosters").doc(String(school.CFBDTeamId)), {
       teamId: school.CFBDTeamId,
       team,
@@ -254,10 +267,13 @@ async function run() {
           first: r.firstName || "",
           last: r.lastName || "",
           pos: r.position || undefined,
-          yr: r.year ?? undefined,
+          yr: placeholderYr ? estYear(r) : r.year ?? undefined,
+          yrEst: placeholderYr && estYear(r) ? 1 : undefined,
           ht: r.height ?? undefined,
           wt: r.weight ?? undefined,
           home: home || undefined,
+          // Hometown coordinates (rounded) — the Portal Sim's home distance.
+          hl: r.homeLatitude != null && r.homeLongitude != null ? [Math.round(r.homeLatitude * 100) / 100, Math.round(r.homeLongitude * 100) / 100] : undefined,
           slug: slugOf.get(String(r.id)) || undefined,
           stars: rec?.stars || undefined,
           rating: rec?.rating ?? undefined,
@@ -289,6 +305,7 @@ async function run() {
     }
   }
   console.log(`${DRY ? "[dry] " : ""}${ops.length} team rosters (${players} players) written; ${unmapped.length} CFBD teams have no We-Draft school.`);
+  console.log(`  ${estTeams} teams had a placeholder CFBD class year — estimated from recruiting class`);
   console.log(`  tables: ${Object.entries(tables).map(([k, v]) => `${k} ${v.length}`).join(", ")} (~${Math.round(JSON.stringify(tables).length / 1024)} KB)`);
   const dcCount = {};
   Object.values(tables).flat().forEach((r) => { dcCount[r.dc] = (dcCount[r.dc] || 0) + 1; });
@@ -298,9 +315,13 @@ async function run() {
   console.log(`  high school known for ${withHs} of ${rows.length} roster players`);
   console.log(`CFBD calls: ${getCallCount()}`);
   if (!DRY) console.log(`Offseason index: ${JSON.stringify(await buildCfbdIndex(db))}`);
-  // High school team pages: each school's current college players (hsAlumni).
-  if (!DRY) console.log(`High school alumni: ${JSON.stringify(await buildHsAlumni(db))}`);
+  // High school pages: players, drafted alumni, ranks, leaderboards (hsAlumni).
+  if (!DRY) console.log(`High school pages: ${JSON.stringify(await buildHsIndex(db))}`);
   if (!DRY) console.log(`HS Research college counts: ${JSON.stringify(await buildHsCfbCounts(db))}`);
+  // Transfer stars for every player (server/portal/stars.js).
+  if (!DRY) console.log(`Transfer stars: ${JSON.stringify(await require("../server/portal/stars").buildPortalStars(db))}`);
+  // The Portal Sim's player pool (server/portalSim/pool.js) — after the stars.
+  if (!DRY) console.log(`Portal Sim pool: ${JSON.stringify(await require("../server/portalSim/pool").buildPortalSimPool(db))}`);
 }
 
 run().catch((e) => { console.error(e.message || e); process.exit(1); });

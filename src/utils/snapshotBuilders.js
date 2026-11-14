@@ -95,6 +95,7 @@
 // _grades and _top are also rebuilt on their own, more often, by
 // scripts/buildGradeSnapshots.mjs (buildGradeSnapshotDocs below) so
 // community grades don't wait for the weekly full build.
+import { buildPortalTeams } from "./portalTeams.js";
 import {
   COMP_SNAPSHOT_VERSION, encodeCompSnapshotRows, draftedPlayersAsHistorical,
   communityTraits, isGraded, positionPercentileTables,
@@ -467,6 +468,9 @@ export function buildSiteSnapshotDocs({ historical, players, draftOrder, evalsBy
       rows: buildStaffTargets({ rows, community, staff: coaches, prospectsByPos: nextClass, pctByPos, firstYear: 2000, latestYear: latest }),
     } });
   }
+
+  // FBS teams for the Transfer Portal's team pages (utils/portalTeams.js).
+  docs.push({ id: "_cfbTeams", data: { version, teams: buildPortalTeams(schools) } });
 
   const gradedComps = Object.values(positionSummary).reduce((a, s) => a + s.graded, 0);
   docs.push({
