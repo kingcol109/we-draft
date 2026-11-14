@@ -100,8 +100,8 @@ const PitchGraphic = forwardRef(function PitchGraphic({ person, brand, number, f
           <span style={pill}>▶️ Watch</span>
         </div>
       </div>
-      {/* ── Hero ── */}
-      <div style={{
+      {/* ── Hero ── (data-pitch marks: AdminSocial.jsx crops the link card from hero to grades) */}
+      <div data-pitch="hero" style={{
         position: "relative", overflow: "hidden", width: HERO_W, height: HERO_H,
         background: [
           `radial-gradient(circle 220px at top left, ${c2}55, transparent 100%)`,
@@ -169,7 +169,7 @@ const PitchGraphic = forwardRef(function PitchGraphic({ person, brand, number, f
       </div>
 
       {/* ── Draft grades (the page's card: 750 wide, inset 24px), under a SAMPLE watermark ── */}
-      <div style={{ position: "relative", margin: `0 ${PAD}px`, display: "flex", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, overflow: "hidden" }}>
+      <div data-pitch="grades" style={{ position: "relative", margin: `0 ${PAD}px`, display: "flex", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, overflow: "hidden" }}>
         <div style={{ flex: "0 0 210px", padding: "20px 24px", borderRight: `1px solid ${LINE_2}`, display: "flex", flexDirection: "column", alignItems: "center", boxSizing: "border-box" }}>
           <div style={{ width: "100%" }}><Heading center gap={16}>Community Grade</Heading></div>
           <div style={{ background: look.bg, borderRadius: 12, padding: "10px 14px", width: 110, textAlign: "center", boxSizing: "border-box" }}>

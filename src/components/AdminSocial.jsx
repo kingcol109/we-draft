@@ -933,6 +933,34 @@ function PitchTab({ players, contactByPlayer }) {
     return { dataUrl: canvas.toDataURL("image/jpeg", quality), width: canvas.width, height: canvas.height };
   };
 
+  // The preview link's card image: Instagram crops link images to about
+  // 1.6:1 from the middle, which cut off the name. So the card is its own
+  // crop — the hero (name at the top) down through the grades card —
+  // padded out to 1.6:1 so nothing is lost, 1200px wide.
+  const makeCard = async () => {
+    const root = ref.current;
+    const hero = root.querySelector('[data-pitch="hero"]');
+    const grades = root.querySelector('[data-pitch="grades"]');
+    if (!hero || !grades) return makeJpeg(1200, 0.85);
+    const scale = 1200 / root.offsetWidth;
+    const png = await renderShareImage(root, { pixelRatio: scale, backgroundColor: "#f7f9fc" });
+    const img = await new Promise((resolve, reject) => { const i = new Image(); i.onload = () => resolve(i); i.onerror = reject; i.src = png; });
+    const box = root.getBoundingClientRect();
+    const margin = 14;
+    // Starts right at the hero (the toolbar sits directly above it).
+    const top = Math.max(0, Math.round((hero.getBoundingClientRect().top - box.top) * scale));
+    const bottom = Math.min(img.naturalHeight, Math.round((grades.getBoundingClientRect().bottom - box.top + margin) * scale));
+    const w = img.naturalWidth, h = bottom - top;
+    const RATIO = 1.6;
+    const cw = Math.round(Math.max(w, h * RATIO)), ch = Math.round(Math.max(h, w / RATIO));
+    const canvas = document.createElement("canvas");
+    canvas.width = cw; canvas.height = ch;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#f7f9fc"; ctx.fillRect(0, 0, cw, ch);
+    ctx.drawImage(img, 0, top, w, h, Math.round((cw - w) / 2), Math.round((ch - h) / 2), w, h);
+    return { dataUrl: canvas.toDataURL("image/jpeg", 0.85), width: cw, height: ch };
+  };
+
   const download = async () => {
     setBusy(true); setErr("");
     try {
@@ -984,8 +1012,8 @@ function PitchTab({ players, contactByPlayer }) {
                 number,
                 posOf: players.filter((p) => String(p.Eligible) === String(person.Eligible) && p.Position === person.Position).length,
                 classOf: players.filter((p) => String(p.Eligible) === String(person.Eligible)).length,
-                // 1200px, a little more compressed: it's stored in Firestore.
-                makeImage: () => makeJpeg(1200, 0.85),
+                // The card crop (makeCard), stored in Firestore.
+                makeImage: makeCard,
               }}>
               <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
                 {fits.map((f, i) => (
