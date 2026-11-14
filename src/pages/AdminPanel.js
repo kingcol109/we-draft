@@ -112,7 +112,7 @@ const gradeBadgeInfo = (g) => gradeDisplayMap[g] || { short: g, bg: "#5F5E5A", b
 
 const BLANK_PLAYER_FORM = {
   First: "", Last: "", HighSchool: "", State: "", School: "", Position: "", Eligible: "", RecruitYear: "",
-  Height: "", Weight: "", Bio: "", Flair: "", Live: true, AdminNotes: "", Flag: "",
+  Height: "", Weight: "", Birthday: "", Bio: "", Flair: "", Live: true, AdminNotes: "", Flag: "",
 };
 
 // ── Recruits (high school players, no public page yet) ──
@@ -894,6 +894,7 @@ function PlayerDataSection() {
       RecruitYear: p.RecruitYear || "",
       Height: p.Height || "",
       Weight: p.Weight || "",
+      Birthday: p.Birthday || "",
       Bio: p.Bio || "",
       Flair: p.Flair || "",
       Live: p.Live !== false,
@@ -2015,6 +2016,9 @@ function PlayerDataSection() {
               </FieldRow>
               <FieldRow label="Weight">
                 <input value={formState.Weight} onChange={(e) => handleFieldChange("Weight", e.target.value)} placeholder="e.g. 215" style={inputStyle} />
+              </FieldRow>
+              <FieldRow label="Birthday">
+                <BirthdayPicker key={selectedPlayer?.id || "new"} value={formState.Birthday || ""} onChange={(v) => handleFieldChange("Birthday", v)} />
               </FieldRow>
               <FieldRow label="Bio (shown on player page)">
                 <textarea
@@ -6193,7 +6197,7 @@ function RecruitsSection() {
   const promoteClass = async () => {
     const rows = classPlan?.rows || [];
     if (!rows.length) return;
-    if (!window.confirm(`Create ${rows.length} player pages for the ${classPlan.cls} recruiting class (draft class ${draftClassForRecruitClass(classPlan.cls)})?\n\nThey're public as soon as they're created.`)) return;
+    if (!window.confirm(`Create ${rows.length} player pages for the ${classPlan.cls} recruiting class (draft class ${draftClassForRecruitClass(classPlan.cls)})?\n\n${isUnreleasedYear(draftClassForRecruitClass(classPlan.cls)) ? "The class is unreleased: only admins can see these pages until it launches." : "They're public as soon as they're created."}`)) return;
     setClassPromoting(true);
     const done = {};
     try {
@@ -13891,6 +13895,59 @@ function StateSilhouettesPane() {
 
 function FieldGroup({ children }) {
   return <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>{children}</div>;
+}
+
+// players.Birthday: "YYYY-MM-DD", "U" (looked, couldn't find) or "" (none).
+// Month / Day / Year dropdowns; the value only changes once all three are
+// picked (or all cleared), so a half-picked date never overwrites one.
+const BDAY_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const BDAY_YEARS = (() => { const top = new Date().getFullYear() - 13; return Array.from({ length: 30 }, (_, i) => String(top - i)); })();
+function BirthdayPicker({ value, onChange }) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || "");
+  const [parts, setParts] = useState(() => (m ? { y: m[1], mo: m[2], d: m[3] } : { y: "", mo: "", d: "" }));
+  const unknown = value === "U";
+  const pad = (n) => String(n).padStart(2, "0");
+  const valid = (p) => new Date(Number(p.y), Number(p.mo) - 1, Number(p.d)).getMonth() === Number(p.mo) - 1;
+  const full = (p) => p.y && p.mo && p.d;
+  const set = (k, v) => {
+    const next = { ...parts, [k]: v };
+    setParts(next);
+    if (full(next)) { if (valid(next)) onChange(`${next.y}-${next.mo}-${next.d}`); }
+    else if (!next.y && !next.mo && !next.d) onChange("");
+  };
+  const incomplete = !unknown && (parts.y || parts.mo || parts.d) && !full(parts);
+  const invalid = !unknown && full(parts) && !valid(parts);
+  const sel = { ...inputStyle, width: "auto", flex: "1 1 0", minWidth: 0 };
+  return (
+    <div>
+      <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+        <select value={parts.mo} disabled={unknown} onChange={(e) => set("mo", e.target.value)} style={{ ...sel, flex: "2 1 0" }}>
+          <option value="">Month</option>
+          {BDAY_MONTHS.map((name, i) => <option key={name} value={pad(i + 1)}>{name}</option>)}
+        </select>
+        <select value={parts.d} disabled={unknown} onChange={(e) => set("d", e.target.value)} style={sel}>
+          <option value="">Day</option>
+          {Array.from({ length: 31 }, (_, i) => <option key={i} value={pad(i + 1)}>{i + 1}</option>)}
+        </select>
+        <select value={parts.y} disabled={unknown} onChange={(e) => set("y", e.target.value)} style={sel}>
+          <option value="">Year</option>
+          {(parts.y && !BDAY_YEARS.includes(parts.y) ? [parts.y, ...BDAY_YEARS] : BDAY_YEARS).map((y) => <option key={y} value={y}>{y}</option>)}
+        </select>
+        <label style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "12px", fontWeight: 800, color: "#666", whiteSpace: "nowrap", cursor: "pointer" }}>
+          <input type="checkbox" checked={unknown} onChange={(e) => {
+            if (e.target.checked) onChange("U");
+            else onChange(full(parts) && valid(parts) ? `${parts.y}-${parts.mo}-${parts.d}` : "");
+          }} />
+          Unknown
+        </label>
+      </div>
+      {(incomplete || invalid) && (
+        <div style={{ fontSize: "11px", fontWeight: 800, color: "#c0392b", marginTop: "3px" }}>
+          {invalid ? "That date doesn't exist." : "Pick month, day and year."} The saved birthday won't change until it's a full date.
+        </div>
+      )}
+    </div>
+  );
 }
 
 function FieldRow({ label, children }) {

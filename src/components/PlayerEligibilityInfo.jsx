@@ -1,10 +1,18 @@
 // src/components/PlayerEligibilityInfo.jsx
 //
 // The player page's Info tab (pages/PlayerProfile.js, next to Stats):
+//   In Their Own Words  players.Answers [{ q, a, date, sample? }] — the
+//                        player's answers to our outreach questions (Admin →
+//                        Social → Pitch), each as the question over the quoted
+//                        answer, signed "— First Last, Month Year" (date:
+//                        "YYYY-MM-DD", when they answered); an InfoTip by
+//                        the title explains the campaign.
+//                        sample: true shows to admins only (a SAMPLE tag) —
+//                        for laying the section out on a real page.
 //   College Eligibility  one plain sentence (utils/eligibility.js
 //                        eligibilityInfo — the admin's True / +1 tags are
-//                        never shown) and an ⓘ button with the estimate
-//                        disclaimer
+//                        never shown); an InfoTip by the title holds the
+//                        estimate disclaimer
 //   Career Path          players.CareerStops (utils/careerStops.js), newest
 //                        first, then the high school ("Graduated" + their
 //                        recruit year) — like the coach pages' career
@@ -35,6 +43,8 @@ import { stopSpan, championSeasons } from "../utils/careerStops";
 import { stateName, STATE_ABBR } from "../utils/highSchoolMatch";
 import { useAccoladeIcons, accoladeIcon } from "../utils/accoladeIcons";
 import { draftLogo, PORTAL_LOGO } from "../utils/draftLogos";
+import { useIsAdmin } from "../utils/prospectYears";
+import { usePreviewMode } from "../utils/previewLinks";
 
 const isHex = (hex) => /^#[0-9a-f]{6}$/i.test(hex || "");
 const initials = (name) => String(name || "?").replace(/[^A-Za-z ]/g, "").split(" ").filter(Boolean).map((w) => w[0]).join("").slice(0, 3).toUpperCase();
@@ -234,10 +244,56 @@ function useNflTeam(abbr) {
   return team;
 }
 
+// What the answers' InfoTip says about the campaign.
+export const ANSWERS_ABOUT = "We-Draft.com regularly reaches out to prospects on social media to add their own words to their profile.";
+
+// A small italic "i" (no circle) beside a section title; hover, focus or tap
+// opens a dark card with the note. Used by In Their Own Words and College
+// Eligibility alike.
+function InfoTip({ note, label, color1, isMobile }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span style={{ position: "relative", display: "inline-block", verticalAlign: "baseline" }}
+      onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+      <button type="button" onClick={() => setOpen((v) => !v)} onFocus={() => setOpen(true)} onBlur={() => setOpen(false)}
+        aria-expanded={open} aria-label={label} title={label}
+        style={{
+          background: "none", border: "none", padding: "0 4px", marginLeft: 2, cursor: "pointer", lineHeight: 1,
+          color: color1, fontFamily: "Georgia, serif", fontStyle: "italic", fontWeight: 900, fontSize: isMobile ? "15px" : "17px",
+        }}>
+        i
+      </button>
+      {open && (
+        <span role="tooltip" style={{
+          position: "absolute", left: 0, top: "100%", marginTop: 6, zIndex: 20, width: isMobile ? 230 : 300,
+          background: "#0f1b2d", color: "#fff", borderRadius: 8, padding: "10px 12px", boxShadow: "0 8px 22px rgba(0,0,0,0.25)",
+          fontSize: "13px", fontWeight: 600, fontStyle: "normal", lineHeight: 1.45, whiteSpace: "normal", textAlign: "left",
+        }}>
+          {note}
+        </span>
+      )}
+    </span>
+  );
+}
+
+// "YYYY-MM-DD" (or "YYYY-MM") → "January 2026"; "" when there's no date.
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const monthYear = (date) => {
+  const m = /^(\d{4})-(\d{2})/.exec(String(date || ""));
+  return m && MONTHS[Number(m[2]) - 1] ? `${MONTHS[Number(m[2]) - 1]} ${m[1]}` : "";
+};
+
+// players.Answers with something in them; sample ones for admins only.
+export const playerAnswers = (player, isAdmin) => (Array.isArray(player?.Answers) ? player.Answers : [])
+  .filter((x) => x && String(x.q || "").trim() && String(x.a || "").trim() && (isAdmin || !x.sample));
+
 // draft: { team (abbr), round, pick } from PlayerProfile.js's draftOrder
 // lookup, once he's been picked.
 export default function PlayerEligibilityInfo({ player, text, espnId, draft, color1, isMobile }) {
-  const [showNote, setShowNote] = useState(false);
+  const { isAdmin } = useIsAdmin();
+  // Preview links (utils/previewLinks.js) leave out the birthday and ages.
+  const preview = usePreviewMode();
+  const answers = playerAnswers(player, isAdmin);
   const saved = player?.CareerStops || [];
   // Newest first. Without saved stops, just their current school — and a
   // transfer's new school leads until CFBD's stops catch up.
@@ -292,7 +348,7 @@ export default function PlayerEligibilityInfo({ player, text, espnId, draft, col
   // Hometown on its own line; birthday and age on the line under it.
   const factRows = [
     [hometown && ["Hometown", hometown]],
-    [born?.text && ["Born", born.text], age && ["Current Age", String(age)], born?.rookieAge && ["Rookie Age", born.rookieAge, `Age at Week 1 of the ${player.Eligible} NFL season (Sept. 1)`]],
+    [!preview && born?.text && ["Born", born.text], !preview && age && ["Current Age", String(age)], !preview && born?.rookieAge && ["Rookie Age", born.rookieAge, `Age at Week 1 of the ${player.Eligible} NFL season (Sept. 1)`]],
   ].map((r) => r.filter(Boolean)).filter((r) => r.length);
   const facts = factRows.flat();
   const heading = (label) => (
@@ -341,28 +397,37 @@ export default function PlayerEligibilityInfo({ player, text, espnId, draft, col
 
   return (
     <div style={{ border: `2px solid ${color1}`, borderRadius: "8px", background: "#fff", padding: isMobile ? "12px" : "16px 20px" }}>
+      {answers.length > 0 && (
+        <div style={{ marginBottom: text || facts.length || rows.length ? (isMobile ? 18 : 22) : 0 }}>
+          <div style={{ marginBottom: 10, display: "flex", alignItems: "center" }}>
+            {heading("In Their Own Words")}
+            <InfoTip note={ANSWERS_ABOUT} label="About these answers" color1={color1} isMobile={isMobile} />
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: isMobile ? 14 : 16 }}>
+            {answers.map((x, i) => (
+              <div key={i}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: isMobile ? "13px" : "14px", fontWeight: 800, color: "#5b6676", lineHeight: 1.4 }}>
+                  <span>{x.q}</span>
+                  {x.sample && <span style={{ flexShrink: 0, fontSize: "10px", fontWeight: 900, letterSpacing: "0.08em", color: "#fff", background: "#c0392b", borderRadius: 4, padding: "2px 6px" }}>SAMPLE · ADMIN ONLY</span>}
+                </div>
+                <blockquote style={{ margin: "6px 0 0", padding: "2px 0 2px 14px", borderLeft: `4px solid ${color1}`, fontSize: isMobile ? "16px" : "19px", fontWeight: 700, fontStyle: "italic", lineHeight: 1.45, color: "#1f2937" }}>
+                  “{x.a}”
+                </blockquote>
+                <div style={{ marginTop: 4, paddingLeft: 18, fontSize: isMobile ? "14px" : "15px", fontWeight: 800, color: "#5b6676" }}>
+                  — {[`${player.First || ""} ${player.Last || ""}`.trim(), monthYear(x.date)].filter(Boolean).join(", ")}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {text && (
         <>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "8px" }}>
+          <div style={{ marginBottom: "8px", display: "flex", alignItems: "center" }}>
             {heading("College Eligibility")}
-            <button
-              type="button" onClick={() => setShowNote((v) => !v)} aria-expanded={showNote} aria-label="About college eligibility"
-              title="About college eligibility"
-              style={{
-                width: "24px", height: "24px", borderRadius: "50%", border: `2px solid ${color1}`, cursor: "pointer", flexShrink: 0,
-                background: showNote ? color1 : "#fff", color: showNote ? "#fff" : color1,
-                fontWeight: 900, fontSize: "13px", lineHeight: 1, fontFamily: "Georgia, serif", fontStyle: "italic", padding: 0,
-              }}
-            >
-              i
-            </button>
+            <InfoTip note={ELIGIBILITY_DISCLAIMER} label="About college eligibility" color1={color1} isMobile={isMobile} />
           </div>
           <p style={{ margin: 0, fontSize: isMobile ? "15px" : "17px", fontWeight: 700, lineHeight: 1.5, color: "#1f2937" }}>{text}</p>
-          {showNote && (
-            <p style={{ margin: "10px 0 0", padding: "8px 10px", borderRadius: "6px", background: "#f3f5f8", fontSize: isMobile ? "12px" : "13px", fontWeight: 600, lineHeight: 1.45, color: "#5b6676" }}>
-              {ELIGIBILITY_DISCLAIMER}
-            </p>
-          )}
         </>
       )}
       {facts.length > 0 && (

@@ -17,6 +17,7 @@ import LoadingSpinner from "./components/LoadingSpinner";
 import PlayerHeaderShell from "./components/PlayerHeaderShell";
 import { prefetchPlayerFromUrl } from "./utils/playerPrefetch";
 import { isUnreleasedYear, isUnreleasedSlug, useIsAdmin } from "./utils/prospectYears";
+import { PreviewContext, usePreviewLink } from "./utils/previewLinks";
 import { WEEKLY_YEARS, MAIN_WEEKLY_YEAR, weeklyMockHref, weeklyYearHref, hasTeamPages } from "./utils/weeklyMockNews";
 
 // A cold landing on /player/:slug starts its player query now, alongside
@@ -302,13 +303,19 @@ const RouteNotFound = () => <div style={{ textAlign: "center", color: "red", fon
 // An unreleased class (utils/prospectYears.js UNRELEASED_YEARS) is admin-only:
 // its board (/community/:year), player pages and comparison pages (slug
 // carries the class) 404 for everyone else. Waits on auth so a signed-in
-// admin isn't turned away on a fresh load.
+// admin isn't turned away on a fresh load. A private preview link
+// (?preview=<token>, utils/previewLinks.js) opens its player's page for
+// anyone, and puts the page in preview mode (PreviewContext).
 function UnreleasedGate({ children }) {
   const { year, slug } = useParams();
   const { isAdmin, authReady } = useIsAdmin();
+  const preview = usePreviewLink(slug);
   const hidden = (year && isUnreleasedYear(year)) || (slug && isUnreleasedSlug(slug));
-  if (!hidden || isAdmin) return children;
-  if (!authReady) return <LoadingSpinner size={48} minHeight="calc(60vh / var(--pz, 1))" />;
+  // Always the same Provider, so a link that checks out after the first
+  // render doesn't remount the page.
+  const wrap = (node) => <PreviewContext.Provider value={preview.status === "ok" ? preview.link : null}>{node}</PreviewContext.Provider>;
+  if (!hidden || isAdmin || preview.status === "ok") return wrap(children);
+  if (!authReady || preview.status === "checking") return <LoadingSpinner size={48} minHeight="calc(60vh / var(--pz, 1))" />;
   return <RouteNotFound />;
 }
 

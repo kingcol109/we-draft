@@ -20,13 +20,14 @@
 // api/instagram.js (server/instagram/contacts.js), which enforces one active
 // account per player, per username and per IGSID, and keeps history.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { collection, doc, getDoc, getDocs, onSnapshot, query, where } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, onSnapshot, query, updateDoc, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { igApi } from "../utils/instagram/api";
 import { renderShareImage } from "../utils/exportImages";
 import { useSchools } from "./DraftArchiveList";
 import PitchGraphic from "./PitchGraphic";
-import { PITCH_MESSAGES, fillPitch, pitchText } from "../utils/pitchMessages";
+import { PITCH_MESSAGES, fillPitch, pitchText, hasNoPublicPage } from "../utils/pitchMessages";
+import { createPreviewLink, listPreviewLinks, previewUrl, revokePreviewLink } from "../utils/previewLinks";
 
 const BLUE = "#0055a5";
 const GREEN = "#2e7d32";
@@ -704,7 +705,146 @@ function PitchMessage({ n, title, text }) {
   );
 }
 
-function PitchTab({ players }) {
+// The panel beside the pitch graphic: the player's Instagram (open it, or
+// add it when there's none), where they're from, and the NFL fit pickers
+// (children). A player's account saves like Connect does (contact-save ->
+// Pending in Instagram Accounts); an unpromoted recruit's goes on their
+// recruits doc (InstagramHandle), which promotion carries over.
+// Private preview links for this player (utils/previewLinks.js): their page
+// for whoever has the link, showing the graphic's sample scouting report,
+// with the graphic as the link's preview image in the DM. Each Create makes
+// a new link from the graphic as it is now (Instagram caches a link's
+// preview, so a changed graphic needs a new link). Revoke turns one off.
+function PreviewLinks({ person, preview, label }) {
+  const [links, setLinks] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [copied, setCopied] = useState("");
+  const load = () => listPreviewLinks(person.id).then(setLinks).catch((e) => { setLinks([]); setMsg(e.message); });
+  useEffect(() => { if (!person.recruit) load(); }, [person.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const copy = async (url) => {
+    try { await navigator.clipboard.writeText(url); setCopied(url); setTimeout(() => setCopied(""), 1500); } catch { /* clipboard blocked */ }
+  };
+  const create = async () => {
+    setBusy(true); setMsg("");
+    try {
+      const image = await preview.makeImage();
+      const token = await createPreviewLink({ player: person, fits: preview.fits, posOf: preview.posOf, classOf: preview.classOf, image });
+      await copy(previewUrl(person.Slug, token));
+      await load();
+    } catch (e) {
+      setMsg(`Couldn't make the link: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const revoke = async (token) => {
+    if (!window.confirm("Turn this link off? Anyone using it gets a 404 (for a hidden class) or the normal page.")) return;
+    try { await revokePreviewLink(token); await load(); } catch (e) { setMsg(e.message); }
+  };
+  const when = (ts) => (ts?.toDate ? ts.toDate().toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "");
+  return (
+    <div>
+      <div style={label}>Preview link</div>
+      {person.recruit ? (
+        <div style={{ fontSize: "12px", fontWeight: 700, color: "#999" }}>Promote this recruit first: a link needs their player page.</div>
+      ) : (
+        <>
+          <button type="button" onClick={create} disabled={busy} style={{ ...small(BLUE, true), opacity: busy ? 0.6 : 1 }}>
+            {busy ? "Making…" : "Create + copy link"}
+          </button>
+          <div style={{ fontSize: "11px", fontWeight: 700, color: "#888", marginTop: "4px", lineHeight: 1.4 }}>
+            Opens their page with this sample report (#1 of {preview.posOf} {person.Position}s, #1 of {preview.classOf} in {person.Eligible}). The graphic shows in the DM's link card.
+          </div>
+          {(links || []).map((l) => {
+            const url = previewUrl(l.slug, l.token);
+            const off = l.active === false;
+            return (
+              <div key={l.token} style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "6px", fontSize: "12px", fontWeight: 700, color: off ? "#aaa" : "#333" }}>
+                <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: off ? "line-through" : "none" }} title={url}>
+                  {when(l.createdAt)} · {(l.fits || []).map((f) => f.abbr).join(" ")}
+                </span>
+                {!off && <button type="button" onClick={() => copy(url)} style={small(copied === url ? GREEN : BLUE)}>{copied === url ? "Copied ✓" : "Copy"}</button>}
+                {!off && <a href={url} target="_blank" rel="noopener noreferrer" style={{ ...small(GRAY), textDecoration: "none" }}>Open</a>}
+                {!off && <button type="button" onClick={() => revoke(l.token)} style={small(RED)}>Revoke</button>}
+                {off && <span style={{ fontSize: "11px" }}>revoked</span>}
+              </div>
+            );
+          })}
+        </>
+      )}
+      {msg && <div style={{ fontSize: "12px", fontWeight: 800, color: RED, marginTop: "4px" }}>{msg}</div>}
+    </div>
+  );
+}
+
+function PitchInfo({ person, contact, rows, onRecruitHandle, preview, children }) {
+  const current = person.recruit ? person.InstagramHandle : contact?.instagramUsername;
+  const [editing, setEditing] = useState(false);
+  const [username, setUsername] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const clean = cleanUsername(username);
+  const save = async () => {
+    if (!clean) { setMsg("Enter a valid Instagram username."); return; }
+    setBusy(true); setMsg("");
+    try {
+      if (person.recruit) {
+        await updateDoc(doc(db, "recruits", person.recruitDocId), { InstagramHandle: clean });
+        onRecruitHandle(clean);
+      } else {
+        await igApi("contact-save", { playerId: person.id, username: clean, verificationMethod: "admin_manual", notes: "" });
+      }
+      setEditing(false); setUsername("");
+    } catch (e) {
+      setMsg(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const label = { fontSize: "11px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "3px" };
+  return (
+    <div style={{ flex: "0 0 260px", maxWidth: "100%", boxSizing: "border-box", background: "#fff", border: "1px solid #e3e8ef", borderRadius: "12px", padding: "14px 16px", display: "flex", flexDirection: "column", gap: "12px" }}>
+      <div style={{ fontSize: "12px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.08em" }}>Info</div>
+      <div>
+        <div style={label}>Instagram</div>
+        {current && !editing ? (
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "6px", fontSize: "14px" }}>
+            <a href={`https://www.instagram.com/${current}/`} target="_blank" rel="noopener noreferrer" style={{ fontWeight: 800, color: "#c13584" }}>@{current} ↗</a>
+            {contact && STATUS[contact.accountStatus] && <span style={{ fontSize: "11px", fontWeight: 800, color: "#888" }}>({STATUS[contact.accountStatus].label})</span>}
+            <button type="button" onClick={() => { setEditing(true); setUsername(current); }} style={small(GRAY)}>Change</button>
+          </div>
+        ) : (
+          <>
+            {!current && <div style={{ fontSize: "12px", fontWeight: 700, color: "#999", marginBottom: "4px" }}>None on file. Add it:</div>}
+            <div style={{ display: "flex", gap: "6px" }}>
+              <input value={username} onChange={(e) => setUsername(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") save(); }}
+                placeholder="@username or link" style={{ ...input, flex: 1, minWidth: 0 }} />
+              <button type="button" onClick={save} disabled={busy || !clean} style={{ ...small(BLUE, true), opacity: busy || !clean ? 0.6 : 1 }}>{busy ? "…" : "Save"}</button>
+              {editing && <button type="button" onClick={() => { setEditing(false); setMsg(""); }} style={small(GRAY)}>Cancel</button>}
+            </div>
+            {clean && <a href={`https://www.instagram.com/${clean}/`} target="_blank" rel="noopener noreferrer" style={{ fontSize: "12px", fontWeight: 800, color: "#c13584" }}>Check @{clean} on Instagram ↗</a>}
+            {editing && contact && <div style={{ fontSize: "11px", fontWeight: 700, color: ORANGE, marginTop: "3px" }}>Saving a different username replaces @{contact.instagramUsername} (kept as inactive).</div>}
+          </>
+        )}
+        {msg && <div style={{ fontSize: "12px", fontWeight: 800, color: RED, marginTop: "4px" }}>{msg}</div>}
+      </div>
+      {rows.map(([k, v]) => (
+        <div key={k}>
+          <div style={label}>{k}</div>
+          <div style={{ fontSize: "14px", fontWeight: 700, color: "#333" }}>{v}</div>
+        </div>
+      ))}
+      <div>
+        <div style={label}>NFL fits</div>
+        {children}
+      </div>
+      <PreviewLinks person={person} preview={preview} label={label} />
+    </div>
+  );
+}
+
+function PitchTab({ players, contactByPlayer }) {
   const [recruits, setRecruits] = useState([]);
   const [nfl, setNfl] = useState([]);
   const [person, setPerson] = useState(null);
@@ -716,8 +856,8 @@ function PitchTab({ players }) {
 
   useEffect(() => {
     getDocs(query(collection(db, "recruits"), where("RecruitClass", "==", "2027")))
-      .then((s) => setRecruits(s.docs.map((d) => d.data()).filter((r) => !r.promotedPlayerId).map((r) => {
-        const p = { id: `recruit-${r.First}-${r.Last}`, First: r.First, Last: r.Last, Position: r.Position, School: r.Commitment, Eligible: "2030", recruit: true };
+      .then((s) => setRecruits(s.docs.map((d) => ({ docId: d.id, ...d.data() })).filter((r) => !r.promotedPlayerId).map((r) => {
+        const p = { id: `recruit-${r.First}-${r.Last}`, recruitDocId: r.docId, First: r.First, Last: r.Last, Position: r.Position, School: r.Commitment, Eligible: "2030", HighSchool: r.HighSchool || "", State: r.State || "", InstagramHandle: r.InstagramHandle || "", recruit: true };
         p._search = norm(`${p.First} ${p.Last} ${p.School} ${p.Position} 2030`);
         return p;
       })))
@@ -728,6 +868,35 @@ function PitchTab({ players }) {
   }, []);
   const shuffle = () => setFits([...nfl].sort(() => Math.random() - 0.5).slice(0, 3));
   useEffect(() => { if (nfl.length && !fits.length) shuffle(); }, [nfl]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Hand-pick one of the three fit slots (Shuffle re-rolls all three).
+  const pickFit = (i, abbr) => {
+    const t = nfl.find((x) => x.abbr === abbr);
+    if (t) setFits((prev) => prev.map((f, j) => (j === i ? t : f)));
+  };
+
+  // For reference while picking fits: where they're from — the high
+  // school's city (highSchools doc), else just the state on file.
+  const [hsCity, setHsCity] = useState("");
+  useEffect(() => {
+    setHsCity("");
+    if (!person?.HighSchool) return undefined;
+    let live = true;
+    getDocs(query(collection(db, "highSchools"), where("Name", "==", person.HighSchool)))
+      .then((s) => {
+        if (!live) return;
+        const hs = s.docs.map((d) => d.data()).find((h) => !person.State || !h.State || h.State === person.State);
+        setHsCity(hs?.City || "");
+      })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [person]);
+  const infoRows = person ? [
+    person.Hometown ? ["Hometown", person.Hometown] : null,
+    ["High school", person.HighSchool || hsCity || person.State
+      ? [person.HighSchool, [hsCity, person.State].filter(Boolean).join(", ")].filter(Boolean).join(" · ")
+      : "None on file"],
+    ["College", person.School || "None on file"],
+  ].filter(Boolean) : [];
 
   // A player in the system: their real headshot and jersey number
   // (playerPhotos/{id}, as their page shows them); the number stays
@@ -750,14 +919,28 @@ function PitchTab({ players }) {
   const brand = person ? brands[person.School] : null;
   const everyone = useMemo(() => [...recruits, ...players], [recruits, players]);
 
+  // The graphic as a JPEG `width` px wide → { dataUrl, width, height }.
+  // (A full-size PNG, ~2100px and several MB, wouldn't send in Instagram
+  // DMs.) It's drawn at the page's size (846px) and scaled up from there.
+  const makeJpeg = async (width, quality) => {
+    const png = await renderShareImage(ref.current, { pixelRatio: width / ref.current.offsetWidth, backgroundColor: "#f7f9fc" });
+    const img = await new Promise((resolve, reject) => { const i = new Image(); i.onload = () => resolve(i); i.onerror = reject; i.src = png; });
+    const canvas = document.createElement("canvas");
+    canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#f7f9fc"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0);
+    return { dataUrl: canvas.toDataURL("image/jpeg", quality), width: canvas.width, height: canvas.height };
+  };
+
   const download = async () => {
     setBusy(true); setErr("");
     try {
-      // 2.5x: the graphic is drawn at the page's own size (846px), ~2100px out.
-      const url = await renderShareImage(ref.current, { pixelRatio: 2.5, backgroundColor: "#f7f9fc" });
+      // 1440px: Instagram's own max width.
+      const { dataUrl: url } = await makeJpeg(1440, 0.92);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `pitch-${norm(`${person.First}-${person.Last}`).replace(/\s+/g, "-")}${number ? `-${number}` : ""}.png`;
+      a.download = `pitch-${norm(`${person.First}-${person.Last}`).replace(/\s+/g, "-")}${number ? `-${number}` : ""}.jpg`;
       a.click();
     } catch (e) {
       setErr(`Couldn't make the image: ${e.message}`);
@@ -781,19 +964,42 @@ function PitchTab({ players }) {
         </Field>
         <div style={{ marginBottom: "12px", display: "flex", gap: "8px" }}>
           <button type="button" onClick={shuffle} disabled={!nfl.length} style={btn(false)}>Shuffle NFL fits</button>
-          <button type="button" onClick={download} disabled={!person || busy} style={{ ...btn(true), opacity: !person || busy ? 0.6 : 1 }}>{busy ? "Making…" : "Download PNG"}</button>
+          <button type="button" onClick={download} disabled={!person || busy} style={{ ...btn(true), opacity: !person || busy ? 0.6 : 1 }}>{busy ? "Making…" : "Download image"}</button>
         </div>
       </div>
       {err && <div style={{ color: RED, fontWeight: 800, fontSize: "13px", marginBottom: "10px" }}>{err}</div>}
       {person ? (
         <>
           <StepLabel n={1}>Graphic</StepLabel>
-          <div style={{ overflowX: "auto", marginBottom: "18px" }}>
-            <PitchGraphic ref={ref} person={person} brand={brand} number={number} fits={fits} headshot={headshot} />
+          {/* The graphic, and beside it what's needed while making it. */}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "16px", alignItems: "flex-start", marginBottom: "18px" }}>
+            <div style={{ overflowX: "auto", flex: "0 1 auto", minWidth: 0, maxWidth: "100%" }}>
+              <PitchGraphic ref={ref} person={person} brand={brand} number={number} fits={fits} headshot={headshot} />
+            </div>
+            <PitchInfo key={person.id} person={person} contact={person.recruit ? null : contactByPlayer[person.id]} rows={infoRows}
+              onRecruitHandle={(h) => setPerson((p) => ({ ...p, InstagramHandle: h }))}
+              preview={{
+                fits,
+                // #1 of everyone in their class / at their position.
+                posOf: players.filter((p) => String(p.Eligible) === String(person.Eligible) && p.Position === person.Position).length,
+                classOf: players.filter((p) => String(p.Eligible) === String(person.Eligible)).length,
+                // 1200px, a little more compressed: it's stored in Firestore.
+                makeImage: () => makeJpeg(1200, 0.85),
+              }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                {fits.map((f, i) => (
+                  <select key={i} value={f.abbr} onChange={(e) => pickFit(i, e.target.value)} style={{ ...input, width: "auto" }}>
+                    {[...nfl].sort((a, b) => a.abbr.localeCompare(b.abbr)).map((t) => (
+                      <option key={t.abbr} value={t.abbr} disabled={t.abbr !== f.abbr && fits.some((x) => x.abbr === t.abbr)}>{t.abbr}</option>
+                    ))}
+                  </select>
+                ))}
+              </div>
+            </PitchInfo>
           </div>
           {PITCH_MESSAGES.map((m, i) => (
             <PitchMessage key={m.title} n={i + 2}
-              title={m.noPage ? `${m.title} (${person.recruit ? "no page yet" : "has a page"})` : m.title}
+              title={m.noPage ? `${m.title} (${hasNoPublicPage(person) ? "no page yet" : "has a page"})` : m.title}
               text={m.text || m.noPage ? pitchText(m, person) : ""} />
           ))}
         </>
@@ -912,7 +1118,7 @@ export default function AdminSocial() {
           openEditor={setEditor} onShowMissing={() => { setPlayersHas("without"); setTab("players"); }} />
       )}
       {tab === "players" && <PlayersTab players={players} contactByPlayer={contactByPlayer} openEditor={setEditor} initialHas={playersHas} />}
-      {tab === "pitch" && <PitchTab players={players} />}
+      {tab === "pitch" && <PitchTab players={players} contactByPlayer={contactByPlayer} />}
       {tab === "manage" && (
         <ManagementTab senders={senders} contacts={contacts} contactById={contactById} playerById={playerById} players={players} run={run} busy={busy} webhook={webhook} />
       )}

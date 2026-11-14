@@ -1,6 +1,6 @@
 // src/pages/PlayerProfile.js
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import ReactDOM from "react-dom";
 import Logo1 from "../assets/Logo1.png";
 import HomageLogo from "../assets/homagelogo.png";
@@ -57,7 +57,10 @@ import { classSnapshotRanks } from "../utils/classRanks";
 import { readableOn, textOn } from "../utils/teamColors";
 import { communityAverage, gradeCounts } from "../utils/gradeWindow";
 import { eligibilityInfo } from "../utils/eligibility";
-import PlayerEligibilityInfo from "../components/PlayerEligibilityInfo";
+import PlayerEligibilityInfo, { playerAnswers } from "../components/PlayerEligibilityInfo";
+import { usePreviewMode } from "../utils/previewLinks";
+import { PUBLIC_PROSPECT_YEARS } from "../utils/prospectYears";
+import { PITCH_STRENGTHS } from "../components/PitchGraphic";
 
 // ── Grade lock: 2026 prospects only, locked at 8PM ET April 23rd 2026 ────────
 const GRADE_LOCK_DATE = new Date("2026-04-23T20:00:00-04:00");
@@ -2152,6 +2155,9 @@ const gradeScale = {
   "Early First Round":1,"Middle First Round":2,"Late First Round":3,"Second Round":4,
   "Third Round":5,"Fourth Round":6,"Fifth Round":7,"Sixth Round":8,"Seventh Round":9,"UDFA":10,
 };
+// Preview links' sidebar list: the current public class.
+const PREVIEW_LIST_YEAR = PUBLIC_PROSPECT_YEARS[0];
+
 const gradeLabels = {
   1:"Early First Round",2:"Middle First Round",3:"Late First Round",4:"Second Round",
   5:"Third Round",6:"Fourth Round",7:"Fifth Round",8:"Sixth Round",9:"Seventh Round",10:"UDFA",
@@ -2196,6 +2202,11 @@ export default function PlayerProfile() {
   const navigate = useNavigate();
   const [player, setPlayer] = useState(null);
   const { user, login, profile } = useAuth();
+  // Opened through a private preview link (utils/previewLinks.js): the
+  // scouting report shows the pitch graphic's sample — Early First Round,
+  // its strengths, no weaknesses, the link's NFL fits, #1 in position and
+  // class — under a SAMPLE watermark. null otherwise.
+  const preview = usePreviewMode();
   const evaluationFormRef = useRef(null);
   // Scouting tabs under the hero — "community" (Scouting Report,
   // the default on every player) or "mine" (My Evaluation).
@@ -2300,7 +2311,13 @@ export default function PlayerProfile() {
   const [lastUpdated, setLastUpdated] = useState(null);
   const [saving, setSaving] = useState(false);
   const [traits, setTraits] = useState({});
-  const [community, setCommunity] = useState({ avgGrade: null, topStrengths: [], topWeaknesses: [], topFits: [] });
+  const [communityLive, setCommunity] = useState({ avgGrade: null, topStrengths: [], topWeaknesses: [], topFits: [] });
+  // avgGrade 1 = Early First Round.
+  // Memoized: effects key on community.topFits, so it must keep its identity.
+  const previewCommunity = useMemo(() => (preview
+    ? { avgGrade: 1, topStrengths: PITCH_STRENGTHS.map(([term, pct]) => ({ term, pct })), topWeaknesses: [], topFits: [] }
+    : null), [preview]);
+  const community = previewCommunity || communityLive;
   // Most recent updatedAt across every scouting evaluation on this player
   // (public or private — a private eval still moves the Community
   // Grade/Strengths/Weaknesses/Fits percentages shown on the page, so it
@@ -2346,14 +2363,18 @@ export default function PlayerProfile() {
   // ── Draft class sidebar ──
   const [draftClassPlayers, setDraftClassPlayers] = useState([]);
   const [draftClassLoading, setDraftClassLoading] = useState(false);
-  const [classRank, setClassRank] = useState(null);
+  const [classRankLive, setClassRank] = useState(null);
   // We-Draft rank within the player's own position group, from the grade
   // ranking — set explicitly (not derived from the sidebar list's order)
   // because the drafted class's sidebar is shown in *draft* order, and the
   // rank must stay the We-Draft rank. null = derive from list position
   // (the live build's list is grade-ordered, so that's the same thing).
-  const [positionRank, setPositionRank] = useState(null);
-  const [classSize, setClassSize] = useState(0);
+  const [positionRankLive, setPositionRank] = useState(null);
+  const [classSizeLive, setClassSize] = useState(0);
+  // Preview: #1 in their class and position (the link carries the counts).
+  const classRank = preview ? 1 : classRankLive;
+  const positionRank = preview ? 1 : positionRankLive;
+  const classSize = preview ? (preview.classOf || classSizeLive || 1) : classSizeLive;
 
   // ── Top 5 Trending sidebar — site-wide spotlight, same on every player
   // page. Order is curated by drag-and-drop in the Admin Panel's Active
@@ -2370,7 +2391,7 @@ export default function PlayerProfile() {
   // once pageVisible flips true, since the grid has no real size before. ──
   const CONTENT_H_PADDING = 60;
   const adFit = useMarginAdFit({ contentRef: mainGridRef, horizontalPadding: CONTENT_H_PADDING, isMobile, watch: [pageVisible] });
-  const showMarginAds = adFit.show;
+  const showMarginAds = adFit.show && !preview; // no ads on preview links
 
   useEffect(() => {
     const handler = () => {
@@ -3180,6 +3201,25 @@ useEffect(() => {
         return;
       }
       setDraftClassLoading(true);
+      // Preview link: the sidebar list is the current public class at their
+      // position (PREVIEW_LIST_YEAR), each row linking to that real page —
+      // their own class stays hidden. Ranks come from the link (above).
+      if (preview) {
+        try {
+          const snapDoc = await getSiteSnapshot(`class_${PREVIEW_LIST_YEAR}_${player.Position}`);
+          setDraftClassPlayers((snapDoc?.rows || []).filter((r) => r.sl).map((r) => ({
+            id: r.i, First: r.F || "", Last: r.L || "", School: r.s || "", Slug: r.sl || "",
+            Position: player.Position, avgGrade: r.g ?? null, isSelf: false, SchoolLogo: r.lg || "",
+            draftRound: null, draftPick: null, draftTeam: "", teamLogo: "", overallRank: r.cr ?? null,
+          })));
+        } catch (e) {
+          console.error(e);
+          setDraftClassPlayers([]);
+        } finally {
+          setDraftClassLoading(false);
+        }
+        return;
+      }
       // Normal path: one read — the weekly class snapshot for this class +
       // position (compSnapshots/class_{Eligible}_{Position}, built by
       // utils/snapshotBuilders.js): already ranked with this page's exact
@@ -3309,7 +3349,7 @@ useEffect(() => {
       }
     };
     fetchDraftClass();
-  }, [player]);
+  }, [player, preview]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!publicFeed.length) return;
@@ -3360,8 +3400,13 @@ useEffect(() => {
   // compSnapshots/_nflFits — see utils/draftProfiles.js). Shown first in the
   // NFL Fits column, above the community's picks. Logos ride on the _ads
   // snapshot the margin ads already read.
-  const [wdFits, setWdFits] = useState([]);
-  const [wdFitLogos, setWdFitLogos] = useState({});
+  const [wdFitsLive, setWdFits] = useState([]);
+  const [wdFitLogosLive, setWdFitLogos] = useState({});
+  // Preview: the NFL fits picked for the link (with their logos).
+  const wdFits = useMemo(() => (preview ? (preview.fits || []).map((f) => ({ t: f.abbr })) : wdFitsLive), [preview, wdFitsLive]);
+  const wdFitLogos = useMemo(() => (preview
+    ? { ...wdFitLogosLive, ...Object.fromEntries((preview.fits || []).filter((f) => f.logo).map((f) => [f.abbr, f.logo])) }
+    : wdFitLogosLive), [preview, wdFitLogosLive]);
   useEffect(() => {
     if (!player?.id) { setWdFits([]); return; }
     let cancelled = false;
@@ -3898,14 +3943,20 @@ useEffect(() => {
   );
 
   // ── Draft Class list (shared between desktop sidebar and mobile dropdown) ──
-  const draftClassLabel = `${formatEligible(player.Eligible)} ${player.Position}`.trim();
-  const communityYearPath = String(player.Eligible) === "2027" ? "/community" : `/community/${player.Eligible}`;
+  // The sidebar list's class: their own, or on a preview link the current
+  // public class (PREVIEW_LIST_YEAR).
+  const listYear = preview ? PREVIEW_LIST_YEAR : player.Eligible;
+  const draftClassLabel = `${formatEligible(listYear)} ${player.Position}`.trim();
+  const communityYearPath = String(listYear) === "2027" ? "/community" : `/community/${listYear}`;
 
   // Drafted-class list (rows carry draft picks) — see draftMode below.
   const draftListMode = draftClassPlayers.some((p) => p.draftPick != null);
 
   // ── Ensure the current player is always visible even if ranked beyond the cap ──
   const selfIndex = draftClassPlayers.findIndex((p) => p.isSelf);
+  // The position rank's "#n of N": in preview, #1 of the link's count.
+  const rankSelf = preview ? 0 : selfIndex;
+  const posOf = preview ? (preview.posOf || draftClassPlayers.length || 1) : draftClassPlayers.length;
   const displayList = selfIndex >= DRAFT_CLASS_LIMIT
     ? [...draftClassPlayers.slice(0, DRAFT_CLASS_LIMIT), draftClassPlayers[selfIndex]]
     : draftClassPlayers.slice(0, DRAFT_CLASS_LIMIT);
@@ -3930,7 +3981,7 @@ useEffect(() => {
         onMouseEnter={(e) => { e.currentTarget.style.background = "#003a7a"; }}
         onMouseLeave={(e) => { e.currentTarget.style.background = SITE_BLUE; }}
       >
-        Full {formatEligible(player.Eligible)} Board →
+        Full {formatEligible(listYear)} Board →
       </Link>
       {draftClassLoading ? (
         <LoadingSpinner label="Loading" size={24} minHeight="60px" />
@@ -4303,7 +4354,22 @@ useEffect(() => {
 
   // Find Comparison — a compact pill beside the Community Scouting Report
   // heading (null when the feature is off or the player has no slug).
-  const findComparisonLink = comparisonEnabled && player.Slug ? (
+  const findComparisonLink = preview ? (
+    // Preview links: shown, not clickable.
+    <span
+      aria-disabled="true"
+      className="wdm-noshadow"
+      style={{
+        display: "inline-flex", alignItems: "center", gap: "6px", flexShrink: 0, cursor: "default",
+        background: color1, color: "#fff", fontWeight: 900, fontSize: isMobile ? "11px" : "13px",
+        textTransform: "uppercase", letterSpacing: "0.06em", whiteSpace: "nowrap",
+        padding: isMobile ? "6px 10px" : "8px 18px", borderRadius: "999px",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+      }}
+    >
+      🔎 {isMobile ? "Compare" : "Find Comparison"}
+    </span>
+  ) : comparisonEnabled && player.Slug ? (
     <Link
       to={`/comparison/${player.Slug}`}
       className="transition hover:opacity-90 wdm-noshadow"
@@ -4386,7 +4452,7 @@ useEffect(() => {
   const classYear = formatEligible(player.Eligible);
   const ranks = [
     classRank && `#${classRank} of ${classSize} ${classYear} prospects`,
-    selfIndex >= 0 && `#${positionRank ?? selfIndex + 1} of ${draftClassPlayers.length} ${classYear} ${pluralPos(player.Position)}`,
+    rankSelf >= 0 && `#${positionRank ?? rankSelf + 1} of ${posOf} ${classYear} ${pluralPos(player.Position)}`,
   ].filter(Boolean);
   const pageShare = playerShare({
     player, url: playerUrl, ranks,
@@ -4427,7 +4493,7 @@ useEffect(() => {
         byTitle="EVALUATIONS" by={evalCount ? String(evalCount) : ""}
         strengths={pageShare.card.strengths} weaknesses={pageShare.card.weaknesses}
         ranks={[
-          selfIndex >= 0 && { rank: positionRank ?? selfIndex + 1, of: draftClassPlayers.length, label: `${classYear} ${pluralPos(player.Position)}` },
+          rankSelf >= 0 && { rank: positionRank ?? rankSelf + 1, of: posOf, label: `${classYear} ${pluralPos(player.Position)}` },
           classRank && { rank: classRank, of: classSize, label: `${classYear} Prospects` },
         ].filter(Boolean)} />
     ),
@@ -4452,19 +4518,22 @@ useEffect(() => {
   );
   // The tab row: both tabs where the section heading used to be, Find
   // Comparison still on the right.
-  const showStatsTab = !!espnId && !espnEmpty;
+  // Preview links always get Stats (a blank freshman season — see below).
+  const showStatsTab = (!!espnId && !espnEmpty) || !!preview;
   // Info tab: the player's college eligibility (utils/eligibility.js) —
   // when there's something to say (a recruit year, an undrafted class)…
   const eligibilityText = eligibilityInfo(player);
   // …and career stops / high school: the tab shows when either has something.
-  const showInfoTab = !!eligibilityText || !!player?.CareerStops?.length || !!player?.HighSchool || !!espnId; // espnId: hometown
+  const showInfoTab = !!eligibilityText || !!player?.CareerStops?.length || !!player?.HighSchool || !!espnId // espnId: hometown
+    || playerAnswers(player, profile?.role === "admin").length > 0; // In Their Own Words
   const scoutTabs = (
     <>
       {/* One row, never wrapping — on phones the labels and the Find
           Comparison pill shorten to fit. */}
       <div className="flex items-center justify-between mb-2" style={{ gap: "10px", flexWrap: "nowrap" }}>
         <div role="tablist" style={{ display: "flex", alignItems: "flex-end", gap: isMobile ? "10px" : "24px", minWidth: 0 }}>
-          {[["community", isMobile ? "Scouting" : "Scouting Report"], ["mine", isMobile && showStatsTab ? "My Eval" : "My Evaluation"], ...(showStatsTab ? [["stats", "Stats"]] : []), ...(showInfoTab ? [["info", "Info"]] : [])].map(([key, label]) => {
+          {/* Info sits first (leftmost); Scouting Report stays the tab a page opens on. */}
+          {[...(showInfoTab ? [["info", "Info"]] : []), ["community", isMobile ? "Scouting" : "Scouting Report"], ...(preview ? [] : [["mine", isMobile && showStatsTab ? "My Eval" : "My Evaluation"]]), ...(showStatsTab ? [["stats", "Stats"]] : [])].map(([key, label]) => {
             const on = scoutTab === key;
             return (
               <button
@@ -4487,7 +4556,14 @@ useEffect(() => {
     </>
   );
   const communityScoutingSection = (
-          <div>
+          <div style={{ position: "relative" }}>
+            {preview && (
+              <div aria-hidden="true" style={{ position: "absolute", inset: 0, zIndex: 3, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none", overflow: "hidden" }}>
+                <span style={{ transform: "rotate(-12deg)", fontSize: isMobile ? "64px" : "120px", fontWeight: 900, letterSpacing: "0.18em", color: "rgba(15,23,42,0.12)", textTransform: "uppercase", whiteSpace: "nowrap", fontFamily: "'Arial Black', Arial, sans-serif" }}>
+                  Sample
+                </span>
+              </div>
+            )}
             {isMobile ? (
               <div className="bg-white rounded-lg overflow-hidden wdm-card" style={{ border:`2px solid ${siteC1}` }}>
                 {/* Grade and Class Rank are now matched half-width columns —
@@ -4533,10 +4609,10 @@ useEffect(() => {
                   </div>
                   <div className="flex-1 px-3 py-3">
                     <h3 className="wdm-h text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:siteC1, borderBottom:`2px solid ${siteC1}`, letterSpacing:"0.12em" }}>Class Rank</h3>
-                    {(selfIndex >= 0 || classRank) ? (
+                    {(rankSelf >= 0 || classRank) ? (
                       <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:"10px" }}>
-                        {selfIndex >= 0 && (
-                          <RankStat rank={positionRank ?? selfIndex+1} of={draftClassPlayers.length} label={`${formatEligible(player.Eligible)} ${pluralPos(player.Position)}`} color={siteC1} />
+                        {rankSelf >= 0 && (
+                          <RankStat rank={positionRank ?? rankSelf+1} of={posOf} label={`${formatEligible(player.Eligible)} ${pluralPos(player.Position)}`} color={siteC1} />
                         )}
                         {classRank && (
                           <RankStat rank={classRank} of={classSize} label={`${formatEligible(player.Eligible)} Prospects`} color={siteC1} />
@@ -4551,7 +4627,7 @@ useEffect(() => {
                     {community.topStrengths.length > 0 ? community.topStrengths.map((s,i) => (
                       <div key={i} className="py-1" style={{ borderBottom:i<community.topStrengths.length-1?"1px solid #f0f0f0":"none" }}>
                         <div className="wdm-item sm font-black uppercase" style={{ fontSize:"10px", color:"#222", letterSpacing:"0.04em" }}>{s.term}</div>
-                        {evalCount >= 5 && (
+                        {(evalCount >= 5 || preview) && (
                           <div style={{ height:"3px", background:"#eee", borderRadius:"2px", marginTop:"3px", overflow:"hidden" }}>
                             <div style={{ width:`${barPct(s.pct)}%`, height:"100%", backgroundColor:"#16a34a", borderRadius:"2px" }} />
                           </div>
@@ -4564,7 +4640,7 @@ useEffect(() => {
                     {community.topWeaknesses.length > 0 ? community.topWeaknesses.map((w,i) => (
                       <div key={i} className="py-1" style={{ borderBottom:i<community.topWeaknesses.length-1?"1px solid #f0f0f0":"none" }}>
                         <div className="wdm-item sm font-black uppercase" style={{ fontSize:"10px", color:"#222", letterSpacing:"0.04em" }}>{w.term}</div>
-                        {evalCount >= 5 && (
+                        {(evalCount >= 5 || preview) && (
                           <div style={{ height:"3px", background:"#eee", borderRadius:"2px", marginTop:"3px", overflow:"hidden" }}>
                             <div style={{ width:`${barPct(w.pct)}%`, height:"100%", backgroundColor:"#dc2626", borderRadius:"2px" }} />
                           </div>
@@ -4631,11 +4707,11 @@ useEffect(() => {
                             </div>
                           </div>
                         )}
-                        {(selfIndex >= 0 || classRank) && (
+                        {(rankSelf >= 0 || classRank) && (
                           <div className="mt-4 w-full">
                             <div className="wdm-h text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:siteC1, borderBottom:`2px solid ${siteC1}`, letterSpacing:"0.1em" }}>Class Rank</div>
                             <div className="text-center wdm-rank" style={{ fontSize:"13px", fontWeight:900, color:"#444", letterSpacing:"0.02em", lineHeight:1.7 }}>
-                              {selfIndex >= 0 && <div>{positionRank ?? selfIndex+1} / {draftClassPlayers.length} {formatEligible(player.Eligible)} {pluralPos(player.Position)}</div>}
+                              {rankSelf >= 0 && <div>{positionRank ?? rankSelf+1} / {posOf} {formatEligible(player.Eligible)} {pluralPos(player.Position)}</div>}
                               {classRank && <div>{classRank} / {classSize} {formatEligible(player.Eligible)} Prospects</div>}
                             </div>
                           </div>
@@ -4649,7 +4725,7 @@ useEffect(() => {
                   {community.topStrengths.length > 0 ? community.topStrengths.map((s,i) => (
                     <div key={i} className="py-2" style={{ borderBottom:i<community.topStrengths.length-1?"1px solid #f0f0f0":"none" }}>
                       <div className="wdm-item font-black uppercase text-sm" style={{ color:"#222", letterSpacing:"0.06em" }}>{s.term}</div>
-                      {evalCount >= 5 && (
+                      {(evalCount >= 5 || preview) && (
                         <div style={{ height:"4px", background:"#eee", borderRadius:"2px", marginTop:"4px", overflow:"hidden" }}>
                           <div style={{ width:`${barPct(s.pct)}%`, height:"100%", backgroundColor:"#16a34a", borderRadius:"2px" }} />
                         </div>
@@ -4662,7 +4738,7 @@ useEffect(() => {
                   {community.topWeaknesses.length > 0 ? community.topWeaknesses.map((w,i) => (
                     <div key={i} className="py-2" style={{ borderBottom:i<community.topWeaknesses.length-1?"1px solid #f0f0f0":"none" }}>
                       <div className="wdm-item font-black uppercase text-sm" style={{ color:"#222", letterSpacing:"0.06em" }}>{w.term}</div>
-                      {evalCount >= 5 && (
+                      {(evalCount >= 5 || preview) && (
                         <div style={{ height:"4px", background:"#eee", borderRadius:"2px", marginTop:"4px", overflow:"hidden" }}>
                           <div style={{ width:`${barPct(w.pct)}%`, height:"100%", backgroundColor:"#dc2626", borderRadius:"2px" }} />
                         </div>
@@ -4692,6 +4768,7 @@ useEffect(() => {
     <>
       <Helmet>
         <title>{`${player.First||""} ${player.Last||""} NFL Draft Scouting Report and Projection`}</title>
+        {preview && <meta name="robots" content="noindex, nofollow" />}
         <meta name="description" content={metaDescription} />
         <link rel="canonical" href={`https://we-draft.com/player/${slug}`} />
         <meta property="og:type" content="article" />
@@ -5062,7 +5139,8 @@ useEffect(() => {
           </div>
         ) : (
           <div className="wdm-col" style={{ position: "sticky", top: "20px", display: "flex", flexDirection: "column", gap: "16px" }}>
-            {TrendingSidebarCard}
+            {/* Preview links: the current class's list replaces Trending. */}
+            {!preview && TrendingSidebarCard}
             {DraftClassList}
           </div>
         )}
@@ -5542,7 +5620,17 @@ useEffect(() => {
             {scoutTab === "info" && showInfoTab ? (
               <PlayerEligibilityInfo player={player} text={eligibilityText} espnId={espnId} draft={draftedBy ? { team: draftedBy, round: draftInfo?.round, pick: draftInfo?.pick } : null} color1={siteC1} isMobile={isMobile} />
             ) : scoutTab === "stats" && showStatsTab ? (
-              <PlayerEspnStats espnId={espnId} color1={siteC1} color2={siteC2} isMobile={isMobile} onEmpty={() => { setEspnEmpty(true); setScoutTab("community"); }} />
+              preview ? (
+                // Preview link: blank stats, their freshman season loaded.
+                <PlayerEspnStats color1={siteC1} color2={siteC2} isMobile={isMobile}
+                  sample={{
+                    year: Number(player.RecruitYear) || (Number(player.Eligible) ? Number(player.Eligible) - 3 : new Date().getFullYear()),
+                    position: player.Position,
+                    team: { name: player.School || "", logo: sanitizeUrl(branding?.logo1 || "") },
+                  }} />
+              ) : (
+                <PlayerEspnStats espnId={espnId} color1={siteC1} color2={siteC2} isMobile={isMobile} onEmpty={() => { setEspnEmpty(true); setScoutTab("community"); }} />
+              )
             ) : scoutTab === "mine" ? (
           <div className="bg-white rounded-lg overflow-hidden wdm-card wdm-form" style={{ border:`2px solid ${siteC1}` }}>
             <div className="flex items-center justify-between wdm-cardhead" style={{ backgroundColor:siteC1, padding:isMobile?"8px 12px":"10px 20px" }}>
@@ -5885,7 +5973,7 @@ useEffect(() => {
         {/* ===== Homage ad — same ad the margin rails are showing. Desktop:
             the wordmark banner. Phones (no rails): MobileAdCard, with the
             product shot and its own team dropdown. ===== */}
-        {adData ? (
+        {preview ? null : adData ? (
           <div className="mb-8">
             {isMobile ? (
               <MobileAdCard
@@ -5911,8 +5999,9 @@ useEffect(() => {
           <div className="mb-8" aria-hidden="true" style={{ height: isMobile ? `${MOBILE_AD_HEIGHT + 17}px` : "131px" }} />
         )}
 
-        {/* PC only, where My Evaluation used to be: opens its tab up top. */}
-        {!isMobile && (
+        {/* PC only, where My Evaluation used to be: opens its tab up top.
+            Not on preview links (no My Evaluation there). */}
+        {!isMobile && !preview && (
           <div className="mb-8" style={{ display: "flex", justifyContent: "center" }}>
             <button onClick={()=>{ setScoutTab("mine"); evaluationFormRef.current?.scrollIntoView({behavior:"smooth",block:"start"}); }}
               className="font-black uppercase rounded-full transition hover:opacity-90"

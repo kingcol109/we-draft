@@ -63,8 +63,21 @@ export default async function middleware(req) {
   const isSearchBot = SEARCH_BOTS.some((bot) => ua.includes(bot));
   const isSocialBot = SOCIAL_BOTS.some((bot) => ua.includes(bot));
   if (!isSearchBot && !isSocialBot) return;
-  const { pathname } = new URL(req.url);
+  const { pathname, searchParams } = new URL(req.url);
   if (pathname.startsWith('/api/')) return;
+
+  // A private preview link (/player/<slug>?preview=<token>, see
+  // src/utils/previewLinks.js): link-preview bots get its own card — the
+  // player's pitch graphic — from api/preview-og.js, not the page.
+  const previewToken = searchParams.get('preview');
+  if (isSocialBot && previewToken && pathname.startsWith('/player/')) {
+    try {
+      const r = await fetch(new URL(`/api/preview-og?token=${encodeURIComponent(previewToken)}`, req.url), { cache: 'no-store' });
+      return new Response(await r.text(), { status: r.status, headers: { 'content-type': 'text/html; charset=utf-8' } });
+    } catch {
+      // fall through to the usual bot handling
+    }
+  }
 
   if (isSearchBot && !isSocialBot) {
     const year = playerPageYear(pathname);

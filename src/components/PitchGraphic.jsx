@@ -5,6 +5,8 @@
 // drawn at the page's own desktop proportions (PlayerProfile.js, the modern
 // "wdm" look, measured on a live page: hero 798 × 194, grades card 750 wide
 // and inset 24px under it, columns 210 / flex / flex / 150):
+//   the toolbar the team-color bar over the hero: Back; Share, Following,
+//               Watch (look only — nothing in an image is clickable)
 //   the hero    school colors, stripes and spotlight; on the left the
 //               player's headshot over a faded team logo when they're in
 //               the system with one, else the team logo; the name and
@@ -13,7 +15,9 @@
 //   the grades  Community Grade, Top Strengths, Top Weaknesses, NFL Fits —
 //               always the same sample: Early First Round; Instincts,
 //               Explosiveness, Physicality; no weaknesses; three NFL teams
-//               (random, re-rollable) — under a SAMPLE watermark
+//               (shuffled or picked in the Pitch tab) — under a SAMPLE
+//               watermark, below the page's tabs (Scouting Report on) and
+//               its Find Comparison pill
 //   the footer  a white bar with the We-Draft.com logo
 // Exported at 2x through utils/exportImages.js (renderShareImage), which
 // inlines the logos.
@@ -77,11 +81,28 @@ const PitchGraphic = forwardRef(function PitchGraphic({ person, brand, number, f
   const wordmark = brand?.WordmarkDark || brand?.Wordmark || "";
   const num = String(number || "").replace(/^#/, "").trim();
   const look = gradeLook(PITCH_GRADE);
+  // The toolbar's outlined white pills, as PlayerProfile.js draws them.
+  const pill = { display: "inline-flex", alignItems: "center", gap: 6, border: "2px solid #fff", background: "rgba(255,255,255,0.12)", color: "#fff", fontSize: 16, fontWeight: 900, padding: "9px 18px", borderRadius: 999, whiteSpace: "nowrap", lineHeight: 1.2 };
   return (
     <div ref={ref} style={{ width: HERO_W + PAD * 2, padding: PAD, background: "#f7f9fc", boxSizing: "border-box", fontFamily: "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif" }}>
+      <div style={{ borderRadius: 16, overflow: "hidden", width: HERO_W }}>
+      {/* ── Toolbar: the page's flat team-color bar over the hero ── */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: c1, padding: "12px 20px" }}>
+        <span style={{ ...pill, borderRadius: 8, padding: "10px 22px", fontWeight: 800, letterSpacing: "0.04em" }}>← Back</span>
+        <div style={{ display: "flex", gap: 8 }}>
+          <span style={pill}>
+            <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7" /><path d="M16 6l-4-4-4 4" /><path d="M12 2v13" />
+            </svg>
+            Share
+          </span>
+          <span style={{ ...pill, background: "#fff", color: c1 }}>✓ Following</span>
+          <span style={pill}>▶️ Watch</span>
+        </div>
+      </div>
       {/* ── Hero ── */}
       <div style={{
-        position: "relative", overflow: "hidden", borderRadius: 16, width: HERO_W, height: HERO_H,
+        position: "relative", overflow: "hidden", width: HERO_W, height: HERO_H,
         background: [
           `radial-gradient(circle 220px at top left, ${c2}55, transparent 100%)`,
           `radial-gradient(circle 220px at bottom right, ${c2}55, transparent 100%)`,
@@ -131,9 +152,24 @@ const PitchGraphic = forwardRef(function PitchGraphic({ person, brand, number, f
           </div>
         </div>
       </div>
+      </div>
+
+      {/* ── Tabs (Scouting Report on) and the Find Comparison pill ── */}
+      <div style={{ margin: `${PAD}px ${PAD}px 10px`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 24 }}>
+          {["Info", "Scouting Report", "Stats"].map((label) => (
+            <span key={label} style={{ fontWeight: 900, textTransform: "uppercase", whiteSpace: "nowrap", fontSize: 14, letterSpacing: "0.1em", padding: "0 0 5px", color: label === "Scouting Report" ? SITE_BLUE : "#9aa5b4", borderBottom: `3px solid ${label === "Scouting Report" ? SITE_GOLD : "transparent"}` }}>
+              {label}
+            </span>
+          ))}
+        </div>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, background: c1, color: "#fff", fontWeight: 900, fontSize: 13, textTransform: "uppercase", letterSpacing: "0.06em", whiteSpace: "nowrap", padding: "8px 18px", borderRadius: 999, boxShadow: "0 2px 8px rgba(0,0,0,0.15)" }}>
+          🔎 Find Comparison
+        </span>
+      </div>
 
       {/* ── Draft grades (the page's card: 750 wide, inset 24px), under a SAMPLE watermark ── */}
-      <div style={{ position: "relative", margin: `${PAD}px ${PAD}px 0`, display: "flex", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, overflow: "hidden" }}>
+      <div style={{ position: "relative", margin: `0 ${PAD}px`, display: "flex", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, overflow: "hidden" }}>
         <div style={{ flex: "0 0 210px", padding: "20px 24px", borderRight: `1px solid ${LINE_2}`, display: "flex", flexDirection: "column", alignItems: "center", boxSizing: "border-box" }}>
           <div style={{ width: "100%" }}><Heading center gap={16}>Community Grade</Heading></div>
           <div style={{ background: look.bg, borderRadius: 12, padding: "10px 14px", width: 110, textAlign: "center", boxSizing: "border-box" }}>

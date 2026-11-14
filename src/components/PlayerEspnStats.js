@@ -34,7 +34,37 @@ const fmtDate = (iso) => {
   return Number.isNaN(d.getTime()) ? "" : `${d.getMonth() + 1}/${d.getDate()}`;
 };
 
-export default function PlayerEspnStats({ espnId, color1, color2, isMobile, onEmpty }) {
+// Preview links (utils/previewLinks.js): a blank stat line for the player's
+// freshman season, laid out like ESPN's tables for their position.
+const SAMPLE_CATEGORIES = {
+  passing: ["Passing", ["CMP", "ATT", "YDS", "CMP%", "AVG", "TD", "INT", "LNG", "RTG"]],
+  rushing: ["Rushing", ["CAR", "YDS", "AVG", "TD", "LNG"]],
+  receiving: ["Receiving", ["REC", "YDS", "AVG", "TD", "LNG"]],
+  defensive: ["Defensive", ["TOT", "SOLO", "AST", "SACK", "TFL", "PD", "FF"]],
+  interceptions: ["Interceptions", ["INT", "YDS", "TD"]],
+  kicking: ["Kicking", ["FGM", "FGA", "FG%", "LNG", "XPM", "XPA", "PTS"]],
+  punting: ["Punting", ["PUNTS", "YDS", "AVG", "LNG", "IN 20"]],
+  games: ["Games", ["GP", "GS"]],
+};
+const SAMPLE_BY_POSITION = {
+  QB: ["passing", "rushing"], RB: ["rushing", "receiving"], WR: ["receiving", "rushing"], TE: ["receiving"],
+  EDGE: ["defensive"], DL: ["defensive"], DT: ["defensive"], DE: ["defensive"], LB: ["defensive", "interceptions"],
+  CB: ["defensive", "interceptions"], S: ["defensive", "interceptions"], DB: ["defensive", "interceptions"],
+  K: ["kicking"], P: ["punting"],
+};
+// sample: { year, position, team: { name, logo } } → the `career` shape below.
+function sampleCareer({ year, position, team }) {
+  const keys = SAMPLE_BY_POSITION[String(position || "").toUpperCase()] || ["games"];
+  return {
+    teams: { sample: { abbreviation: team?.name || "", logos: team?.logo ? [{ href: team.logo }] : [] } },
+    cats: keys.map((k) => {
+      const [displayName, labels] = SAMPLE_CATEGORIES[k];
+      return { name: k, displayName, labels, statistics: [{ season: { year }, teamSlug: "sample", stats: labels.map(() => "–") }] };
+    }),
+  };
+}
+
+export default function PlayerEspnStats({ espnId, color1, color2, isMobile, onEmpty, sample }) {
   const [career, setCareer] = useState(undefined); // undefined = loading, null = none
   // Sub-tabs: "seasons" (Season, the default) or "games" (Game Log).
   const [view, setView] = useState("seasons");
@@ -44,6 +74,10 @@ export default function PlayerEspnStats({ espnId, color1, color2, isMobile, onEm
   useEffect(() => {
     let live = true;
     setCareer(undefined); setSeason(null); setView("seasons");
+    if (sample) {
+      setCareer(sampleCareer(sample)); setSeason(sample.year);
+      return undefined;
+    }
     fetchEspnCareer(espnId).then((j) => {
       if (!live) return;
       const cats = (j?.categories || []).filter((c) => !SKIP_CATEGORIES.has(c.name) && c.statistics?.length);
@@ -53,11 +87,11 @@ export default function PlayerEspnStats({ espnId, color1, color2, isMobile, onEm
       if (years.length) setSeason(years.includes(CURRENT_SEASON) ? CURRENT_SEASON : Math.max(...years));
     });
     return () => { live = false; };
-  }, [espnId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [espnId, sample?.year, sample?.position]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The game log loads once that sub-tab is opened.
   useEffect(() => {
-    if (!season || view !== "games") return undefined;
+    if (!season || view !== "games" || sample) return undefined;
     let live = true;
     setLog(undefined);
     fetchGameLog(espnId, season).then((j) => { if (live) setLog(j || null); });
@@ -193,7 +227,7 @@ export default function PlayerEspnStats({ espnId, color1, color2, isMobile, onEm
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px", margin: "2px 0 12px" }}>
         <div role="tablist" style={{ display: "flex", gap: isMobile ? "14px" : "20px" }}>
           {subTab("seasons", "Season")}
-          {subTab("games", "Game Log")}
+          {!sample && subTab("games", "Game Log")}
         </div>
         {view === "games" && (
           <div role="tablist" aria-label="Season" style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
@@ -247,7 +281,7 @@ export default function PlayerEspnStats({ espnId, color1, color2, isMobile, onEm
           ))}
         </>
       ) : renderLog()}
-      <div style={{ fontSize: "10px", color: "#9aa5b4", fontWeight: 700, textAlign: "right", marginTop: "-8px" }}>Stats: ESPN</div>
+      {!sample && <div style={{ fontSize: "10px", color: "#9aa5b4", fontWeight: 700, textAlign: "right", marginTop: "-8px" }}>Stats: ESPN</div>}
     </div>
   );
 }

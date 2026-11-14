@@ -367,6 +367,19 @@ service cloud.firestore {
       allow read: if isAdmin();
       allow write: if false;
     }
+    // Private preview links (src/utils/previewLinks.js): anyone holding a
+    // link's token can get() its doc — that's what opens the page — but only
+    // admins can list them (so tokens can't be discovered) or write them.
+    // The graphic (previewImages) is admin-only; api/preview-og.js serves
+    // it with the Admin SDK.
+    match /previewLinks/{token} {
+      allow get: if true;
+      allow list, write: if isAdmin();
+    }
+    match /previewImages/{token} {
+      allow read, write: if isAdmin();
+    }
+
     // Admin → Social (src/components/AdminSocial.jsx): player ↔ Instagram
     // account associations, the people who've messaged @wedraftsite and
     // their messages. Admins read; only the server writes
