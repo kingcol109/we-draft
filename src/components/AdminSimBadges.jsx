@@ -10,9 +10,9 @@
 // to try it out). The preview is the pop-up a user will see in the sim
 // when they earn one.
 import { useEffect, useState } from "react";
-import { addDoc, deleteDoc, getDocs, orderBy, query, serverTimestamp, updateDoc } from "firebase/firestore";
+import { addDoc, deleteDoc, getDocs, orderBy, query, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
 import { badgesCol, badgeRef, RARITIES, rarityOf } from "../utils/draftSim/badges";
-import { isWired } from "../utils/draftSim/badgeRules";
+import { isWired, BADGE_DEFAULTS } from "../utils/draftSim/badgeRules";
 import { BadgeIcon, BadgeToast } from "./draftSim/SimBadges";
 import LoadingSpinner from "./LoadingSpinner";
 
@@ -63,6 +63,21 @@ export default function AdminSimBadges() {
       alert("Couldn't change the badge — try again.");
     }
   };
+  // A badge wired at a fixed id (BADGE_DEFAULTS) whose doc isn't made yet:
+  // made here, not live until it's switched Active.
+  const missing = badges ? Object.entries(BADGE_DEFAULTS).filter(([id]) => !badges.some((b) => b.id === id)) : [];
+  const create = async (id, d) => {
+    setBusy(true);
+    try {
+      await setDoc(badgeRef(id), { ...d, active: false, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+      await load();
+    } catch (e) {
+      console.error("Badge create error:", e);
+      alert("Couldn't create the badge — try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
   const remove = async (b) => {
     if (!window.confirm(`Delete the "${b.title}" badge?`)) return;
     try {
@@ -82,6 +97,23 @@ export default function AdminSimBadges() {
         {" "}<strong>Wired</strong> badges have their rule in the sim&apos;s code (badgeRules.js); a new badge shows <strong>Not wired</strong> until it&apos;s added there.
         {" "}Only <strong>Active</strong> badges are shown and awarded to users — admins earn wired badges either way, to test them first.
       </div>
+
+      {missing.length > 0 && (
+        <div style={{ ...card, borderColor: "#f6a21d" }}>
+          <div style={{ padding: "10px 14px", borderBottom: "1px solid #eef1f5", fontWeight: 900, fontSize: "13px", color: "#b7791f", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+            Wired, not created yet
+          </div>
+          {missing.map(([id, d]) => (
+            <div key={id} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "10px 14px", flexWrap: "wrap" }}>
+              <div style={{ flex: "1 1 260px", minWidth: 0, fontSize: "13px" }}>
+                <strong>{d.title}</strong> <span style={{ color: rarityOf(d.rarity).color, fontWeight: 900, fontSize: "11px", textTransform: "uppercase" }}>{rarityOf(d.rarity).label}</span>
+                <div style={{ color: "#666", marginTop: "2px" }}>{d.description}</div>
+              </div>
+              <button onClick={() => create(id, d)} disabled={busy} style={{ ...smallBtn, background: BLUE, color: "#fff" }}>Create (inactive)</button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Add / edit */}
       <div style={card}>

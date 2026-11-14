@@ -1,4 +1,4 @@
-import { BADGE_RULES, runBadges, profileBadges, isWired } from "./badgeRules";
+import { BADGE_RULES, BADGE_DEFAULTS, runBadges, profileBadges, isWired } from "./badgeRules";
 
 jest.mock("../../firebase", () => ({ db: {} }));
 
@@ -111,4 +111,13 @@ test("Armchair Scout only with evaluations", () => {
   const s = stateWith([{ overall: 5, pos: "WR" }]);
   expect(has(s, "p2qew4rKFOybcr1w5XcS")).toBe(false);
   expect(has(s, "p2qew4rKFOybcr1w5XcS", { evaluated: new Set(["p0"]) })).toBe(true);
+});
+
+test("Back to Back: only the finished second draft of a double; its doc made from BADGE_DEFAULTS", () => {
+  const done = { picks: [], byId: {}, userTeams: [], done: true };
+  expect(runBadges(done, { year: "2028", double: true })).toContain("back-to-back");
+  expect(runBadges(done, { year: "2028" })).not.toContain("back-to-back");
+  expect(runBadges({ ...done, done: false }, { year: "2028", double: true })).not.toContain("back-to-back");
+  expect(isWired("back-to-back")).toBe(true);
+  expect(BADGE_DEFAULTS["back-to-back"]).toMatchObject({ title: "Back to Back", rarity: "rare" });
 });

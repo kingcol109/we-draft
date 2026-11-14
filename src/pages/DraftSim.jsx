@@ -11,6 +11,17 @@
 // many rounds as its board can fill (maxRounds); the setup screen switches
 // between them.
 //
+// A finished class with a next one (2027 → 2028) offers to carry the draft
+// over: the next class drafted on top of it (weeklyMock.js carryOverData —
+// needs a year on, the Weekly Mock's position rules for CPU teams, the order
+// shuffled in tiers, the run's trades of next year's picks carried, its
+// picks on the Roster tab), same teams and settings, on the Expanded Board
+// as a next-class run starts. Both years' results show at the end
+// (SimResults DoubleResults), saved as one draft. The setup screen's
+// "2027 + 2028" (config.double) does it on its own: when 2027's done, a
+// screen in between (SimResults CarryInterlude — the recap, the 2028 order,
+// what changed) and a button to begin 2028.
+//
 // /draftsim/tb is the marketed entry: it skips setup and starts the draft
 // right away with the default settings, the Buccaneers as the user's team
 // ("Drafting as the Buccaneers" on the stage first). /draftsim is the setup
@@ -26,7 +37,7 @@ import { Link, Navigate, useLocation, useNavigate, useParams } from "react-route
 import LoadingSpinner from "../components/LoadingSpinner";
 import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
 import { NFL_TEAMS, NFL_TEAM_ABBRS } from "../utils/coachHistory";
-import { loadSimSetup, loadSimData, loadExpandedBoard, loadMyGrades, SIM_YEAR, SIM_YEARS, maxRounds, teamNamer } from "../utils/draftSim/data";
+import { loadSimSetup, loadSimData, loadExpandedBoard, loadMyGrades, SIM_YEAR, SIM_YEARS, classRounds, teamNamer } from "../utils/draftSim/data";
 import { applyMyGrades, teamHaul, shuffleOrder, relabelOrder, orderTeams, randomTeamMap, swapTeams, CPU_TRADES, VARIANCE, DEFAULT_VARIANCE } from "../utils/draftSim/engine";
 import { useAuth } from "../context/AuthContext";
 import { countSim, countTeams, countUserPick } from "../utils/draftSim/stats";
@@ -35,7 +46,7 @@ import { CHATTER, DEFAULT_CHATTER } from "../utils/draftSim/analysts";
 import { useIsMobile, BLUE, GOLD } from "../components/MockDraftKit";
 import useDraftSim, { SPEEDS, DEFAULT_SPEED } from "../components/draftSim/useDraftSim";
 import SimBroadcast, { SIM_CSS, introHeadline } from "../components/draftSim/SimBroadcast";
-import SimResults from "../components/draftSim/SimResults";
+import SimResults, { DoubleResults, CarryInterlude } from "../components/draftSim/SimResults";
 import SavedSims from "../components/draftSim/SavedSims";
 import SimProfile from "../components/draftSim/SimProfile";
 import SimCommunity, { SubTabs } from "../components/draftSim/SimCommunity";
@@ -75,10 +86,13 @@ function roundsFor(order, teams, rounds) {
 }
 
 // The centered content column. contentRef: the one the side ads center
-// in the gutters beside.
+// in the gutters beside. Wide (the sim, its results): 1320px, growing on a
+// big screen to fill it — up to 2200px — while leaving each gutter about
+// 380px, enough for a full-size side ad (MarginAds scales them to fit).
+const WIDE_MAX = "max(1320px, min(2200px, calc(100vw / var(--pz, 1) - 760px)))";
 function Column({ wide, isMobile, contentRef, children }) {
   return (
-    <div ref={contentRef} style={{ maxWidth: wide ? 1320 : 1100, margin: "0 auto", padding: isMobile ? "12px 10px 60px" : "18px 20px 60px", fontFamily: FONT }}>
+    <div ref={contentRef} data-sim-col="" style={{ maxWidth: wide ? WIDE_MAX : 1100, margin: "0 auto", padding: isMobile ? "12px 10px 60px" : "18px 20px 60px", fontFamily: FONT }}>
       {children}
     </div>
   );
@@ -122,6 +136,8 @@ export default function DraftSim({ page = null }) {
   // finished.
   const [doneTab, setDoneTab] = useState(null);
   const [doneView, setDoneView] = useState({ profile: "profile", community: "insights" });
+  // Carrying a finished run over to the next class (carryOver below) — loading it.
+  const [carrying, setCarrying] = useState(false);
   useEffect(() => { setDoneTab(null); }, [config]);
   const openDoneTab = (t) => { setDoneTab(t); window.scrollTo(0, 0); };
 
@@ -155,7 +171,7 @@ export default function DraftSim({ page = null }) {
   }, [year]);
 
   // The Expanded Board, once a run (started or waiting to) wants it.
-  const wantsExpanded = !!(config?.expanded || pending?.expanded);
+  const wantsExpanded = !!((config?.expanded && !config.carry) || pending?.expanded);
   useEffect(() => {
     if (!wantsExpanded || expandedBoard) return;
     loadExpandedBoard(year).then(setExpandedBoard).catch((e) => { console.error("Draft sim expanded board error:", e); setError(true); });
@@ -170,7 +186,7 @@ export default function DraftSim({ page = null }) {
   // that just never comes back): one real page reload after 5 seconds, as
   // player pages do — on desktop too.
   // A run on the Expanded Board waits for it too.
-  const boardReady = !!data && (!config?.expanded || !!expandedBoard);
+  const boardReady = !!data && (!config?.expanded || !!config.carry || !!expandedBoard);
   const stuckLoading = !error && (!setup || ((config || pending) && !boardReady));
   useMobileStuckPageWatchdog(stuckLoading, `draftsim_${year}`, { enabled: true, timeoutMs: 5000 });
   // Loaded (its tags are DraftSimMeta's, set from the start): tell
@@ -250,6 +266,45 @@ export default function DraftSim({ page = null }) {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
+  // Carry over: the next class drafted on top of the finished run (prev:
+  // its leg — sim, data, … and the config it ran on). The next class's
+  // board (the Expanded Board, as a next-class run starts) and the carried
+  // order, needs and rules are ready before the run starts.
+  const carryYear = SIM_YEARS[SIM_YEARS.indexOf(year) + 1] || null;
+  // The next year's run, ready to start (prev: the finished leg, with its config).
+  const prepareCarry = async (prev) => {
+    const [{ carryOverData }, next, board] = await Promise.all([
+      import("../utils/draftSim/weeklyMock"), loadSimData(carryYear), loadExpandedBoard(carryYear),
+    ]);
+    const seed = newSeed();
+    const first = prev.config;
+    const { data: carried, changes, carried: moved } = carryOverData({ ...next, board }, prev.sim, prev.data.year, seed);
+    // No more rounds than the next class's own board fills (2028: three) —
+    // what its setup screen allows — even when this one went longer.
+    const cap = classRounds(carryYear, next.board);
+    return {
+      ...rerunOf(first), orderMode: undefined, orderMap: undefined, order: null, expanded: true, seed,
+      baseRounds: Math.min(first.baseRounds ?? first.rounds, cap),
+      rounds: Math.min(cap, roundsFor(carried.order, first.teams, first.baseRounds ?? first.rounds)),
+      carry: { data: carried, prev: { ...prev, config: undefined }, first, changes, moved },
+    };
+  };
+  const beginCarry = (cfg) => { setConfig(cfg); window.scrollTo({ top: 0, behavior: "smooth" }); };
+  const carryOver = async (prev) => {
+    if (!carryYear || carrying) return;
+    setCarrying(true);
+    try {
+      beginCarry(await prepareCarry(prev));
+    } catch (e) {
+      console.error("Draft sim carry over error:", e);
+      alert(`Couldn't load the ${carryYear} draft — try again.`);
+    } finally {
+      setCarrying(false);
+    }
+  };
+  // A carried run's restart, start over and settings go back to its first year's.
+  const firstOf = (c) => c.carry?.first || c;
+
   return (
     <>
       <style>{SIM_CSS}</style>
@@ -266,13 +321,18 @@ export default function DraftSim({ page = null }) {
         ) : config ? (
           <>
             {/* Kept mounted (hidden) while a finished run's other tab is open. */}
-            <div style={doneAway ? { display: "none" } : undefined}>
+            {/* data-sim-fs: what fullscreen takes (SimBroadcast.jsx SIM_FS) — it
+                outlives each run, so a double stays fullscreen from 2027 through
+                the screen in between into 2028. */}
+            <div data-sim-fs="" style={doneAway ? { display: "none" } : undefined}>
               <SimErrorBoundary key={config.seed} isMobile={isMobile}
-                onRestart={() => start(rerunOf(config))}
-                onSettings={() => openSettings(config.teams, config.board, optsOf(config))}>
-                <LiveSim data={config.expanded && expandedBoard ? { ...data, board: expandedBoard } : data} config={config} myGrades={myGrades} isMobile={isMobile} contentRef={contentRef}
-                  onRerun={() => start(rerunOf(config))}
-                  onSettings={() => openSettings(config.teams, config.board, optsOf(config))}
+                onRestart={() => (config.carry ? carryOver({ ...config.carry.prev, config: config.carry.first }) : start(rerunOf(config)))}
+                onSettings={() => openSettings(config.teams, config.board, optsOf(firstOf(config)))}>
+                <LiveSim data={config.carry ? config.carry.data : config.expanded && expandedBoard ? { ...data, board: expandedBoard } : data} config={config} myGrades={myGrades} isMobile={isMobile} contentRef={contentRef}
+                  onRerun={() => start(rerunOf(firstOf(config)))}
+                  onSettings={() => openSettings(config.teams, config.board, optsOf(firstOf(config)))}
+                  onCarry={config.carry ? undefined : carryOver} carryYear={config.carry ? null : carryYear} carrying={carrying}
+                  prepareCarry={prepareCarry} onBegin={beginCarry}
                   onPickTeam={pickAnother}
                   onDone={() => setDoneTab((t) => t || "new")}
                   tabs={<SetupTabs tab="new" thisDraft onTab={openDoneTab} isMobile={isMobile} />} />
@@ -289,8 +349,8 @@ export default function DraftSim({ page = null }) {
           <Column isMobile={isMobile} contentRef={contentRef}>
             <SetupTabs tab={tab} onTab={setTab} isMobile={isMobile} />
             {tab !== "new" ? tabBody(tab, view, setView)
-              : <Setup key={year} setup={setup} year={year} rounds={data ? maxRounds(data.board) : null} initialTeams={location.state?.teams || []} initialBoard={location.state?.board} initialOpts={location.state?.opts} signedIn={!!user} myCount={myCount} isMobile={isMobile} names={names} onStart={start} starting={!!pending} onTeams={setSetupTeams}
-              onYear={(y) => navigate(`/draftsim${y === SIM_YEAR ? "" : `/${y}`}`, { replace: true, state: location.state })} />}
+              : <Setup key={year} setup={setup} year={year} rounds={data ? classRounds(year, data.board) : null} initialTeams={location.state?.teams || []} initialBoard={location.state?.board} initialOpts={location.state?.opts} signedIn={!!user} myCount={myCount} isMobile={isMobile} names={names} onStart={start} starting={!!pending} onTeams={setSetupTeams}
+              onYear={(y, extra) => navigate(`/draftsim${y === SIM_YEAR ? "" : `/${y}`}`, { replace: true, state: extra ? { ...location.state, opts: { ...(location.state?.opts || {}), ...extra, year: y } } : location.state })} />}
           </Column>
         )}
       </div>
@@ -308,7 +368,7 @@ export default function DraftSim({ page = null }) {
 }
 
 // A run's setup choices, to run it again or take back to Settings.
-const optsOf = (c) => ({ mode: c.mode, orderMode: c.orderMode, orderMap: c.orderMap, cpuTrades: c.cpuTrades, variance: c.variance, expanded: !!c.expanded });
+const optsOf = (c) => ({ mode: c.mode, orderMode: c.orderMode, orderMap: c.orderMap, cpuTrades: c.cpuTrades, variance: c.variance, expanded: !!c.expanded, double: !!c.double });
 const rerunOf = (c) => ({ mode: c.mode, teams: c.teams, baseRounds: c.baseRounds, rounds: c.rounds, speed: c.speed, chatter: c.chatter, board: c.board, ...optsOf(c) });
 
 // The ad's team: the one the user's drafting as (the first of several);
@@ -318,6 +378,15 @@ const adTeam = (teams) => (teams.length && teams.length < NFL_TEAM_ABBRS.length 
 const adLogos = (branding) => Object.fromEntries(
   Object.entries(branding || {}).map(([t, b]) => [t, b.LogoDark || b.Logo1]).filter(([, logo]) => logo),
 );
+
+// The finished run's results: out of fullscreen first (they sit under the
+// page's tabs, which fullscreen would leave behind).
+function FinalResults({ children }) {
+  useEffect(() => {
+    if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+  }, []);
+  return children;
+}
 
 // Anything the live sim throws: a way back in instead of a blank page.
 // Keyed by the run's seed, so a restart (a new seed) clears it.
@@ -358,7 +427,13 @@ class SimErrorBoundary extends Component {
 }
 
 // onDone: the run's finished; tabs: the tab bar over its results.
-function LiveSim({ data: communityData, config, myGrades, isMobile, contentRef, onRerun, onSettings, onPickTeam, onDone, tabs }) {
+// onCarry(leg): draft the next class on top of this finished one (carrying
+// while it loads); config.carry: this run is that next class — carry.prev
+// the finished first leg, shown beside it at the end.
+// config.double (the setup screen's 2027 + 2028), first year done: the
+// screen in between instead of results — prepareCarry(leg) readies the
+// next year, onBegin(cfg) starts it.
+function LiveSim({ data: communityData, config, myGrades, isMobile, contentRef, onRerun, onSettings, onPickTeam, onDone, tabs, onCarry, carryYear, carrying, prepareCarry, onBegin }) {
   // My Board: their grades over the community's (fixed for this run — the
   // sim remounts on every start).
   // A random order (config.order) over the real one.
@@ -368,7 +443,7 @@ function LiveSim({ data: communityData, config, myGrades, isMobile, contentRef, 
     ...(config.order ? { order: config.order } : {}),
   }));
   // No more rounds than the class's board can fill (2028 is thin).
-  const rounds = Math.min(config.rounds, maxRounds(data.board));
+  const rounds = Math.min(config.rounds, classRounds(data.year, data.board));
   // Mock Draft mode: the same sim, no pause between picks (useDraftSim quick).
   const mock = config.mode === "mock";
   // Usage counts (Admin → Mock Draft → Statistics): this run once START THE
@@ -382,13 +457,16 @@ function LiveSim({ data: communityData, config, myGrades, isMobile, contentRef, 
   const started = s.phase !== "intro";
   useEffect(() => { if (started) { countSim(uid, "sims"); countTeams(uid, data.year, config.teams); } }, [started]); // eslint-disable-line react-hooks/exhaustive-deps
   const finished = s.phase === "done";
+  // A 2027-only run the user chose to carry over from its results: the
+  // screen in between, as a "2027 + 2028" run gets on its own.
+  const [rolling, setRolling] = useState(false);
   useEffect(() => { if (finished) { countSim(uid, "completed"); onDone?.(); } }, [finished]); // eslint-disable-line react-hooks/exhaustive-deps
   // The signed-in user's Sim Profile (utils/draftSim/simProfile.js), once
   // the draft's finished: any sim keeps their streak going; only a
   // single-team sim on the default settings (speed and chatter aside)
   // goes on the profile. Once a run — and a run finished signed out counts
   // when they sign in from the end screen (its sign-in prompt).
-  const counted = onDefaults(config, { maxRounds: maxRounds(data.board), defaultRounds: DEFAULT_ROUNDS, defaultExpanded: EXPANDED_YEARS.includes(data.year) });
+  const counted = onDefaults(config, { maxRounds: classRounds(data.year, data.board), defaultRounds: DEFAULT_ROUNDS, defaultExpanded: EXPANDED_YEARS.includes(data.year) });
   const profiled = useRef(false);
   useEffect(() => {
     if (!finished || !uid || profiled.current) return;
@@ -398,7 +476,7 @@ function LiveSim({ data: communityData, config, myGrades, isMobile, contentRef, 
   }, [finished, uid]); // eslint-disable-line react-hooks/exhaustive-deps
   // Badges (components/draftSim/useSimBadges.js): popped up as they're
   // earned, saved at the end. My Board's ranks don't count for the value ones.
-  const badges = useSimBadges({ sim: s.sim, year: data.year, valueBoard: config.board !== "mine", uid, admin: profile?.role === "admin", off: mock });
+  const badges = useSimBadges({ sim: s.sim, year: data.year, valueBoard: config.board !== "mine", uid, admin: profile?.role === "admin", off: mock, double: !!config.carry });
   const toasts = <BadgeToasts queue={badges.queue} onDone={badges.dismiss} isMobile={isMobile} />;
   // Mobile, mid-draft: one anchored screen pinned to the viewport — the
   // stage never moves, and only the console's tab scrolls (SimBroadcast).
@@ -450,12 +528,33 @@ function LiveSim({ data: communityData, config, myGrades, isMobile, contentRef, 
       </>
     );
   }
-  if (s.phase === "done") {
+  const interlude = finished && (config.double || rolling) && !config.carry && !!carryYear;
+  if (finished && !interlude) return <FinalResults>{doneView()}</FinalResults>;
+  if (interlude && !isMobile) {
+    // Desktop: the screen in between sits in the sim's own frame — the
+    // same one, so a fullscreen sim stays fullscreen — scrolling inside it.
+    return (
+      <Column wide isMobile={isMobile} contentRef={contentRef}>
+        <DesktopFill><div className="wd-sim-scroll" style={{ height: "100%", overflowY: "auto" }}>{doneView()}</div></DesktopFill>
+        {toasts}
+      </Column>
+    );
+  }
+  // Mobile: the screen in between, as a page.
+  if (finished) return <Column wide isMobile={isMobile} contentRef={contentRef}>{doneView()}{toasts}</Column>;
+  function doneView() {
+    const leg = { sim: s.sim, data, ctx: s.ctx, speed: s.speed, mock, counted, badges: badges.runEarned, badgeTotal: badges.total };
+    if (interlude) return <CarryInterlude leg={leg} nextYear={carryYear} prepare={() => prepareCarry({ ...leg, config })} onBegin={onBegin} isMobile={isMobile} />;
     return (
       <Column wide isMobile={isMobile} contentRef={contentRef}>
         {tabs}
-        <SimResults sim={s.sim} data={data} ctx={s.ctx} speed={s.speed} isMobile={isMobile} onRerun={onRerun} onNew={onSettings} mock={mock} counted={counted} onUndo={mock && s.canUndo ? s.undo : undefined}
-          badges={badges.runEarned} badgeTotal={badges.total} />
+        {config.carry ? (
+          <DoubleResults legs={[config.carry.prev, leg]} isMobile={isMobile} onRerun={onRerun} onNew={onSettings} onUndo={mock && s.canUndo ? s.undo : undefined} />
+        ) : (
+          <SimResults sim={s.sim} data={data} ctx={s.ctx} speed={s.speed} isMobile={isMobile} onRerun={onRerun} onNew={onSettings} mock={mock} counted={counted} onUndo={mock && s.canUndo ? s.undo : undefined}
+            badges={badges.runEarned} badgeTotal={badges.total}
+            onCarry={onCarry && carryYear ? () => { setRolling(true); window.scrollTo(0, 0); } : undefined} carryYear={carryYear} carrying={carrying} />
+        )}
         {toasts}
       </Column>
     );
@@ -474,7 +573,8 @@ function LiveSim({ data: communityData, config, myGrades, isMobile, contentRef, 
 // bottom edge (in CSS px — the page zoom, utils/pageZoom.js), re-measured
 // on resize. The page itself doesn't scroll meanwhile (wd-sim-lock), and
 // the footer is hidden. Fullscreen (the broadcast bar's button —
-// SimBroadcast.jsx SIM_FRAME) takes this frame to the whole screen.
+// SimBroadcast.jsx SIM_FS) takes the page's wrapper around the run — and
+// so this frame — to the whole screen.
 const FILL_BOTTOM_GAP = 14;
 const FULLSCREEN_PAD = 14;
 function DesktopFill({ children }) {
@@ -487,7 +587,7 @@ function DesktopFill({ children }) {
     html.classList.add("wd-sim-lock");
     document.body.classList.add("wd-sim-nofooter");
     const read = () => {
-      const fs = document.fullscreenElement === ref.current;
+      const fs = !!document.fullscreenElement && !!ref.current && document.fullscreenElement.contains(ref.current);
       setFull(fs);
       if (fs) setHeight(window.innerHeight - FULLSCREEN_PAD * 2);
       else if (ref.current) setHeight(Math.max(420, Math.floor(viewportCssHeight() - cssRect(ref.current).top - FILL_BOTTOM_GAP)));
@@ -592,6 +692,14 @@ function Setup({ setup, year, rounds: maxRoundsForYear, onYear, initialTeams, in
   });
   const [cpuTrades, setCpuTrades] = useState(() => (CPU_TRADES[initialOpts?.cpuTrades] ? initialOpts.cpuTrades : "normal"));
   const [variance, setVariance] = useState(() => (VARIANCE[initialOpts?.variance] ? initialOpts.variance : DEFAULT_VARIANCE));
+  // 2027 + 2028: this class, then the next one carried over from it
+  // (only from a class that has a next one — the first).
+  const doubleYear = SIM_YEARS[SIM_YEARS.indexOf(year) + 1] || null;
+  const [double, setDouble] = useState(() => !!initialOpts?.double && !!doubleYear);
+  const pickDouble = () => {
+    if (doubleYear) setDouble(true);
+    else onYear(SIM_YEARS[0], { double: true });
+  };
   // Their own choice for this class (back from Settings), else the class's default.
   const [expanded, setExpanded] = useState(() => (initialOpts?.year === year ? !!initialOpts.expanded : EXPANDED_YEARS.includes(year)));
   // More Options: the choices off their defaults, shown on the closed
@@ -633,8 +741,16 @@ function Setup({ setup, year, rounds: maxRoundsForYear, onYear, initialTeams, in
           ))}
         </div>
         <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 16 }}>
-          <Field label="Draft" note={maxRoundsForYear && maxRoundsForYear < 7 ? `The ${year} board fills ${maxRoundsForYear} round${maxRoundsForYear === 1 ? "" : "s"} so far.` : null}>
-            {SIM_YEARS.map((y) => <button key={y} onClick={() => onYear(y)} aria-pressed={year === y} style={chipStyle(year === y)}>{y}</button>)}
+          <Field label="Draft" note={maxRoundsForYear && maxRoundsForYear < 7 ? `The ${year} sim drafts ${maxRoundsForYear} round${maxRoundsForYear === 1 ? "" : "s"}.` : null}>
+            {SIM_YEARS.map((y) => <button key={y} onClick={() => (y === year ? setDouble(false) : onYear(y))} aria-pressed={year === y && !double} style={chipStyle(year === y && !double)}>{y}</button>)}
+            {SIM_YEARS.length > 1 && (
+              <button onClick={pickDouble} aria-pressed={double} title="Draft 2027, then roll straight into 2028" style={chipStyle(double)}>{SIM_YEARS[0]} + {SIM_YEARS[1]}</button>
+            )}
+            {double && (
+              <div style={{ flexBasis: "100%", color: "#9fb0c8", fontSize: 12, fontFamily: BODY, lineHeight: 1.5, marginTop: 6 }}>
+                Two drafts back to back. When {year} is done, every team keeps the players it drafted and any {doubleYear} picks it traded for, its needs move a year on, and the {doubleYear} order is shuffled within tiers (picks 1–10, 11–20, 21–32). A recap and the {doubleYear} order come up in between, then you start {doubleYear}. Results for both at the end.
+              </div>
+            )}
           </Field>
           <Field label="Rounds">
             {ROUND_OPTIONS.map((r) => {
@@ -732,12 +848,12 @@ function Setup({ setup, year, rounds: maxRoundsForYear, onYear, initialTeams, in
           </div>
         )}
 
-        <button onClick={() => onStart({ mode, teams, baseRounds: rounds, speed, chatter, board, expanded, orderMode, orderMap: orderMode === "custom" ? orderMap : null, cpuTrades: mode === "mock" ? "off" : cpuTrades, variance })} disabled={starting} style={{
+        <button onClick={() => onStart({ mode, teams, baseRounds: rounds, speed, chatter, board, expanded, orderMode, orderMap: orderMode === "custom" ? orderMap : null, cpuTrades: mode === "mock" ? "off" : cpuTrades, variance, double: double && !!doubleYear })} disabled={starting} style={{
           marginTop: 20, width: "100%", border: "none", borderRadius: 14, padding: isMobile ? "15px 18px" : "18px 22px", cursor: starting ? "wait" : "pointer",
           background: `linear-gradient(90deg, ${GOLD}, #ffcc66)`, color: "#fff", fontFamily: FONT, fontWeight: 900, fontSize: isMobile ? 16 : 20, letterSpacing: "0.08em",
           textTransform: "uppercase", boxShadow: "0 10px 30px rgba(246,162,29,0.25)",
         }}>
-          {startLabel} →
+          {startLabel}{double && doubleYear && !starting ? ` · ${year} + ${doubleYear}` : ""} →
         </button>
       </div>
 

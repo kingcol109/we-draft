@@ -1,4 +1,4 @@
-import { customInput, customSlides, customImageUrls, customCutoutUrls, customPlayerIds, customCaption, layerBox, newLayer, blankSlide, CUSTOM_W, CUSTOM_H } from "./custom";
+import { customInput, customSlides, customImageUrls, customCutoutUrls, customPlayerIds, customTagSpots, customCaption, layerBox, newLayer, blankSlide, CUSTOM_W, CUSTOM_H } from "./custom";
 
 const env = { measure: (t, size) => String(t).length * size * 0.45, images: { shot: { href: "data:image/png;base64,AA", w: 100, h: 200 }, logo: { href: "data:image/png;base64,BB", w: 200, h: 100 }, wd: { href: "data:image/png;base64,CC", w: 300, h: 100 } } };
 
@@ -56,4 +56,10 @@ test("it lists what it needs: images, cut-outs, players, a caption", () => {
   expect(customPlayerIds(input)).toEqual(["p1"]);
   expect(customCaption(input)).toContain("Big news");
   expect(customCaption(input)).toContain("#MarkBowman");
+});
+
+test("tag spots: each player's first slide, about his chest, inside the image", () => {
+  const p = (playerId, x, y, w) => ({ kind: "player", playerId, x, y, w, url: "shot" });
+  const spots = customTagSpots({ slides: [{ layers: [p("a", 0, 0, 540), { kind: "text", value: "hi" }] }, { layers: [p("a", 0, 0, 100), p("b", 1000, 1300, 400)] }] });
+  expect(spots).toEqual([{ id: "a", slide: 0, x: 0.25, y: 0.18 }, { id: "b", slide: 1, x: 1, y: 1 }]);
 });

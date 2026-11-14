@@ -408,6 +408,16 @@ export function mockSlides(input, env) {
     }));
 }
 
+// Where each drafted player is in the carousel, for Instagram tags:
+// [{ id, slide }] in mockSlides' order (round 1's slides, the ad, the rest).
+export function mockTagSlides(picks, simAd = true) {
+  const plan = mockSlidePlan((picks || []).filter((p) => p.player)).slice(0, IG_MAX_SLIDES - (simAd ? 1 : 0));
+  const after = plan.filter((s) => s.round === 1).length || 1;
+  const out = [];
+  plan.forEach((s, k) => s.picks.forEach((p) => p.player?.id && out.push({ id: p.player.id, slide: k + (simAd && k >= after ? 1 : 0) })));
+  return out;
+}
+
 // The picks a Draft Sim trade moved, by overall: the week's own trades
 // (weeklyMock.js tradesFromSim — the picks each side got, this class's) and,
 // for the next class, the main class's trades carried over

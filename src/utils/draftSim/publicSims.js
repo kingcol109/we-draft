@@ -9,6 +9,10 @@
 // (components/draftSim/RecentSims.jsx) lists those. Making one private
 // takes the public copy down; making it public again puts it back.
 // Multi-team sims are never listed — there's no one team to file them under.
+// A carried-over pair (SimResults DoubleResults) is one sim: its first
+// year as always, the next under `next` ({ year, rounds, teams }) — on the
+// public copy, that team's next-year grade and picks ({ year, rounds,
+// grade, picks }).
 import { collection, doc, getDocs, limit, orderBy, query, serverTimestamp, where, writeBatch } from "firebase/firestore";
 import { db } from "../../firebase";
 
@@ -21,13 +25,18 @@ const publicRef = (id) => doc(db, PUBLIC, id);
 
 // Listed on Recent Drafts when public: exactly one team, with picks.
 export const listable = (sim) => (sim.teams || []).length === 1;
-const publicCopy = (uid, username, sim) => ({
-  uid, username: username || "", year: String(sim.year), rounds: sim.rounds || null,
-  team: sim.teams[0].team, grade: sim.teams[0].grade, picks: sim.teams[0].picks || [],
-  createdAt: sim.createdAt || serverTimestamp(),
-});
+const publicCopy = (uid, username, sim) => {
+  const team = sim.teams[0].team;
+  const next = sim.next && (sim.next.teams || []).find((t) => t.team === team);
+  return {
+    uid, username: username || "", year: String(sim.year), rounds: sim.rounds || null,
+    team, grade: sim.teams[0].grade, picks: sim.teams[0].picks || [],
+    ...(next ? { next: { year: String(sim.next.year), rounds: sim.next.rounds || null, grade: next.grade, picks: next.picks || [] } } : {}),
+    createdAt: sim.createdAt || serverTimestamp(),
+  };
+};
 
-// rec: { year, rounds, speed, teams } → the new sim's id.
+// rec: { year, rounds, speed, teams, next? } → the new sim's id.
 export async function saveSim(uid, username, rec) {
   const ref = doc(collection(db, "users", uid, "draftSims"));
   const sim = { ...rec, visibility: "public", createdAt: serverTimestamp() };

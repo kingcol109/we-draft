@@ -103,6 +103,25 @@ prevention is on.
    - If a delete fails after publishing, `ig.cleanup` is set to `pending`,
      and the hourly cron retries it.
 
+## Tagging players
+
+The Post Manager's save bar has **Tag on Instagram**. It lists the post's
+players who have an active account in Admin → Social (`instagramContacts`),
+each with a checkbox and, in a carousel, the slide the tag goes on. A Weekly
+Mock lists every drafted player on his slide; a custom post puts each tag on
+the player's first slide, at about his chest. A post saved before this had
+the field tags everyone with an account by default.
+
+- Saved as `userTags: [{ playerId, username, slide, x, y }]` on the post.
+- `publish-start` reads them (`resolveTags`): each player's **current**
+  username from his active contact (the saved one if he has none), up to 20
+  a slide, kept as `ig.tags`. Images get `user_tags` with a spot; a lone reel
+  gets usernames only; a carousel's video items get none.
+- Instagram refuses a container whose tag it can't use (a private, renamed or
+  wrong account). That container is made again **without** its tags and
+  `ig.tagsDropped` lists them, so a tag never costs the post. The save bar
+  shows which tags were dropped.
+
 ## Post types
 
 Publishing doesn't depend on a post's `type`: every type is a list of drawn
@@ -186,8 +205,8 @@ All of these are admin-read only. See `firestore.rules`.
 
 | Path | Contents | Written by |
 |---|---|---|
-| `instagramPosts/{id}` | the Post Manager's saved post: `type`, `name`, `state` (the settings that redraw it, never touched by publishing), `caption`, `slides`, `thumb`, `playerIds`, `subject`, `status` | page (draft, ready, posted) |
-| …same doc `ig` | `attempt`, `step`, `staged`, `files`, `children`, `container`, `leaseUntil`, `mediaId`, `permalink`, `publishedAt`, `mediaType`, `error`, `lastError`, `cleanup` | server only. The rules block the page from writing `ig`, from setting publishing/published/failed, and from editing a publishing or published post. |
+| `instagramPosts/{id}` | the Post Manager's saved post: `type`, `name`, `state` (the settings that redraw it, never touched by publishing), `caption`, `slides`, `thumb`, `playerIds`, `userTags`, `subject`, `status` | page (draft, ready, posted) |
+| …same doc `ig` | `attempt`, `step`, `staged`, `tags`, `tagsDropped`, `files`, `children`, `container`, `leaseUntil`, `mediaId`, `permalink`, `publishedAt`, `mediaType`, `error`, `lastError`, `cleanup` | server only. The rules block the page from writing `ig`, from setting publishing/published/failed, and from editing a publishing or published post. |
 | `igMedia/{mediaId}` | every post on the account: `caption`, `mediaType`, `productType`, `timestamp`, `permalink`, `thumb`, `counts` (like/comment counts), `meta` (Meta's lifetime insights), `calc`, `metricsAt`. Posts published from We-Draft also have `postId`, `postName`, `playerIds` and `subject`. | the media sync, plus publish for the link |
 | `igMedia/{id}/daily/{YYYY-MM-DD}` | a post's numbers as seen on each Pacific day, one document per day | the media sync |
 | `igAccountDaily/{YYYY-MM-DD}` | `meta`: reach, views, accounts_engaged, total_interactions, likes, comments, saves, shares, replies, profile_links_taps, profile_views, follows, unfollows, newFollowers. `calc.followers`: the follower count seen at that day's sync. `fetchedAt`, `partial`. | the account sync |

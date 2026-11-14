@@ -108,6 +108,21 @@ export function customPlayerIds(input) {
   return [...new Set(ids)];
 }
 
+// Each player layer's slide and spot (0–1, about his chest) for an
+// Instagram tag: [{ id, slide, x, y }], his first appearance only.
+export function customTagSpots(input) {
+  const out = [];
+  const seen = new Set();
+  const clamp = (v) => Math.min(1, Math.max(0, Math.round(v * 1000) / 1000));
+  (input?.slides || []).forEach((s, slide) => (s.layers || []).forEach((l) => {
+    if (l.kind !== "player" || !l.playerId || seen.has(l.playerId)) return;
+    seen.add(l.playerId);
+    const w = Number(l.w) || 0;
+    out.push({ id: l.playerId, slide, x: clamp(((Number(l.x) || 0) + w / 2) / IG_W), y: clamp(((Number(l.y) || 0) + w * 0.45) / IG_H) });
+  }));
+  return out;
+}
+
 // A starting caption: the post's words, the players' names as tags.
 export function customCaption(input) {
   const words = [];

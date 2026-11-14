@@ -13,7 +13,8 @@ import { runBadges } from "../../utils/draftSim/badgeRules";
 
 // valueBoard: the community board (not My Board) — see badgeRules.js.
 // off: a Mock Draft — it earns no badges (no pop-ups, nothing saved).
-export default function useSimBadges({ sim, year, valueBoard, uid, admin, off = false }) {
+// double: the second draft of a carried-over pair (Back to Back).
+export default function useSimBadges({ sim, year, valueBoard, uid, admin, off = false, double = false }) {
   const [badges, setBadges] = useState(null);
   const [earned, setEarned] = useState(null);
   const [evaluated, setEvaluated] = useState(null);
@@ -48,16 +49,16 @@ export default function useSimBadges({ sim, year, valueBoard, uid, admin, off = 
   // After every pick and trade.
   useEffect(() => {
     if (off || !badges || !earned) return;
-    pop(runBadges(sim, { year, valueBoard, evaluated }), earned);
-  }, [off, sim, badges, earned, evaluated, year, valueBoard, pop]);
+    pop(runBadges(sim, { year, valueBoard, evaluated, double }), earned);
+  }, [off, sim, badges, earned, evaluated, year, valueBoard, pop, double]);
 
   // Done, signed in: saved once a run (for whoever's signed in then).
   const awarded = useRef(null);
   useEffect(() => {
     if (off || !sim.done || !uid || !badges || !earned || awarded.current === uid) return;
     awarded.current = uid;
-    awardBadges(uid, { state: sim, year, runIds: runBadges(sim, { year, valueBoard, evaluated }), badges }).then((ids) => pop(ids, earned));
-  }, [off, sim, uid, badges, earned, evaluated, year, valueBoard, pop]);
+    awardBadges(uid, { state: sim, year, runIds: runBadges(sim, { year, valueBoard, evaluated, double }), badges }).then((ids) => pop(ids, earned));
+  }, [off, sim, uid, badges, earned, evaluated, year, valueBoard, pop, double]);
 
   const dismiss = useCallback(() => setQueue((q) => q.slice(1)), []);
   return { queue, dismiss, runEarned, total: badges ? Object.keys(badges).length : 0 };

@@ -25,11 +25,13 @@ import { bestGame } from "./bestGame.js";
 // SIM_YEAR / SIM_YEARS (years.js): the class drafted by default, and every
 // class it can draft. A thin class's board only fills a few rounds —
 // maxRounds says how many.
-import { SIM_YEAR, SIM_YEARS } from "./years";
+import { SIM_YEAR, SIM_YEARS, ROUND_CAPS } from "./years";
 export { SIM_YEAR, SIM_YEARS };
 // Scored in bestGame.js (shared with the weekly snapshot build).
 export { bestGame };
 export const maxRounds = (board) => Math.max(1, Math.min(7, Math.floor(board.filter((p) => !SPECIALISTS.includes(p.Position)).length / 32)));
+// A class's rounds: what its board fills, and never past its cap (ROUND_CAPS — 2028: three).
+export const classRounds = (year, board) => Math.min(ROUND_CAPS[String(year)] || 7, maxRounds(board));
 
 const cache = {};
 const once = (key, load) => {
@@ -50,7 +52,11 @@ export function loadSimSetup(year = SIM_YEAR) {
       // Next year's picks trade too (engine FUTURE_DISCOUNT).
       next ? fetchDraft(next).then((d) => d.picks || []).catch(() => []) : [],
     ]);
-    return { year, order: draft.picks || [], futureOrder: future, futureYear: next ? Number(next.year) : null, branding, staff };
+    // A class with no order out yet for the year after (2028 → 2029): each
+    // team's own seven picks, projected from this year's first round.
+    const order = draft.picks || [];
+    const futureOrder = future.length ? future : projectedNextOrder(order);
+    return { year, order, futureOrder, futureYear: futureOrder.length ? Number(year) + 1 : null, branding, staff };
   });
 }
 
@@ -285,4 +291,16 @@ export function teamNamer(branding = {}) {
   const nickname = (abbr) => branding[abbr]?.Team || (NFL_TEAMS[abbr] || abbr).split(" ").pop();
   const city = (abbr) => branding[abbr]?.City || (NFL_TEAMS[abbr] || "").split(" ").slice(0, -1).join(" ");
   return { teamName, nickname, city };
+}
+
+// The year after's draft, before there's an order for it: every team holds
+// its own pick in each of seven rounds, in this year's first-round order
+// (a team's first spot), numbered straight through — fetchDraft's shape
+// ([{ Pick, Round, Team, Traded }]). For trading those picks (engine
+// futureOrder); the numbers are only their place.
+export const PROJECTED_ROUNDS = 7;
+export function projectedNextOrder(order) {
+  const teams = [];
+  [...(order || [])].filter((p) => p.Round === 1).sort((a, b) => a.Pick - b.Pick).forEach((p) => { if (!teams.includes(p.Team)) teams.push(p.Team); });
+  return Array.from({ length: PROJECTED_ROUNDS }, (_, r) => teams.map((Team, i) => ({ Pick: r * teams.length + i + 1, Round: r + 1, Team, Traded: null }))).flat();
 }

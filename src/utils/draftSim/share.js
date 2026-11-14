@@ -41,17 +41,16 @@ export const simUrl = (year) => `We-Draft.com/draftsim${String(year) === SIM_YEA
 export const simCallToAction = (year) => `Create Your Own On ${simUrl(year)}`;
 
 // teams: haulRecords' shape; teamName(abbr) → "New York Jets".
-export function simShareText({ year, teams, teamName, grades = true }) {
-  return [
-    ...teams.flatMap((t, i) => [
-      ...(i ? [""] : []),
-      `My ${year} ${teamName(t.team)} Draft Sim`,
-      ...(grades ? [`Grade: ${t.grade}`] : []),
-      ...(t.picks || []).map((p) => `${p.overall}. ${p.first} ${p.last}, ${p.pos}${p.school ? `, ${p.school}` : ""}`),
-    ]),
-    "",
-    simCallToAction(year),
-  ].join("\n");
+// next: a carried-over pair's next year ({ year, teams }), after this one's.
+export function simShareText({ year, teams, teamName, grades = true, next = null }) {
+  const block = (y, list) => list.flatMap((t, i) => [
+    ...(i ? [""] : []),
+    `My ${y} ${teamName(t.team)} Draft Sim`,
+    ...(grades ? [`Grade: ${t.grade}`] : []),
+    ...(t.picks || []).map((p) => `${p.overall}. ${p.first} ${p.last}, ${p.pos}${p.school ? `, ${p.school}` : ""}`),
+  ]);
+  const later = next?.teams?.length ? ["", ...block(next.year, next.teams)] : [];
+  return [...block(year, teams), ...later, "", simCallToAction(year)].join("\n");
 }
 
 // Mock Draft mode's export (components/draftSim/MockExport.jsx): the sim

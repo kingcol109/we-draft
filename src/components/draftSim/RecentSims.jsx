@@ -8,7 +8,7 @@ import { Helmet } from "react-helmet-async";
 import { NFL_TEAM_ABBRS } from "../../utils/coachHistory";
 import { SIM_YEARS } from "../../utils/draftSim/data";
 import { loadRecentSims } from "../../utils/draftSim/publicSims";
-import { SavedTeamCard, PANEL } from "./SavedSims";
+import { SavedTeamCard, PANEL, YearLabel } from "./SavedSims";
 import LoadingSpinner from "../LoadingSpinner";
 
 const GOLD = "#f6a21d";
@@ -73,9 +73,11 @@ export default function RecentSims({ branding = {}, names, isMobile }) {
                   <div key={s.id} style={{ display: "grid", gap: 6 }}>
                     <div style={{ display: "flex", gap: 8, alignItems: "baseline", color: "#8b9bb4", fontSize: 11, fontFamily: BODY, padding: "0 4px" }}>
                       <span style={{ color: "#fff", fontWeight: 900, fontFamily: "inherit" }}>{s.username || "We-Draft user"}</span>
-                      <span>{[s.year, s.rounds ? `${s.rounds} rd${s.rounds === 1 ? "" : "s"}` : "", date].filter(Boolean).join(" · ")}</span>
+                      <span>{[s.next ? `${s.year} + ${s.next.year}` : s.year, s.rounds ? `${s.rounds} rd${s.rounds === 1 ? "" : "s"}` : "", date].filter(Boolean).join(" · ")}</span>
                     </div>
                     <SavedTeamCard t={{ team: s.team, grade: s.grade, picks: s.picks }} branding={branding} teamName={names} maxPicks={7} />
+                    {s.next && <YearLabel year={s.next.year} />}
+                    {s.next && <SavedTeamCard t={{ team: s.team, grade: s.next.grade, picks: s.next.picks }} branding={branding} teamName={names} maxPicks={7} />}
                   </div>
                 );
               })}

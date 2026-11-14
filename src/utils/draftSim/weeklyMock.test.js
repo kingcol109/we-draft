@@ -1,6 +1,6 @@
 import { buildBoard } from "./engine";
 import { acceptOffer } from "./engine";
-import { WEEKLY_TRADES_BY_YEAR, slotKeys, runWeeklyMock, weeklyFromSim, weeklyNotes, teamWeek, teamChanges, tradesFromSim, nextYearNeeds, qbEligibleTeams, nextYearLabel, mockPicksFrom, weeklyPicksFromMock, nextYearRules, qbTeamsOf, carryTrades, tieredOrder, replayNotes, simPickFor, randomOrder, WEEKLY_ROUNDS_BY_YEAR } from "./weeklyMock";
+import { WEEKLY_TRADES_BY_YEAR, slotKeys, runWeeklyMock, weeklyFromSim, weeklyNotes, teamWeek, teamChanges, tradesFromSim, nextYearNeeds, qbEligibleTeams, nextYearLabel, mockPicksFrom, weeklyPicksFromMock, nextYearRules, qbTeamsOf, carryTrades, carryOverData, historyWithPicks, tieredOrder, replayNotes, simPickFor, randomOrder, WEEKLY_ROUNDS_BY_YEAR } from "./weeklyMock";
 import { pickNote } from "./pickNotes";
 import { applyPlayerTakes } from "./analysts";
 
@@ -416,4 +416,53 @@ test("notes: a role need is said as the player it describes, never as a label", 
   const text = [...all].join(" ");
   expect(text).toMatch(/a tight end who can help in the run game/);
   expect(text).not.toMatch(/blocking tight end/i);
+});
+
+test("carry over: next year's needs from the sim's picks, its trades of next year's picks on a tiered order, CPU teams held to the rules", () => {
+  const sim = runWeeklyMock(data, { seed: 3, rounds: 2 });
+  // BBB sent DDD its 2028 first in this sim.
+  const prev = { ...sim, trades: [...sim.trades, { a: "DDD", b: "BBB", aGot: [{ overall: 10002, number: 2, year: "2028", future: true, round: 1, original: "BBB" }], bGot: [{ overall: 7, round: 2, original: "CCC" }] }] };
+  const needs = Object.fromEntries(TEAMS.map((t) => [t, { QB: { labels: ["Upgrade Needed"] }, WR: { labels: ["Depth Needed"] } }]));
+  const next = { ...data, year: "2028", needs, order: order.map((p) => ({ ...p })) };
+  const firstQb = prev.picks.find((p) => p.round === 1 && prev.byId[p.selection]?.Position === "QB");
+  const out = carryOverData(next, prev, "2027", 11);
+  // The picks it made, for the Roster tab.
+  expect(out.data.prior.year).toBe("2027");
+  expect(out.data.prior.picks).toHaveLength(prev.picks.length);
+  expect(out.data.prior.picks[0]).toMatchObject({ owner: prev.picks[0].owner, round: 1, overall: 1, player: { id: prev.picks[0].selection } });
+  // Needs a year on: a first-round QB sets QB; without one it's still a need, and a depth need moves up.
+  if (firstQb) expect(out.data.needs[firstQb.owner].QB.labels).toEqual(["Set"]);
+  const noQb = TEAMS.find((t) => !prev.picks.some((p) => p.owner === t && prev.byId[p.selection]?.Position === "QB"));
+  expect(out.data.needs[noQb].QB.labels).toEqual(["Upgrade Needed"]);
+  // The trade carried: BBB's 2028 first is DDD's now.
+  const bbbFirst = out.data.order.find((p) => p.Round === 1 && p.Team === "BBB");
+  expect(bbbFirst.Traded).toBe("DDD");
+  expect(out.carried).toEqual([{ round: 1, original: "BBB", from: "BBB", to: "DDD" }]);
+  // Every round still follows round 1, and the rules ride on the data for the engine.
+  const r1 = out.data.order.filter((p) => p.Round === 1).map((p) => p.Team);
+  expect(out.data.order.filter((p) => p.Round === 2).map((p) => p.Team)).toEqual(r1);
+  expect(Object.keys(out.data.posRules).sort()).toEqual(TEAMS);
+  expect(out.data.qbTeams).toEqual(qbTeamsOf(out.data.posRules));
+  // The same seed, the same order.
+  expect(carryOverData(next, prev, "2027", 11).data.order).toEqual(out.data.order);
+});
+
+test("Thad's books with a sim's picks: that year's draft, new schools and teams indexed, its No. 1, nothing changed in place", () => {
+  const books = { years: [2000, 2025], teams: ["NYJ"], schools: ["Texas"], picks: [[2025, 1, 3, 0, "QB", 0, "Old Guy"]], firstOverall: [[2025, "NYJ", "QB", "Texas", "Old Guy"]] };
+  const pl = (First, Position, School) => ({ First, Last: "X", Position, School });
+  const out = historyWithPicks(books, [
+    { owner: "DAL", round: 1, overall: 2, player: pl("B", "WR", "Texas") },
+    { owner: "NYJ", round: 1, overall: 1, player: pl("A", "EDGE", "Miami") },
+  ], "2027");
+  expect(out.picks.slice(1)).toEqual([[2027, 1, 1, 0, "EDGE", 1, "A X"], [2027, 1, 2, 1, "WR", 0, "B X"]]);
+  expect(out.teams).toEqual(["NYJ", "DAL"]);
+  expect(out.schools).toEqual(["Texas", "Miami"]);
+  expect(out.years).toEqual([2000, 2027]);
+  expect(out.firstOverall[1]).toEqual([2027, "NYJ", "EDGE", "Miami", "A X"]);
+  expect(books.picks).toHaveLength(1);
+  expect(books.teams).toEqual(["NYJ"]);
+  // The carry over hands it to the next class's sim.
+  const sim = runWeeklyMock(data, { seed: 3, rounds: 1 });
+  const carried = carryOverData({ ...data, year: "2028", history: books }, sim, "2027", 5);
+  expect(carried.data.history.picks.filter((r) => r[0] === 2027)).toHaveLength(sim.picks.length);
 });

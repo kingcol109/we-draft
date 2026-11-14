@@ -204,6 +204,7 @@ export default function HighSchoolTeamPage() {
       setContentLoading(true);
       try {
         const sameState = (x) => !x.State || x.State === school.State;
+        const chunk = (arr, n = 10) => { const out = []; for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n)); return out; };
         const [allPlayersSnap, historicalSnap, alumniSnap] = await Promise.all([
           getDocs(query(collection(db, "players"), where("HighSchool", "==", school.Name))),
           getDocs(query(collection(db, "historical"), where("HighSchool", "==", school.Name))),
@@ -245,13 +246,16 @@ export default function HighSchoolTeamPage() {
         // from draftOrder (Selection == Slug) — a 2026 alum with no
         // draftOrder entry wasn't actually drafted, so it's left out here
         // the same way TeamPage.js's own archivePlayers query filters it.
+        // Only those alumni's picks are read (Selection in their slugs, 30 a
+        // query) — never the whole 260-pick draftOrder collection.
         const archived2026 = allAlumni.filter((p) => p.Eligible === "2026");
-        const draftOrderSnap = await getDocs(collection(db, "draftOrder"));
+        const slugs2026 = archived2026.map((p) => p.Slug).filter(Boolean);
         const draftBySlug = {};
-        draftOrderSnap.forEach((d) => {
+        const pickSnaps = await Promise.all(chunk(slugs2026, 30).map((c) => getDocs(query(collection(db, "draftOrder"), where("Selection", "in", c)))));
+        pickSnaps.forEach((snap) => snap.forEach((d) => {
           const data = d.data();
           if (data.Selection) draftBySlug[data.Selection] = { Team: data.Team, Round: data.Round, Pick: data.Pick };
-        });
+        }));
         const archived2026Rows = archived2026
           .filter((p) => draftBySlug[p.Slug])
           .map((p) => ({
@@ -271,7 +275,6 @@ export default function HighSchoolTeamPage() {
         // News feed is built from.
         const alumniIds = allAlumni.map((p) => p.id).filter(Boolean);
         const alumniSlugs = allAlumni.map((p) => p.Slug).filter(Boolean);
-        const chunk = (arr) => { const out = []; for (let i = 0; i < arr.length; i += 10) out.push(arr.slice(i, i + 10)); return out; };
         const [articleSnaps, newsSnaps] = await Promise.all([
           Promise.all(chunk(alumniIds).map((c) => getDocs(query(collection(db, "articles"), where("status", "==", "published"), where("playerIds", "array-contains-any", c))))),
           Promise.all(chunk(alumniSlugs).map((c) => getDocs(query(collection(db, "news"), where("active", "==", true), where("slugs", "array-contains-any", c))))),
@@ -311,7 +314,9 @@ export default function HighSchoolTeamPage() {
     let cancelled = false;
     const load = async () => {
       try {
-        const snap = await getDocs(collection(db, "schools"));
+        // Just the 25 ranked schools (one School-in query) — not all ~250.
+        const ranked = entries.sort((a, b) => a[1] - b[1]).slice(0, 25).map(([School]) => School);
+        const snap = await getDocs(query(collection(db, "schools"), where("School", "in", ranked)));
         const byName = {};
         snap.docs.forEach((d) => { const data = d.data(); if (data.School) byName[data.School] = data; });
         if (cancelled) return;

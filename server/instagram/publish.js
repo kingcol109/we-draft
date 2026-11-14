@@ -27,6 +27,16 @@
 // there asks the container first — PUBLISHED means Instagram has the post,
 // and the media is found (recover) rather than published again.
 //
+// Tags: a saved post's userTags ([{ playerId, username, slide, x, y }],
+// picked in the Post Manager from the players' accounts in Admin → Social)
+// are read at start — each player's current username from his active
+// instagramContacts record, the saved one if he has none — and kept as
+// ig.tags { [slide]: [{ username, x, y }] }. Images take them with a spot;
+// a lone reel takes usernames only; a carousel's video items take none.
+// Instagram refuses a container whose tag it can't use (a private or
+// renamed account): that one is made again without its tags, and
+// ig.tagsDropped says which — a tag never costs the post.
+//
 // Fails → status "failed", ig.error { message, code, subcode, fbtraceId,
 // step, at } as Meta said it; the staged files stay for a retry or a look.
 //
@@ -41,6 +51,7 @@
 const { graph: realGraph, credentials, httpError, sleep: realSleep } = require("./graph");
 const staging = require("./staging");
 const videos = require("./videos");
+const { normalizeUsername } = require("./contacts");
 
 const POSTS = "instagramPosts";
 const MAX_SLIDES = 20;
@@ -101,6 +112,61 @@ function scheduleTime(ctx, at) {
   return t;
 }
 
+// ── Tags ──
+const MAX_TAGS = 20; // Instagram's most per image
+const spot = (v) => (Number.isFinite(Number(v)) ? Math.min(1, Math.max(0, Math.round(Number(v) * 1000) / 1000)) : 0.5);
+
+// The post's userTags → { [slide]: [{ username, x, y }] } for this publish.
+async function resolveTags(ctx, p, n, vids) {
+  const list = Array.isArray(p.userTags) ? p.userTags : [];
+  if (!list.length) return {};
+  const lone = n === 1;
+  const out = {};
+  const seen = new Set();
+  for (const t of list) {
+    const slide = Number(t?.slide ?? 0);
+    if (!Number.isInteger(slide) || slide < 0 || slide >= n) continue;
+    if (vids[slide] && !lone) continue; // carousel video items take no tags
+    let username = t?.username;
+    if (t?.playerId) {
+      const snap = await ctx.db.collection("instagramContacts").where("playerId", "==", String(t.playerId)).where("active", "==", true).get().catch(() => null);
+      const c = snap?.docs?.[0]?.data();
+      if (c?.instagramUsername) username = c.instagramUsername;
+    }
+    const u = normalizeUsername(username);
+    if (!u || seen.has(`${slide}:${u.lower}`)) continue;
+    seen.add(`${slide}:${u.lower}`);
+    const arr = (out[slide] = out[slide] || []);
+    if (arr.length < MAX_TAGS) arr.push({ username: u.display, x: spot(t.x), y: spot(t.y) });
+  }
+  return out;
+}
+
+// Graph's user_tags for slide i ("" when it has none). A reel: usernames only.
+function userTagsParam(ig, i, reel) {
+  const tags = ig.tags?.[i] || ig.tags?.[String(i)];
+  if (!tags?.length) return {};
+  return { user_tags: JSON.stringify(tags.map((t) => (reel ? { username: t.username } : { username: t.username, x: t.x, y: t.y }))) };
+}
+
+// A container made with slide i's tags; if Meta refuses it with tags,
+// made again without them (noted in ig.tagsDropped).
+async function createWithTags(ctx, ig, set, i, params, reel = false) {
+  const tagged = userTagsParam(ig, i, reel);
+  const post = (extra) => ctx.graph(`/${ctx.userId}/media`, { method: "POST", params: { ...params, ...extra }, retries: 0 });
+  if (!tagged.user_tags) return post({});
+  try {
+    return await post(tagged);
+  } catch (e) {
+    // Only Meta refusing this request (not a rate limit or an outage) is a tag's fault.
+    if (!e?.meta || e.code === "rate_limited" || (e.status && e.status >= 500)) throw e;
+    const c = await post({});
+    const tags = ig.tags?.[i] || ig.tags?.[String(i)] || [];
+    await set({ tagsDropped: [...(ig.tagsDropped || []), { slide: i, usernames: tags.map((t) => t.username), message: String(e.message || e).slice(0, 300) }] });
+    return c;
+  }
+}
+
 // ── 1. start ──
 // scheduledAt (ms): claim it as "scheduled" instead — the slides are staged
 // now, confirmSchedule marks them complete, and the cron (runDue) publishes
@@ -138,6 +204,7 @@ async function startPublish(ctx, uid, { postId, slides, scheduledAt, videos: vid
       throw httpError(409, "Instagram says this post's last attempt was published, but it can't be found on @wedraftsite. Check the account before publishing again.", { code: "published_unconfirmed" });
     }
   }
+  const tags = await resolveTags(ctx, before, n, vids);
   const attempt = staging.newAttempt();
   const now = ctx.now();
   // The clips, copied into this attempt's folder (before the claim: a copy
@@ -161,7 +228,7 @@ async function startPublish(ctx, uid, { postId, slides, scheduledAt, videos: vid
     tx.update(ref, {
       status: at ? "scheduled" : "publishing",
       ig: {
-        attempt, by: uid || null, startedAt: now, slides: n, step: "staging", staged, videos: Object.fromEntries(Object.keys(vids).map((i) => [i, true])), files: [], children: {}, container: null,
+        attempt, by: uid || null, startedAt: now, slides: n, step: "staging", staged, tags, tagsDropped: [], videos: Object.fromEntries(Object.keys(vids).map((i) => [i, true])), files: [], children: {}, container: null,
         leaseUntil: null, error: null, prevStatus: p.status || "draft", lastError: p.ig?.error || null,
         ...(p.ig?.deletedPosts ? { deletedPosts: p.ig.deletedPosts } : {}),
         // scheduledActive: the cron's one query (runDue) — on while it's waiting or publishing.
@@ -338,7 +405,7 @@ async function runPublish(ctx, uid, { postId, attempt } = {}) {
         for (let i = 0; i < ig.slides; i++) {
           if (children[i]) continue;
           const item = ig.videos?.[i] ? { media_type: "VIDEO", video_url: urls[i] } : { image_url: urls[i] };
-          const c = await ctx.graph(`/${ctx.userId}/media`, { method: "POST", params: { ...item, is_carousel_item: "true" }, retries: 0 });
+          const c = await createWithTags(ctx, ig, set, i, { ...item, is_carousel_item: "true" });
           children[i] = c.id;
           await set({ children: { ...children } });
         }
@@ -352,7 +419,7 @@ async function runPublish(ctx, uid, { postId, attempt } = {}) {
       } else if (!ig.container) {
         // A lone video goes up as a reel (Instagram's only single-video post).
         const item = ig.videos?.[0] ? { media_type: "REELS", video_url: urls[0] } : { image_url: urls[0] };
-        const c = await ctx.graph(`/${ctx.userId}/media`, { method: "POST", params: { ...item, caption: p.caption || "" }, retries: 0 });
+        const c = await createWithTags(ctx, ig, set, 0, { ...item, caption: p.caption || "" }, !!ig.videos?.[0]);
         await set({ container: c.id });
       }
       const st = await waitFinished(ctx, [ig.container], deadline);
@@ -482,6 +549,6 @@ async function deletePost(ctx, uid, { postId } = {}) {
 }
 
 module.exports = {
-  POSTS, MAX_SLIDES, LEASE_MS, POLL_MS, SCHEDULE_MIN_LEAD, context, captionProblem, startPublish, stageSlide, runPublish, cleanupPost, cleanupPending, deletePost, recover,
+  POSTS, MAX_SLIDES, MAX_TAGS, LEASE_MS, resolveTags, POLL_MS, SCHEDULE_MIN_LEAD, context, captionProblem, startPublish, stageSlide, runPublish, cleanupPost, cleanupPending, deletePost, recover,
   confirmSchedule, reschedule, cancelSchedule, runDue,
 };

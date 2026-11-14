@@ -29,7 +29,7 @@
 // which of that team's picks in the round it is (a comp pick is its second):
 // "1-NYJ-1" is the Jets' own first-rounder, "1-DAL-1" the one they got from
 // Dallas, whoever holds it now.
-import { initSim, stepCpu, makePick, chooseCpuPick, NEED_LABELS, NEED_KEYS, needKeysFor, roleFits } from "./engine";
+import { initSim, stepCpu, makePick, chooseCpuPick, NEED_LABELS, NEED_KEYS, needKeysFor, roleFits, rngNext } from "./engine";
 import { pickNote } from "./pickNotes";
 
 export const WEEKLY_ROUNDS = 7;
@@ -445,4 +445,61 @@ export function nextYearNeeds(needs, picks, board = []) {
     });
   });
   return { needs: out, changes };
+}
+
+// ── Draft Sim: carry a finished sim over to the next class ──
+
+// The next class's Draft Sim, drafted on top of a finished sim of this one
+// (the Draft Sim's "Carry over", pages/DraftSim.jsx) the way the next
+// class's Weekly Mock is drafted on top of the main week: every team's
+// needs a year on from the picks it made (nextYearNeeds), each CPU team
+// held to nextYearRules, the next class's order shuffled in tiers
+// (tieredOrder), and the sim's trades of the next class's picks carried
+// onto it (carryTrades). next: loadSimData's for the next class; prevSim:
+// the finished sim; seed: the next run's. → { data (next, with needs,
+// order, posRules, qbTeams, and prior: { year, picks: [{ owner, round,
+// overall, player }] } — the picks the Roster tab and My Picks add — and
+// history with them in it, for Thad), changes, carried }.
+export function carryOverData(next, prevSim, prevYear, seed) {
+  const picks = (prevSim.picks || []).filter((p) => p.selection && prevSim.byId[p.selection])
+    .map((p) => ({ owner: p.owner, round: p.round, overall: p.overall, player: prevSim.byId[p.selection] }));
+  const board = prevSim.board || [];
+  const { needs, changes } = nextYearNeeds(next.needs, picks, board);
+  const posRules = nextYearRules(next.needs, picks, board);
+  let state = (seed ^ 0x2c1b3c6d) | 0;
+  const rand = () => { const r = rngNext(state); state = r.seed; return r.value; };
+  const moved = carryTrades(tieredOrder(next.order, rand), tradesFromSim(prevSim, prevYear), next.year);
+  return {
+    data: {
+      ...next, needs, order: moved.order, posRules, qbTeams: qbTeamsOf(posRules), prior: { year: String(prevYear), picks },
+      history: historyWithPicks(next.history, picks, prevYear),
+    },
+    changes,
+    carried: moved.carried,
+  };
+}
+
+// Thad Murphy's history books (draftHistory.json's shape) with a finished
+// sim's picks added as that year's draft — so the next class's sim knows
+// what every team and school did in it ("the last Texas QB the Jets took",
+// the last No. 1 at a position, a GM's record). picks: [{ owner, round,
+// overall, player }]. A copy; the books themselves are untouched.
+export function historyWithPicks(history, picks, year) {
+  if (!history?.picks || !picks?.length) return history;
+  const y = Number(year);
+  const teams = [...(history.teams || [])];
+  const schools = [...(history.schools || [])];
+  const at = (list, v) => { let i = list.indexOf(v); if (i < 0) { list.push(v); i = list.length - 1; } return i; };
+  const name = (pl) => `${pl.First} ${pl.Last}`.trim();
+  const rows = picks.filter((p) => p.player).sort((a, b) => a.overall - b.overall)
+    .map((p) => [y, p.round, p.overall, at(teams, p.owner), p.player.Position, at(schools, p.player.School || ""), name(p.player)]);
+  const first = picks.find((p) => p.overall === 1 && p.player);
+  return {
+    ...history, teams, schools,
+    picks: [...history.picks.filter((r) => r[0] !== y), ...rows],
+    years: [history.years?.[0] ?? y, Math.max(history.years?.[1] ?? y, y)],
+    firstOverall: first
+      ? [...(history.firstOverall || []).filter((r) => r[0] !== y), [y, first.owner, first.player.Position, first.player.School || "", name(first.player)]]
+      : history.firstOverall,
+  };
 }

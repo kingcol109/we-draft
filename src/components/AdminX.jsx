@@ -28,6 +28,7 @@ import { X_W, X_H, xCard, xCardInput, xCardImageUrls } from "../utils/x/graphics
 import { MEDIA_MAX_CHARS, loadXPosts, loadXPost, loadXMedia, saveXPost, scheduleXPost, unscheduleXPost, markXPosted, reopenXPost, deleteXPost } from "../utils/x/store";
 import { msOf, PLATFORMS } from "../utils/contentCalendar/platforms";
 import { HighlightSection } from "./AdminXHighlight";
+import { xProfileUrl } from "../utils/socialHandles";
 import WdLogo from "../assets/Logo2.png";
 
 const STATUS = {
@@ -164,6 +165,31 @@ export default function AdminX({ open = null }) {
       </div>
       <Composer key={run} type={type} saved={opened} startDate={startDate} setMsg={setMsg} onSaved={() => setVersion((v) => v + 1)} onSavedPost={setOpened} />
       {msg && <div data-x-msg style={{ fontSize: "12px", fontWeight: 800, color: /^Couldn't|^No |^Fix/.test(msg) ? "#a52a1e" : "#15803d" }}>{msg}</div>}
+    </div>
+  );
+}
+
+// Mention: the post's players who have an X handle (players.XHandle, set in
+// Admin → Players), each a button that puts "@handle" at the end of the
+// text. A handle already in the text shows as in.
+function XMentions({ playerIds, text, setText }) {
+  const key = [...new Set(playerIds.filter(Boolean))].join(",");
+  const [found, setFound] = useState([]);
+  useEffect(() => {
+    let live = true;
+    const ids = key ? key.split(",") : [];
+    Promise.all(ids.map((id) => getDoc(doc(db, "players", id)).catch(() => null)))
+      .then((snaps) => live && setFound(snaps.filter((d) => d?.exists() && d.data().XHandle).map((d) => ({ id: d.id, name: `${d.data().First || ""} ${d.data().Last || ""}`.trim(), handle: d.data().XHandle }))));
+    return () => { live = false; };
+  }, [key]);
+  if (!found.length) return null;
+  const has = (h) => new RegExp(`@${h}(?![A-Za-z0-9_])`, "i").test(text);
+  return (
+    <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap", marginTop: "4px" }}>
+      <span style={{ fontSize: "11px", fontWeight: 900, color: "#8a97ab", textTransform: "uppercase" }}>Mention</span>
+      {found.map((p) => (has(p.handle)
+        ? <a key={p.id} href={xProfileUrl(p.handle)} target="_blank" rel="noopener noreferrer" title={`${p.name} is mentioned`} style={{ fontSize: "11px", fontWeight: 900, color: "#15803d", textDecoration: "none" }}>✓ @{p.handle}</a>
+        : <button key={p.id} type="button" title={`Add @${p.handle} (${p.name}) to the post`} onClick={() => setText((t) => `${t.replace(/\s+$/, "")}${t.trim() ? " " : ""}@${p.handle}`)} style={{ ...linkBtn, fontSize: "11px" }}>+ @{p.handle}</button>))}
     </div>
   );
 }
@@ -328,7 +354,7 @@ function Composer({ type = "post", saved, startDate, setMsg, onSaved, onSavedPos
     const data = {
       type: "post", name: shownName, text, media: docMedia, card: card.on ? { ...card } : { on: false },
       thumb: first ? await thumbOf(first) : "",
-      playerIds: [...new Set([card.on ? card.playerId : null].filter(Boolean))],
+      playerIds: [...new Set([...(saved?.playerIds || []), card.on ? card.playerId : null].filter(Boolean))],
       subject: card.on && card.playerId ? { kind: "player", playerId: card.playerId } : null,
       linkedTo: links,
     };
@@ -421,6 +447,7 @@ function Composer({ type = "post", saved, startDate, setMsg, onSaved, onSavedPos
             {hl && touched && hlOut?.text && <button onClick={() => { setTouched(false); setText(hlOut.text); }} style={linkBtn}>Rewrite it for the player</button>}
             <div data-x-count style={{ fontSize: "11px", fontWeight: 900, marginLeft: "auto", color: over ? "#a52a1e" : n > X_LIMIT - 20 ? "#b7791f" : "#8a97ab" }}>{n} / {X_LIMIT}</div>
           </div>
+          <XMentions playerIds={[...(saved?.playerIds || []), card.on ? card.playerId : null, hl ? hlOut?.playerId : null]} text={text} setText={(f) => { setText(f); setTouched(true); }} />
         </div>
 
         {hl && <HighlightSection initial={saved?.highlight} onUpdate={setHlOut} setMsg={setMsg} />}

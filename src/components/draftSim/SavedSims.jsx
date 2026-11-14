@@ -75,6 +75,11 @@ export function SavedTeamCard({ t, branding, teamName, maxPicks = Infinity }) {
   );
 }
 
+// A carried-over pair's second year, over its cards.
+export const YearLabel = ({ year }) => (
+  <div style={{ color: GOLD, fontWeight: 900, fontSize: 11, letterSpacing: "0.14em", padding: "2px 2px 0" }}>{year} DRAFT · CARRIED OVER</div>
+);
+
 // branding: { [abbr]: { City, Team, Color1, Color2, LogoDark, Logo1 } } (the sim's setup).
 export default function SavedSims({ branding = {}, isMobile }) {
   const { user, profile, login } = useAuth();
@@ -130,17 +135,20 @@ export default function SavedSims({ branding = {}, isMobile }) {
   return (
     <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(340px, 1fr))", gap: 12, alignItems: "start" }}>
       {sims.map((s) => {
-        const text = simShareText({ year: s.year, teams: s.teams || [], teamName });
+        const text = simShareText({ year: s.year, teams: s.teams || [], teamName, next: s.next || null });
         const date = s.createdAt?.toDate ? s.createdAt.toDate().toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "";
         const isPublic = s.visibility === "public";
         return (
           <div key={s.id} style={PANEL}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", padding: "8px 12px 0" }}>
-              <span style={{ color: "#fff", fontWeight: 900, fontSize: 11, letterSpacing: "0.14em" }}>{s.year} DRAFT SIM</span>
+              <span style={{ color: "#fff", fontWeight: 900, fontSize: 11, letterSpacing: "0.14em" }}>{s.next ? `${s.year} + ${s.next.year}` : s.year} DRAFT SIM</span>
               <span style={{ color: "#8b9bb4", fontSize: 11, fontFamily: BODY }}>{[date, s.rounds ? `${s.rounds} round${s.rounds === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ")}</span>
             </div>
             <div style={{ display: "grid", gap: 8, padding: "8px 10px" }}>
               {(s.teams || []).map((t) => <SavedTeamCard key={t.team} t={t} branding={branding} teamName={teamName} />)}
+              {/* A carried-over pair: its next year, under this one. */}
+              {s.next && (s.next.teams || []).length > 0 && <YearLabel year={s.next.year} />}
+              {s.next && (s.next.teams || []).map((t) => <SavedTeamCard key={`next-${t.team}`} t={t} branding={branding} teamName={teamName} />)}
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", padding: "0 10px 10px" }}>
               {listable(s) && (

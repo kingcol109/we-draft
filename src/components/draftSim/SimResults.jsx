@@ -45,11 +45,14 @@ const btn = { border: "none", borderRadius: 999, padding: "9px 16px", cursor: "p
 
 // mock: a Mock Draft mode run — the export-as-mock-draft panel up top.
 // onUndo (Mock Draft mode): take back the last pick, back into the draft.
+// onCarry (a finished class with a next one — pages/DraftSim.jsx): draft
+// the next class on top of this one (carryYear; carrying while it loads).
+// head: false leaves the title and buttons off (DoubleResults has its own).
 // counted: this run counts toward the Sim Profile (default settings — utils/draftSim/simProfile.js onDefaults).
 // badges: the badges this run unlocked (useSimBadges runEarned) — under the
 // profile snapshot, or signed out in the sign-up pitch in its place (a Mock
 // Draft's: across the top); badgeTotal: how many there are to earn.
-export default function SimResults({ sim, data, ctx, speed, isMobile, onRerun, onNew, mock = false, counted = false, onUndo, badges = [], badgeTotal = 0 }) {
+export default function SimResults({ sim, data, ctx, speed, isMobile, onRerun, onNew, mock = false, counted = false, onUndo, badges = [], badgeTotal = 0, onCarry, carryYear, carrying = false, head = true }) {
   const { user, login, signup } = useAuth();
   const brand = (t) => data.branding[t] || {};
   const userHauls = useMemo(() => sim.userTeams.map((t) => teamHaul(sim, t)), [sim]);
@@ -58,18 +61,21 @@ export default function SimResults({ sim, data, ctx, speed, isMobile, onRerun, o
   const league = useMemo(() => NFL_TEAM_ABBRS.map((t) => teamHaul(sim, t)).filter((h) => h.rows.length).sort((a, b) => b.score - a.score), [sim]);
   const hasMine = userHauls.some((h) => h.rows.length);
 
+  const carry = onCarry && carryYear ? <CarryPanel year={carryYear} onCarry={onCarry} busy={carrying} isMobile={isMobile} /> : null;
+
   // Mock Draft mode: no grades and no badges — the export and the draft itself.
   if (mock) {
     return (
       <div className="wd-sim-in">
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+        {head && <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
           <div style={{ marginRight: "auto" }}>
             <div style={{ color: GOLD, fontSize: 11, fontWeight: 900, letterSpacing: "0.16em" }}>FINAL · {data.year} NFL MOCK DRAFT</div>
             <div style={{ color: "#fff", fontSize: isMobile ? 24 : 34, fontWeight: 900, lineHeight: 1 }}>THE MOCK IS COMPLETE</div>
           </div>
           <button onClick={onRerun} style={{ ...btn, background: "#1a2438", color: "#fff" }}>START OVER</button>
           <button onClick={onNew} style={{ ...btn, background: "#1a2438", color: "#fff" }}>SETTINGS</button>
-        </div>
+        </div>}
+        {carry}
         <FullDraft sim={sim} data={data} isMobile={isMobile} cols={isMobile ? 1 : 4} action={<MockShare sim={sim} data={data} isMobile={isMobile} />} />
         {/* Post it as a mock draft, under the picks. */}
         <div style={{ marginTop: 12 }}><MockExport sim={sim} year={data.year} isMobile={isMobile} onUndo={onUndo} /></div>
@@ -79,7 +85,7 @@ export default function SimResults({ sim, data, ctx, speed, isMobile, onRerun, o
 
   return (
     <div className="wd-sim-in">
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+      {head && <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
         <div style={{ marginRight: "auto", flexBasis: isMobile ? "100%" : "auto" }}>
           <div style={{ color: GOLD, fontSize: 11, fontWeight: 900, letterSpacing: "0.16em" }}>FINAL · {data.year} NFL DRAFT SIM</div>
           <div style={{ color: "#fff", fontSize: isMobile ? 24 : 34, fontWeight: 900, lineHeight: 1 }}>THE DRAFT IS COMPLETE</div>
@@ -100,7 +106,8 @@ export default function SimResults({ sim, data, ctx, speed, isMobile, onRerun, o
             <Link to={RECENT_PATH} style={{ ...btn, textDecoration: "none", background: "#1a2438", color: "#fff" }}>RECENT DRAFTS</Link>
           </>
         )}
-      </div>
+      </div>}
+      {carry}
 
       <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1fr) 400px", gap: 12, alignItems: "start", marginBottom: 12 }}>
         <div style={{ display: "grid", gap: 12, minWidth: 0 }}>
@@ -265,7 +272,8 @@ function FullDraft({ sim, data, isMobile, cols, action }) {
 // full: fill its cell (the mobile button grid), any note under the button.
 // Saved public (utils/draftSim/publicSims.js — a one-team sim shows on
 // Recent Drafts), with a switch to make it private right there.
-function SaveButton({ sim, data, hauls, speed, full }) {
+// makeRec: what to save, when it's not this one sim (DoubleResults: both years).
+export function SaveButton({ sim, data, hauls, speed, full, makeRec }) {
   const { user, profile, login } = useAuth();
   const [state, setState] = useState("idle"); // idle | waiting (for sign-in) | saving | saved | error
   const [saved, setSaved] = useState(null); // the saved sim ({ id, year, rounds, teams, visibility })
@@ -273,7 +281,7 @@ function SaveButton({ sim, data, hauls, speed, full }) {
   const save = async (uid) => {
     setState("saving");
     try {
-      const rec = { year: data.year, rounds: Math.max(...sim.picks.map((p) => p.round)), speed: speed || null, teams: haulRecords(hauls) };
+      const rec = makeRec ? makeRec() : { year: data.year, rounds: roundsOf(sim), speed: speed || null, teams: haulRecords(hauls) };
       const id = await saveSim(uid, profile?.username, rec);
       setSaved({ ...rec, id, visibility: "public" });
       setState("saved");
@@ -482,3 +490,330 @@ function SimShare({ sim, data, hauls, isMobile, size = "card" }) {
   );
 }
 
+
+const roundsOf = (sim) => Math.max(1, ...sim.picks.map((p) => p.round));
+
+// Under a finished class's results: draft the next class on top of it.
+function CarryPanel({ year, onCarry, busy, isMobile }) {
+  return (
+    <div style={{ ...PANEL, border: `1px solid ${GOLD}`, display: "flex", alignItems: "center", gap: 14, flexWrap: isMobile ? "wrap" : "nowrap", padding: isMobile ? 12 : "14px 18px", marginBottom: 12 }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ color: GOLD, fontSize: 11, fontWeight: 900, letterSpacing: "0.16em" }}>KEEP IT GOING</div>
+        <div style={{ color: "#fff", fontSize: isMobile ? 18 : 22, fontWeight: 900, lineHeight: 1.1 }}>CARRY THIS DRAFT OVER TO {year}</div>
+        <div style={{ color: "#9fb0c8", fontSize: 12, fontFamily: BODY, lineHeight: 1.5, marginTop: 4 }}>
+          Every team keeps the players it just drafted and the {year} picks it traded for, with its needs updated a year on. Same teams and settings; the {year} order is shuffled within tiers (picks 1–10, 11–20, 21–32). Then see both drafts&apos; results.
+        </div>
+      </div>
+      <button onClick={onCarry} disabled={busy} style={{ ...btn, padding: "12px 18px", fontSize: 13, background: GOLD, color: "#fff", flexBasis: isMobile ? "100%" : "auto", opacity: busy ? 0.7 : 1 }}>
+        {busy ? `LOADING ${year}…` : `DRAFT ${year} →`}
+      </button>
+    </div>
+  );
+}
+
+// A carried-over pair's results (pages/DraftSim.jsx): one header for both —
+// one Save, which keeps both years as one draft (users/{uid}/draftSims:
+// this year's as always, the next year's under `next`) — and a tab a year,
+// each that year's own results (SimResults, no header of its own).
+// legs: [first, second], each { sim, data, ctx, speed, mock, counted,
+// badges, badgeTotal }. onUndo: the second year's (Mock Draft mode).
+export function DoubleResults({ legs, isMobile, onRerun, onNew, onUndo }) {
+  const [at, setAt] = useState(1);
+  const hauls = useMemo(() => legs.map((l) => l.sim.userTeams.map((t) => teamHaul(l.sim, t))), [legs]);
+  const mock = !!legs[1].mock;
+  const hasMine = hauls.some((h) => h.some((x) => x.rows.length));
+  const years = legs.map((l) => l.data.year);
+  const makeRec = () => ({
+    year: years[0], rounds: roundsOf(legs[0].sim), speed: legs[1].speed || legs[0].speed || null, teams: haulRecords(hauls[0]),
+    next: { year: years[1], rounds: roundsOf(legs[1].sim), teams: haulRecords(hauls[1]) },
+  });
+  const grade = (i) => (hauls[i].length === 1 && hauls[i][0].rows.length ? hauls[i][0].letter : "");
+  const leg = legs[at];
+  const tab = (on) => ({
+    border: `2px solid ${on ? GOLD : "#24324d"}`, background: on ? "rgba(246,162,29,0.14)" : "#0e1626", color: "#fff", borderRadius: 999,
+    padding: "8px 16px", cursor: "pointer", fontFamily: "inherit", fontWeight: 900, fontSize: 12, letterSpacing: "0.08em",
+  });
+  return (
+    <div className="wd-sim-in">
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+        <div style={{ marginRight: "auto", flexBasis: isMobile ? "100%" : "auto" }}>
+          <div style={{ color: GOLD, fontSize: 11, fontWeight: 900, letterSpacing: "0.16em" }}>FINAL · {years[0]} + {years[1]} NFL {mock ? "MOCK DRAFTS" : "DRAFT SIM"}</div>
+          <div style={{ color: "#fff", fontSize: isMobile ? 24 : 34, fontWeight: 900, lineHeight: 1 }}>BOTH DRAFTS ARE COMPLETE</div>
+        </div>
+        {mock ? (
+          <>
+            <button onClick={onRerun} style={{ ...btn, background: "#1a2438", color: "#fff" }}>START OVER</button>
+            <button onClick={onNew} style={{ ...btn, background: "#1a2438", color: "#fff" }}>SETTINGS</button>
+          </>
+        ) : (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", flexBasis: isMobile ? "100%" : "auto" }}>
+            {hasMine && <SaveButton sim={legs[0].sim} data={legs[0].data} hauls={hauls[0]} speed={legs[0].speed} makeRec={makeRec} />}
+            <button onClick={onNew} style={{ ...btn, background: GOLD, color: "#fff" }}>NEW SIM</button>
+            <Link to={RECENT_PATH} style={{ ...btn, textDecoration: "none", background: "#1a2438", color: "#fff" }}>RECENT DRAFTS</Link>
+          </div>
+        )}
+      </div>
+      <div role="tablist" style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+        {legs.map((l, i) => (
+          <button key={years[i]} role="tab" aria-selected={at === i} onClick={() => setAt(i)} style={tab(at === i)}>
+            {years[i]} DRAFT{grade(i) && !mock ? <span style={{ marginLeft: 8, color: gradeColor(grade(i)) }}>{grade(i)}</span> : null}
+          </button>
+        ))}
+      </div>
+      <SimResults key={at} sim={leg.sim} data={leg.data} ctx={leg.ctx} speed={leg.speed} isMobile={isMobile} onRerun={onRerun} onNew={onNew}
+        mock={mock} counted={leg.counted} badges={leg.badges || []} badgeTotal={leg.badgeTotal || 0} onUndo={at === 1 ? onUndo : undefined} head={false} />
+    </div>
+  );
+}
+
+// Between the two drafts of a "2027 + 2028" run (pages/DraftSim.jsx,
+// config.double), broadcast-style: a banner in the user's team colors (its
+// grade, how many picks, the best value, needs answered) beside what's up
+// next (their first pick in the next draft, and the button to begin); then
+// the class they just drafted — each pick with his school and grade
+// (watching: round 1's top ten) — the needs a year on, as chips (answered,
+// now a need, shifted), and the next draft's first round as it stands (the
+// tiered order, the picks traded in the first draft carried), with the
+// next-year picks that changed hands. prepare(): readies the next run (→ its
+// config — carry.data / changes / moved), once, on arrival.
+const NEED_GROUPS = [
+  { key: "answered", label: "ANSWERED", color: "#4ade80", test: (c) => c.to.includes("Set") },
+  { key: "need", label: "NOW A NEED", color: "#ff8a9a", test: (c) => c.to.includes("Upgrade Needed") },
+  { key: "shifted", label: "SHIFTED", color: GOLD, test: () => true },
+];
+const stripes = "repeating-linear-gradient(115deg, rgba(255,255,255,0.035) 0 2px, transparent 2px 22px)";
+
+export function CarryInterlude({ leg, nextYear, prepare, onBegin, isMobile }) {
+  const [next, setNext] = useState(null);
+  const [failed, setFailed] = useState(false);
+  const started = useRef(false);
+  const load = () => {
+    setFailed(false);
+    prepare().then(setNext).catch((e) => { console.error("Draft sim carry over error:", e); setFailed(true); });
+  };
+  useEffect(() => {
+    if (started.current) return;
+    started.current = true;
+    load();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const { sim, data } = leg;
+  const brand = (t) => data.branding[t] || {};
+  const { teamName, nickname } = teamNamer(data.branding);
+  const mineSet = new Set(sim.userTeams);
+  const hauls = useMemo(() => sim.userTeams.map((t) => teamHaul(sim, t)).filter((h) => h.rows.length), [sim]);
+  const lead = hauls[0] || null;
+  const team = lead?.team || sim.userTeams[0] || null;
+  const b = team ? brand(team) : {};
+  const c1 = b.Color1 || BLUE;
+  const c2 = b.Color2 || GOLD;
+  const onC1 = team ? textOn(c1, c2) : "#fff";
+  const top = sim.picks.filter((p) => p.round === 1 && p.selection).slice(0, 10);
+
+  const order = next ? next.carry.data.order : [];
+  const round1 = order.filter((p) => p.Round === 1).sort((a, b2) => a.Pick - b2.Pick);
+  const firstMine = order.filter((p) => mineSet.has(p.Traded || p.Team) && p.Round <= (next?.rounds || 7)).sort((a, b2) => a.Pick - b2.Pick)[0] || null;
+  const moved = next?.carry.moved || [];
+  const needMoves = (next?.carry.changes || []).filter((c) => mineSet.has(c.team));
+  const grouped = NEED_GROUPS.map((g, i) => ({ ...g, list: needMoves.filter((c) => g.test(c) && !NEED_GROUPS.slice(0, i).some((x) => x.test(c))) })).filter((g) => g.list.length);
+  const valueOf = (r) => (r.prospect.rank ? r.pick.overall - r.prospect.rank : null);
+  const best = lead ? lead.rows.reduce((a, r) => (valueOf(r) != null && (a == null || valueOf(r) > valueOf(a)) ? r : a), null) : null;
+  const answered = needMoves.filter((c) => c.to.includes("Set")).length;
+
+  const kicker = { fontSize: 11, fontWeight: 900, letterSpacing: "0.18em" };
+  const sub = { color: "#8b9bb4", fontSize: 11, fontWeight: 800, fontFamily: BODY };
+  const section = (title, right = null) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", borderBottom: "1px solid #1f2b42" }}>
+      <span style={{ width: 4, height: 16, borderRadius: 2, background: GOLD }} />
+      <span style={{ color: "#fff", fontWeight: 900, fontSize: 13, letterSpacing: "0.14em" }}>{title}</span>
+      {right && <span style={{ marginLeft: "auto" }}>{right}</span>}
+    </div>
+  );
+  const stat = (label, value, color = "#fff", small = "") => (
+    <div style={{ background: "rgba(0,0,0,0.28)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12, padding: isMobile ? "8px 10px" : "10px 16px", minWidth: isMobile ? 0 : 110 }}>
+      <div style={{ ...kicker, fontSize: 9, color: "rgba(255,255,255,0.7)" }}>{label}</div>
+      <div style={{ color, fontWeight: 900, fontSize: isMobile ? 22 : 30, lineHeight: 1.05, whiteSpace: "nowrap" }}>{value}</div>
+      {small && <div style={{ color: "rgba(255,255,255,0.75)", fontSize: 11, fontWeight: 800, fontFamily: BODY, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 180 }}>{small}</div>}
+    </div>
+  );
+  const beginBtn = (big) => (failed ? (
+    <button onClick={load} style={{ ...btn, padding: big ? "16px 26px" : "12px 18px", fontSize: big ? 16 : 13, background: "#1a2438", color: "#fff", border: `1px solid ${GOLD}` }}>COULDN&apos;T LOAD {nextYear} — RETRY</button>
+  ) : (
+    <button onClick={() => next && onBegin(next)} disabled={!next} className={next ? "wd-sim-in" : undefined} style={{
+      ...btn, padding: big ? "16px 28px" : "13px 22px", fontSize: big ? 17 : 14, letterSpacing: "0.08em",
+      background: next ? `linear-gradient(90deg, ${GOLD}, #ffcc66)` : "#1a2438", color: next ? "#111" : "#9fb0c8",
+      boxShadow: next ? "0 10px 30px rgba(246,162,29,0.3)" : "none", cursor: next ? "pointer" : "wait", width: isMobile ? "100%" : "auto",
+    }}>
+      {next ? `BEGIN THE ${nextYear} DRAFT ▶` : `SHUFFLING THE ${nextYear} ORDER…`}
+    </button>
+  ));
+
+  return (
+    <div className="wd-sim-in" style={{ display: "grid", gap: 14, padding: isMobile ? 0 : 4 }}>
+      {/* The banner. */}
+      <div style={{ position: "relative", overflow: "hidden", borderRadius: 18, border: `1px solid ${team ? c2 : "#1f2b42"}`, background: `${stripes}, linear-gradient(120deg, ${c1} 0%, ${c1} 45%, #0b1220 120%)` }}>
+        {team && teamLogo(b) && (
+          <img src={teamLogo(b)} alt="" style={{ position: "absolute", right: isMobile ? -40 : 300, top: "50%", transform: "translateY(-50%)", height: "150%", opacity: 0.1, pointerEvents: "none" }} />
+        )}
+        <div style={{ position: "relative", display: "flex", gap: 18, alignItems: "stretch", flexWrap: isMobile ? "wrap" : "nowrap", padding: isMobile ? 16 : "24px 28px" }}>
+          <div style={{ flex: 1, minWidth: 0, color: onC1 }}>
+            <span style={{ ...kicker, display: "inline-block", background: "rgba(0,0,0,0.35)", color: "#fff", borderRadius: 6, padding: "5px 10px" }}>THE {data.year} DRAFT IS IN THE BOOKS</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 10 }}>
+              {team && teamLogo(b) && <img src={teamLogo(b)} alt="" style={{ width: isMobile ? 52 : 80, height: isMobile ? 52 : 80, objectFit: "contain", flexShrink: 0 }} />}
+              <div style={{ color: "#fff", fontWeight: 900, fontSize: isMobile ? 26 : 46, lineHeight: 0.95, textTransform: "uppercase", textShadow: "0 2px 18px rgba(0,0,0,0.35)" }}>
+                {team ? <>{nickname(team)}<br /><span style={{ fontSize: "0.62em", opacity: 0.9 }}>{data.year} draft class</span></> : <>On to {nextYear}</>}
+              </div>
+            </div>
+            {lead && (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 16 }}>
+                {stat("GRADE", lead.letter, gradeColor(lead.letter))}
+                {stat("PICKS", lead.rows.length)}
+                {best && valueOf(best) > 0 && stat("BEST VALUE", `+${valueOf(best)}`, "#4ade80", `${best.prospect.First} ${best.prospect.Last}`)}
+                {next && stat("NEEDS ANSWERED", answered)}
+              </div>
+            )}
+          </div>
+          {/* Up next. */}
+          <div style={{ flex: isMobile ? "1 1 100%" : "0 0 300px", background: "rgba(5,10,20,0.62)", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 14, padding: 18, display: "flex", flexDirection: "column", justifyContent: "center", gap: 10, backdropFilter: "blur(2px)" }}>
+            <div style={{ ...kicker, color: GOLD }}>UP NEXT</div>
+            <div style={{ color: "#fff", fontWeight: 900, fontSize: 28, lineHeight: 1 }}>{nextYear} NFL DRAFT</div>
+            <div style={{ color: "#c9d4e5", fontSize: 13, fontFamily: BODY, minHeight: 18 }}>
+              {!next ? "Carrying every pick and trade over…"
+                : firstMine ? <>{sim.userTeams.length > 1 ? "Your first pick" : `The ${nickname(firstMine.Traded || firstMine.Team)} pick first at`}: <strong style={{ color: GOLD }}>No. {firstMine.Pick}</strong> · Round {firstMine.Round}{firstMine.Traded ? ` (via ${firstMine.Team})` : ""}</>
+                  : team ? "No picks in the rounds you're drafting — you'll watch this one." : "Every team on the CPU."}
+            </div>
+            {beginBtn(false)}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1fr) minmax(0, 1.3fr)", gap: 14, alignItems: "start" }}>
+        <div style={{ display: "grid", gap: 14, minWidth: 0 }}>
+          {/* The class just drafted. */}
+          <div style={PANEL}>
+            {section(hauls.length ? `YOUR ${data.year} CLASS` : `${data.year} ROUND 1 · TOP 10`)}
+            {hauls.length ? hauls.map((h) => (
+              <div key={h.team}>
+                {hauls.length > 1 && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 16px", background: (brand(h.team).Color1 || BLUE) + "33" }}>
+                    {teamLogo(brand(h.team)) && <img src={teamLogo(brand(h.team))} alt="" style={{ width: 22, height: 22, objectFit: "contain" }} />}
+                    <span style={{ color: "#fff", fontWeight: 900, fontSize: 12, flex: 1 }}>{teamName(h.team).toUpperCase()}</span>
+                    <span style={{ color: gradeColor(h.letter), fontWeight: 900, fontSize: 16 }}>{h.letter}</span>
+                  </div>
+                )}
+                {h.rows.map(({ pick, prospect, letter }) => (
+                  <div key={pick.overall} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 16px", borderBottom: "1px solid #18233a" }}>
+                    <div style={{ width: 46, flexShrink: 0, textAlign: "center", lineHeight: 1.1 }}>
+                      <div style={{ color: GOLD, fontWeight: 900, fontSize: 10, letterSpacing: "0.1em" }}>RD {pick.round}</div>
+                      <div style={{ color: "#fff", fontWeight: 900, fontSize: 17 }}>{pick.overall}</div>
+                    </div>
+                    {schoolLogo(prospect) ? <img src={schoolLogo(prospect)} alt="" style={{ width: 34, height: 34, objectFit: "contain", flexShrink: 0 }} /> : <span style={{ width: 34, flexShrink: 0 }} />}
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ display: "block", color: "#fff", fontWeight: 900, fontSize: 15, textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{prospect.First} {prospect.Last}</span>
+                      <span style={{ display: "block", ...sub }}>{prospect.Position} · {prospect.School}{pick.via ? ` · via ${pick.via}` : ""}</span>
+                    </span>
+                    {letter && <span style={{ flexShrink: 0, minWidth: 34, textAlign: "center", borderRadius: 8, padding: "3px 6px", background: "rgba(0,0,0,0.3)", color: gradeColor(letter), fontWeight: 900, fontSize: 15 }}>{letter}</span>}
+                  </div>
+                ))}
+              </div>
+            )) : top.map((p) => {
+              const pl = sim.byId[p.selection];
+              return (
+                <div key={p.overall} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 16px", borderBottom: "1px solid #18233a" }}>
+                  <span style={{ color: "#fff", fontWeight: 900, fontSize: 16, width: 24, textAlign: "right" }}>{p.overall}</span>
+                  {teamLogo(brand(p.owner)) && <img src={teamLogo(brand(p.owner))} alt="" style={{ width: 30, height: 30, objectFit: "contain" }} />}
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ display: "block", color: "#fff", fontWeight: 900, fontSize: 14, textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pl.First} {pl.Last}</span>
+                    <span style={{ display: "block", ...sub }}>{pl.Position} · {pl.School}</span>
+                  </span>
+                  {schoolLogo(pl) && <img src={schoolLogo(pl)} alt="" style={{ width: 26, height: 26, objectFit: "contain" }} />}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Needs a year on. */}
+          {grouped.length > 0 && (
+            <div style={PANEL}>
+              {section(`NEEDS HEADING INTO ${nextYear}`)}
+              <div style={{ display: "grid", gap: 12, padding: "12px 16px 16px" }}>
+                {grouped.map((g) => (
+                  <div key={g.key}>
+                    <div style={{ ...kicker, fontSize: 10, color: g.color, marginBottom: 6 }}>{g.label} · {g.list.length}</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {g.list.map((c) => (
+                        <span key={`${c.team}-${c.key}`} title={`${c.from.join(", ") || "—"} → ${c.to.join(", ")}`} style={{
+                          padding: "5px 10px", borderRadius: 999, fontSize: 12, fontWeight: 900, fontFamily: BODY,
+                          background: `${g.color}1f`, color: g.color, border: `1px solid ${g.color}55`,
+                        }}>{sim.userTeams.length > 1 ? `${c.team} · ` : ""}{needName(c.key)}</span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* The next draft's first round. */}
+        <div style={PANEL}>
+          {section(`${nextYear} ROUND 1`, next ? <span style={{ ...sub, fontSize: 10, letterSpacing: "0.12em" }}>TIERED ORDER</span> : null)}
+          {!next ? (
+            <div style={{ padding: 28, textAlign: "center", color: failed ? "#ff8a9a" : "#6f7f99", fontSize: 13, fontFamily: BODY }}>{failed ? `Couldn't load the ${nextYear} draft.` : `Shuffling the ${nextYear} order…`}</div>
+          ) : (
+            <div style={{ padding: 12 }}>
+              {/* Down the columns: 1–8 in the first, 9–16 the next… */}
+              <div style={{ display: "grid", gridTemplateColumns: `repeat(${isMobile ? 2 : 4}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${Math.ceil(round1.length / (isMobile ? 2 : 4))}, auto)`, gridAutoFlow: "column", gap: 6 }}>
+                {round1.map((p, i) => {
+                  const owner = p.Traded || p.Team;
+                  const ob = brand(owner);
+                  const mine = mineSet.has(owner);
+                  const oc1 = ob.Color1 || BLUE;
+                  return (
+                    <div key={p.Pick} className="wd-sim-in" style={{
+                      display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 10, minWidth: 0, animationDelay: `${i * 18}ms`,
+                      background: mine ? `linear-gradient(120deg, ${oc1}, ${oc1}aa)` : "#121c2f", border: `1px solid ${mine ? GOLD : "#1a2640"}`,
+                      boxShadow: mine ? "0 0 0 1px rgba(246,162,29,0.35), 0 6px 18px rgba(0,0,0,0.3)" : "none",
+                    }}>
+                      <span style={{ color: mine ? "#fff" : "#6f7f99", fontWeight: 900, fontSize: 13, width: 22, textAlign: "right", flexShrink: 0 }}>{p.Pick}</span>
+                      {teamLogo(ob) && <img src={teamLogo(ob)} alt="" style={{ width: 32, height: 32, objectFit: "contain", flexShrink: 0 }} />}
+                      <span style={{ minWidth: 0 }}>
+                        <span style={{ display: "block", color: "#fff", fontWeight: 900, fontSize: 14, letterSpacing: "0.04em" }}>{owner}</span>
+                        {p.Traded ? <span style={{ display: "block", color: mine ? "#fff" : GOLD, fontSize: 10, fontWeight: 900, letterSpacing: "0.06em" }}>VIA {p.Team}</span>
+                          : mine ? <span style={{ display: "block", color: "#fff", fontSize: 10, fontWeight: 900, letterSpacing: "0.06em" }}>YOUR PICK</span> : null}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+              {moved.length > 0 && (
+                <div style={{ marginTop: 14 }}>
+                  <div style={{ ...kicker, fontSize: 10, color: "#c9d4e5", marginBottom: 8 }}>{nextYear} PICKS THAT CHANGED HANDS IN {data.year}</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {moved.map((m, i) => {
+                      const mine = mineSet.has(m.to) || mineSet.has(m.from);
+                      const logo = (t) => teamLogo(brand(t)) && <img src={teamLogo(brand(t))} alt={t} style={{ width: 18, height: 18, objectFit: "contain" }} />;
+                      return (
+                        <span key={i} title={`${teamName(m.to)} hold ${m.original === m.to ? "their own" : `the ${nickname(m.original)}'`} round ${m.round} pick${m.from !== m.original ? `, from the ${nickname(m.from)}` : ""}`} style={{
+                          display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 9px", borderRadius: 999, fontSize: 11, fontWeight: 900, fontFamily: BODY,
+                          background: mine ? "rgba(246,162,29,0.16)" : "#0b1322", color: mine ? GOLD : "#c9d4e5", border: `1px solid ${mine ? GOLD : "#24324d"}`,
+                        }}>
+                          {logo(m.from)}<span style={{ opacity: 0.7 }}>→</span>{logo(m.to)}
+                          <span>{m.to} · R{m.round}{m.original !== m.to ? ` (${m.original})` : ""}</span>
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              <div style={{ ...sub, marginTop: 14, lineHeight: 1.5, fontWeight: 700 }}>
+                The {nextYear} order is a year away, so it&apos;s shuffled within tiers: the teams projected to pick 1–10, 11–20 and 21–32 are each drawn at random within their group, and every round follows round 1. {Number(nextYear) + 1} picks can be traded too.
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "center", padding: "4px 0 10px" }}>{beginBtn(true)}</div>
+    </div>
+  );
+}

@@ -44,11 +44,11 @@ import { getSiteSnapshot } from "../utils/siteSnapshots";
 import { WEEKLY_YEARS, MAIN_WEEKLY_YEAR, loadWeeklyMockSummary, weeklyMockDate } from "../utils/weeklyMockNews";
 import { NFL_TEAMS } from "../utils/coachHistory";
 import {
-  IG_W, IG_H, IG_MAX_SLIDES, mockSlides, mockInput, mockCaption, mockSlidePlan, playerPost, playerInput, playerCaption,
+  IG_W, IG_H, IG_MAX_SLIDES, mockSlides, mockInput, mockCaption, mockSlidePlan, mockTagSlides, playerPost, playerInput, playerCaption,
 } from "../utils/instagram/posts";
 import { spotlightSlides, spotlightInput, spotlightCaption, spotlightImageUrls, scoutingReport, spotlightFrame, espnStats, editedStats, statsSeed, MAX_STAT_TILES } from "../utils/instagram/spotlight";
 import { fetchEspnCareer } from "./PlayerEspnStats";
-import { customInput, customSlides, customCaption, customImageUrls, customCutoutUrls, customPlayerIds, layerBox, newLayer, blankSlide, LAYER_LABELS } from "../utils/instagram/custom";
+import { customInput, customSlides, customCaption, customImageUrls, customCutoutUrls, customPlayerIds, customTagSpots, layerBox, newLayer, blankSlide, LAYER_LABELS } from "../utils/instagram/custom";
 import { transferSlides, transferInput, transferCaption, transferImageUrls, transferFrame } from "../utils/instagram/transfer";
 import { shortInput, shortFrame, shortEnd, shortImageUrls, SHORT_W, SHORT_H } from "../utils/instagram/short";
 import { igApi, uploadVideo, videoInfo } from "../utils/instagram/api";
@@ -190,6 +190,96 @@ async function makeXDraft({ svgs, caption, name, postId, playerIds, subject, uid
   }, images);
 }
 
+// Tag on Instagram: the post's players who have an account in Admin → Social
+// (instagramContacts, active), each a checkbox and — in a carousel — the
+// slide his tag goes on. Saved on the post as userTags [{ playerId,
+// username, slide, x, y }]; publishing reads each player's current username
+// then (server/instagram/publish.js resolveTags). spots: [{ id, slide, x?, y? }]
+// where each player is in the post (his first slide), else slide 1, middle.
+// A post saved without the field yet tags everyone with an account.
+function useInstagramTags(spots, postId, savedTags) {
+  const ids = useMemo(() => [...new Set(spots.map((s) => s.id).filter(Boolean))], [spots]);
+  const key = ids.join(",");
+  const [accounts, setAccounts] = useState({}); // playerId → { username, status, name }
+  const [picked, setPicked] = useState(null); // playerId → { on, slide } (null: everyone, as placed)
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      const out = {};
+      for (let i = 0; i < ids.length; i += 30) {
+        const snap = await getDocs(query(collection(db, "instagramContacts"), where("playerId", "in", ids.slice(i, i + 30)))).catch(() => null);
+        (snap?.docs || []).forEach((d) => {
+          const c = d.data();
+          if (c.active && c.instagramUsername) out[c.playerId] = { username: c.instagramUsername, status: c.accountStatus || "pending", name: c.playerName || "" };
+        });
+      }
+      if (live) setAccounts(out);
+    })();
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  useEffect(() => {
+    if (!Array.isArray(savedTags)) { setPicked(null); return; }
+    setPicked(Object.fromEntries(savedTags.map((t) => [t.playerId, { on: true, slide: Number(t.slide) || 0 }])));
+  }, [postId, savedTags]);
+  const spotOf = (id) => spots.find((s) => s.id === id) || { id, slide: 0 };
+  const rows = ids.filter((id) => accounts[id]).map((id) => {
+    const sp = spotOf(id);
+    const choice = picked ? picked[id] : null;
+    const on = picked ? !!choice?.on : true;
+    const slide = choice?.slide ?? sp.slide ?? 0;
+    return { id, ...accounts[id], on, slide, spotSlide: sp.slide ?? 0, x: sp.x, y: sp.y };
+  });
+  const set = (id, patch) => setPicked((cur) => {
+    const b = cur || Object.fromEntries(rows.map((r) => [r.id, { on: true, slide: r.slide }]));
+    const row = rows.find((r) => r.id === id);
+    return { ...b, [id]: { on: true, slide: row?.slide ?? 0, ...b[id], ...patch } };
+  });
+  // What the post saves.
+  const userTags = () => rows.filter((r) => r.on).map((r) => {
+    const here = r.slide === r.spotSlide && Number.isFinite(r.x) && Number.isFinite(r.y);
+    return { playerId: r.id, username: r.username, slide: r.slide, x: here ? r.x : 0.5, y: here ? r.y : 0.5 };
+  });
+  return { rows, missing: ids.length - rows.length, set, userTags };
+}
+
+function TagPicker({ tags, order, disabled, dropped }) {
+  const { rows, missing, set } = tags;
+  if (!rows.length && !missing) return null;
+  const lone = order.length === 1;
+  const droppedNames = (dropped || []).flatMap((d) => (d.usernames || []).map((u) => `@${u}`));
+  return (
+    <div style={{ marginTop: "8px", padding: "6px 8px", border: "1px solid #e3e8ef", borderRadius: "6px", background: "#fff" }}>
+      <div style={{ ...label, marginBottom: "4px" }}>Tag on Instagram</div>
+      {rows.map((r) => (
+        <div key={r.id} style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", fontWeight: 700, color: "#33415a", padding: "2px 0", flexWrap: "wrap" }}>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: "5px", cursor: disabled ? "default" : "pointer" }}>
+            <input type="checkbox" checked={r.on} disabled={disabled} onChange={(e) => set(r.id, { on: e.target.checked })} />
+            {r.name || r.id}
+          </label>
+          <a href={`https://www.instagram.com/${r.username}/`} target="_blank" rel="noopener noreferrer" style={{ color: "#c13584", fontWeight: 900, textDecoration: "none" }}>@{r.username}</a>
+          {r.status !== "verified" && <span title="Not verified in Admin → Social yet. Instagram drops a tag for a private or wrong account; the post still goes up." style={{ fontSize: "10px", fontWeight: 900, color: "#b7791f", textTransform: "uppercase" }}>{r.status}</span>}
+          {!lone && (
+            <select value={r.slide} disabled={disabled || !r.on} onChange={(e) => set(r.id, { slide: Number(e.target.value) })} style={{ ...field, width: "auto", padding: "1px 4px", fontSize: "11px" }}>
+              {order.map((sl, i) => <option key={i} value={i} disabled={!!sl.video}>Slide {i + 1}{sl.video ? " (video)" : ""}</option>)}
+            </select>
+          )}
+        </div>
+      ))}
+      {missing > 0 && (
+        <div style={{ fontSize: "11px", fontWeight: 700, color: "#8a97ab", marginTop: "2px" }}>
+          {missing} {missing === 1 ? "player has" : "players have"} no Instagram saved. Add accounts in Admin → Social.
+        </div>
+      )}
+      {droppedNames.length > 0 && (
+        <div style={{ fontSize: "11px", fontWeight: 800, color: "#a52a1e", marginTop: "4px" }}>
+          Instagram wouldn&apos;t tag {droppedNames.join(", ")} (private or wrong account?). The post went up without {droppedNames.length > 1 ? "those tags" : "that tag"}.
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Save, or save as a new post: the post's name, then the buttons. A post
 // opened from the list (or once saved) saves over itself. Publish to
 // Instagram saves first, then sends these slides — the preview, as is.
@@ -197,7 +287,7 @@ async function makeXDraft({ svgs, caption, name, postId, playerIds, subject, uid
 // new (a fresh draft) from here. videos: [{ at, path }] — uploaded clips in
 // the carousel (the Spotlight's); hold: why it can't save or publish yet;
 // saveOnly: save it, nothing else (a Short's frame — the video's made elsewhere).
-function SaveBar({ type, defaultName, stateNow, caption, svgs, post, setPost, onSaved, setMsg, playerIds = [], subject = null, videos = [], hold = "", saveOnly = false }) {
+function SaveBar({ type, defaultName, stateNow, caption, svgs, post, setPost, onSaved, setMsg, playerIds = [], subject = null, videos = [], hold = "", saveOnly = false, tagSpots = null }) {
   const { user } = useAuth();
   const sendToX = useContext(SendToXContext);
   const [name, setName] = useState(post?.name || "");
@@ -209,11 +299,20 @@ function SaveBar({ type, defaultName, stateNow, caption, svgs, post, setPost, on
   const off = busy || !svgs.length || !!hold;
   // Where it's on the site (instagramPosts.site — Post to site below).
   const [site, setSite] = useState(null);
+  const [savedTags, setSavedTags] = useState(null);
   useEffect(() => {
     setSite(null);
+    setSavedTags(null);
     if (!post?.id || saveOnly) return;
-    getDoc(doc(db, "instagramPosts", post.id)).then((d) => setSite(d.data()?.site || null)).catch(() => {});
+    getDoc(doc(db, "instagramPosts", post.id)).then((d) => {
+      setSite(d.data()?.site || null);
+      setSavedTags(Array.isArray(d.data()?.userTags) ? d.data().userTags : null);
+    }).catch(() => {});
   }, [post?.id, saveOnly]);
+  // Where the post's players are (the maker's tagSpots), else each on slide 1.
+  const idsKey = playerIds.filter(Boolean).join(",");
+  const spots = useMemo(() => (saveOnly ? [] : tagSpots || idsKey.split(",").filter(Boolean).map((id) => ({ id, slide: 0 }))), [saveOnly, tagSpots, idsKey]);
+  const tags = useInstagramTags(spots, post?.id, savedTags);
   // → the saved post's id (null when it couldn't save).
   const save = async (asNew, quiet = false) => {
     if (!svgs.length) return null;
@@ -222,6 +321,7 @@ function SaveBar({ type, defaultName, stateNow, caption, svgs, post, setPost, on
       playerIds: [...new Set(playerIds.filter(Boolean))], subject: plain(subject), updatedAt: serverTimestamp(),
       // The clips it uses (server/instagram/videos.js keeps a clip while a saved post lists it).
       videoPaths: videos.map((v) => v.path),
+      ...(saveOnly ? {} : { userTags: tags.userTags() }),
     };
     let id = asNew ? null : post?.id;
     if (id) await updateDoc(doc(db, "instagramPosts", id), data);
@@ -381,6 +481,7 @@ function SaveBar({ type, defaultName, stateNow, caption, svgs, post, setPost, on
         {busy && <span style={{ fontSize: "11px", fontWeight: 800, color: BLUE }}>{phase || "Saving…"}</span>}
         {hold && !busy && <span style={{ fontSize: "11px", fontWeight: 800, color: "#b7791f" }}>{hold}</span>}
       </div>
+      {!saveOnly && <TagPicker tags={tags} order={carouselOrder(svgs, videos)} disabled={isLocked || busy} dropped={post?.ig?.tagsDropped} />}
       {siteForm && !saveOnly && (
         <div style={{ marginTop: "8px", padding: "8px", border: "1px solid #d5dce6", borderRadius: "6px", background: "#fff", display: "flex", flexDirection: "column", gap: "6px" }}>
           <div>
@@ -879,6 +980,7 @@ function MockCarousel({ setMsg, saved, onSaved }) {
         {input && (
           <SaveBar type="mock" defaultName={`${year} Mock · ${dated || "draft"}`} caption={cap.caption} svgs={svgs} post={post} setPost={setPost} onSaved={onSaved} setMsg={setMsg}
             playerIds={[1, 2].map((part) => (halves[part] || []).find((p) => p.overall === feats[part].feature?.overall)?.player?.id)} subject={{ kind: "mock", year: String(year), weekId }}
+            tagSpots={week ? mockTagSlides(week.picks, simAd) : null}
             stateNow={() => ({ year, weekId, theme, kicker, title, dated, cutout, simAd, features: { 1: f1.feature, 2: f2.feature } })} />
         )}
         {input && <CaptionBox c={cap} />}
@@ -2059,6 +2161,7 @@ function CustomPostMaker({ setMsg, saved, onSaved }) {
         <div><button onClick={() => Promise.all(drawn.map((s) => downloadSvg(s.svg, `wedraft-post-${s.name}`))).catch((e) => setMsg(`Couldn't export: ${e.message}`))} disabled={!drawn.length || empty} style={{ ...btn(true), opacity: drawn.length && !empty ? 1 : 0.5 }}>Download {drawn.length > 1 ? `all (${drawn.length})` : "PNG"}</button></div>
         <SaveBar type="custom" defaultName={`Post · ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" })}`} caption={cap.caption} svgs={svgs} post={post} setPost={setPost} onSaved={onSaved} setMsg={setMsg}
           playerIds={customPlayerIds(input)} subject={customPlayerIds(input).length === 1 ? { kind: "player", playerId: customPlayerIds(input)[0] } : null} hold={empty ? "Add something to the post first." : ""}
+          tagSpots={customTagSpots(input)}
           stateNow={() => ({ slides, footerOn, cta })} />
         <CaptionBox c={cap} />
       </div>

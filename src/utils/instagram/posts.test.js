@@ -1,4 +1,4 @@
-import { mockSlidePlan, mockSlides, mockInput, mockCaption, playerPost, playerInput, imageUrls, IG_MAX_SLIDES } from "./posts";
+import { mockSlidePlan, mockSlides, mockTagSlides, mockInput, mockCaption, playerPost, playerInput, imageUrls, IG_MAX_SLIDES } from "./posts";
 
 // A fixed-width font stands in for Bebas Neue.
 const env = { measure: (t, size) => String(t).length * size * 0.45, images: {} };
@@ -115,4 +115,19 @@ test("a player post draws without a photo", () => {
   const svg = playerPost(playerInput({ player: player(1), school: { Color1: "#bf5700" }, kicker: "2027 NFL Draft" }), env);
   expect(svg).toContain("LAST1");
   expect(svg).toContain("2027 NFL DRAFT");
+});
+
+test("tag slides follow the carousel: round 1's two, the ad, then a round a slide", () => {
+  const d = draft(3);
+  const withAd = mockTagSlides(d.picks, true);
+  const at = (id, list) => list.find((t) => t.id === id).slide;
+  expect(at("p1", withAd)).toBe(0);
+  expect(at("p20", withAd)).toBe(1);
+  expect(at("p33", withAd)).toBe(3);
+  expect(at("p96", withAd)).toBe(4);
+  const noAd = mockTagSlides(d.picks, false);
+  expect(at("p33", noAd)).toBe(2);
+  // The same slides the carousel draws.
+  const slides = mockSlides(mockInput({ week: d, simAd: true }), env);
+  expect(slides[at("p33", withAd)].name).toBe("round-2");
 });

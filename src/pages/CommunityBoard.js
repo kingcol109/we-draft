@@ -612,7 +612,10 @@ export default function CommunityBoard() {
   const [filtersOpen, setFiltersOpen] = useState(false); // mobile filter panel
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedSchools, setSelectedSchools] = useState([]);
-  const [selectedPositions, setSelectedPositions] = useState([]);
+  // Seeded from the URL, so a first render at /community/2027/qb already
+  // agrees with it — starting empty, the URL-sync effect below read that as
+  // "no position" and navigated straight back to /community.
+  const [selectedPositions, setSelectedPositions] = useState(() => positionParams);
   // The sub-position tab (SubPositionBar) — only while OL or DB is the one position picked.
   const [selectedSub, setSelectedSub] = useState("");
   const subPosition = selectedPositions.length === 1 && SUB_TABS[selectedPositions[0]] ? selectedPositions[0] : null;

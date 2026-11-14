@@ -195,7 +195,9 @@ function MainLayout() {
             <Route path="/draftorder" element={<DraftOrderPage />} />
             <Route path="/news" element={<News />} />
             <Route path="/news/:id" element={<NewsArticle />} />
-            <Route path="/community" element={<CommunityBoard />} />
+            {/* Same gate as the year/position routes (it passes the
+                current class through) so a position chip doesn't remount the page. */}
+            <Route path="/community" element={<UnreleasedGate><CommunityBoard /></UnreleasedGate>} />
             <Route path="/community/:year" element={<UnreleasedGate><CommunityBoard /></UnreleasedGate>} />
             {/* Position-specific rankings pages, e.g. /community/2027/qb —
                 distinct from the year-only route above since it's a separate

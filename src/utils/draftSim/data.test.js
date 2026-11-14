@@ -30,3 +30,17 @@ test("expanded board: the site board plus its hidden players, each at his own cl
   // The site board itself is untouched.
   expect(data.board).toHaveLength(3);
 });
+
+test("the year after, projected: every team's own pick in each of seven rounds, in this year's round-1 order", () => {
+  const { projectedNextOrder } = require("./data");
+  const order = [
+    { Pick: 1, Round: 1, Team: "NYJ", Traded: "DAL" }, { Pick: 2, Round: 1, Team: "DAL" }, { Pick: 3, Round: 1, Team: "KC" },
+    { Pick: 4, Round: 2, Team: "KC" }, { Pick: 5, Round: 2, Team: "NYJ" }, { Pick: 6, Round: 2, Team: "DAL" },
+  ];
+  const next = projectedNextOrder(order);
+  expect(next).toHaveLength(21);
+  expect(next.slice(0, 3)).toEqual([
+    { Pick: 1, Round: 1, Team: "NYJ", Traded: null }, { Pick: 2, Round: 1, Team: "DAL", Traded: null }, { Pick: 3, Round: 1, Team: "KC", Traded: null },
+  ]);
+  expect(next[20]).toEqual({ Pick: 21, Round: 7, Team: "KC", Traded: null });
+});

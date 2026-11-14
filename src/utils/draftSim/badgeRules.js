@@ -123,6 +123,11 @@ export const BADGE_RULES = {
 
   // Advance Scouting — Completed a 2028 mock draft
   "9CaWtrPkWLxnhjCyGqS8": { scope: "run", test: (r) => r.year === "2028" },
+  // Back to Back — Finished a double: a draft carried straight into the
+  // next class's (pages/DraftSim.jsx carry over), awarded as the second ends.
+  // Its simBadges doc has this fixed id — Admin → Badges creates it from
+  // BADGE_DEFAULTS below.
+  "back-to-back": { scope: "run", test: (r) => !!r.double },
 
   // 50 Piece — Completed 50 sims
   qGa6smMXNKNJw53szOHN: { scope: "profile", test: (p) => p.sims >= 50 },
@@ -140,6 +145,13 @@ export const BADGE_RULES = {
 
 export const isWired = (id) => !!BADGE_RULES[id];
 
+// Wired badges whose simBadges doc is made from here, at a fixed id (Admin →
+// Badges lists any that don't exist yet, with a Create button) — the title,
+// description and rarity it starts with; edit them there after.
+export const BADGE_DEFAULTS = {
+  "back-to-back": { title: "Back to Back", description: "Completed a double draft: carried a draft straight over into the next class's and finished both.", rarity: "rare" },
+};
+
 // A team's class so far: its picks made and its trades (teamHaul's shape,
 // without the grades).
 export function classOf(state, team) {
@@ -151,12 +163,13 @@ export function classOf(state, team) {
 
 // The badge ids a sim's earned so far (pick rules always; final and run
 // rules once state.done). opts: { year, valueBoard, evaluated }.
-export function runBadges(state, { year, valueBoard = true, evaluated = null } = {}) {
+// double: the run is the second of a carried-over pair.
+export function runBadges(state, { year, valueBoard = true, evaluated = null, double = false } = {}) {
   const y = String(year);
   const classes = state.userTeams.map((t) => ({ ...classOf(state, t), state, year: y, valueBoard, evaluated }));
   return Object.entries(BADGE_RULES).filter(([, rule]) => {
     if (rule.scope === "pick" || (rule.scope === "final" && state.done)) return classes.some((c) => rule.test(c));
-    if (rule.scope === "run") return state.done && rule.test({ state, year: y });
+    if (rule.scope === "run") return state.done && rule.test({ state, year: y, double });
     return false;
   }).map(([id]) => id);
 }

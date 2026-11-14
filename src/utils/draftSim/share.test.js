@@ -1,4 +1,4 @@
-import { simShareText, haulRecords, mockFromSim, mockShareText, futureMoves } from "./share";
+import { simShareText, simCallToAction, haulRecords, mockFromSim, mockShareText, futureMoves } from "./share";
 import { buildBoard, initSim, makePick } from "./engine";
 
 test("share text: the heading, the grade, each pick, then the call to action", () => {
@@ -59,4 +59,15 @@ test("saved hauls note next year's picks added or given up, net of re-trades", (
   ];
   expect(futureMoves(trades)).toEqual({ got: [{ year: 2028, round: 3, team: "KC" }], gave: [{ year: 2028, round: 2, team: "CLE" }] });
   expect(futureMoves([])).toEqual({ got: [], gave: [] });
+});
+
+test("share text: a carried-over pair lists both years, then one call to action", () => {
+  const t = (team, grade) => ({ team, grade, picks: [{ overall: 5, first: "A", last: "B", pos: "QB", school: "S" }] });
+  const text = simShareText({ year: "2027", teams: [t("NYJ", "A")], teamName: (x) => x, next: { year: "2028", teams: [t("NYJ", "B+")] } });
+  const lines = text.split("\n");
+  expect(lines[0]).toBe("My 2027 NYJ Draft Sim");
+  expect(lines).toContain("My 2028 NYJ Draft Sim");
+  expect(lines).toContain("Grade: B+");
+  expect(lines.indexOf("My 2028 NYJ Draft Sim")).toBeGreaterThan(lines.indexOf("Grade: A"));
+  expect(text.endsWith(simCallToAction("2027"))).toBe(true);
 });

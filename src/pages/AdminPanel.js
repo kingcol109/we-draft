@@ -1,5 +1,6 @@
 // src/pages/AdminPanel.js
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { cleanXHandle, xProfileUrl } from "../utils/socialHandles";
 import { matchHighSchool } from "../utils/highSchoolMatch";
 import { isUnreleasedYear } from "../utils/prospectYears";
 import { igApi } from "../utils/instagram/api";
@@ -112,7 +113,7 @@ const gradeBadgeInfo = (g) => gradeDisplayMap[g] || { short: g, bg: "#5F5E5A", b
 
 const BLANK_PLAYER_FORM = {
   First: "", Last: "", HighSchool: "", State: "", School: "", Position: "", Eligible: "", RecruitYear: "",
-  Height: "", Weight: "", Birthday: "", Bio: "", Flair: "", Live: true, AdminNotes: "", Flag: "",
+  Height: "", Weight: "", Birthday: "", Bio: "", Flair: "", Live: true, AdminNotes: "", Flag: "", XHandle: "",
 };
 
 // ── Recruits (high school players, no public page yet) ──
@@ -143,7 +144,7 @@ function recruitFlairRank(flair) {
 
 const BLANK_RECRUIT_FORM = {
   First: "", Last: "", HighSchool: "", State: "", Commitment: "", Position: "", RecruitClass: "",
-  Height: "", Weight: "", Flair: "", Film: "", InstagramHandle: "", AdminNotes: "", Flag: "", Grades: {},
+  Height: "", Weight: "", Flair: "", Film: "", InstagramHandle: "", XHandle: "", AdminNotes: "", Flag: "", Grades: {},
   Strengths: [], Weaknesses: [],
 };
 
@@ -299,6 +300,7 @@ function recruitToPlayer(r, { highSchools, takenSlugs, players = [] }) {
       HighSchool: m ? m.doc.Name : r.HighSchool || "", State: m ? m.doc.State : r.State || "",
       Height: r.Height || "", Weight: r.Weight || "", Bio: "", Flair: r.Flair || "",
       Live: true, AdminNotes: r.AdminNotes || "", Flag: r.Flag || "", Slug: slug,
+      ...(r.XHandle ? { XHandle: r.XHandle } : {}),
       promotedFromRecruitId: r.id,
     },
   };
@@ -900,6 +902,7 @@ function PlayerDataSection() {
       Live: p.Live !== false,
       AdminNotes: p.AdminNotes || "",
       Flag: p.Flag || "",
+      XHandle: p.XHandle || "",
     });
     setSaveMessage("");
     setDuplicateMatches(null);
@@ -2019,6 +2022,20 @@ function PlayerDataSection() {
               </FieldRow>
               <FieldRow label="Birthday">
                 <BirthdayPicker key={selectedPlayer?.id || "new"} value={formState.Birthday || ""} onChange={(v) => handleFieldChange("Birthday", v)} />
+              </FieldRow>
+              <FieldRow label="X (Twitter)">
+                <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                  <input
+                    value={formState.XHandle || ""}
+                    onChange={(e) => handleFieldChange("XHandle", cleanXHandle(e.target.value))}
+                    placeholder="handle (no @)"
+                    style={{ ...inputStyle, flex: 1 }}
+                  />
+                  {formState.XHandle && (
+                    <a href={xProfileUrl(formState.XHandle)} target="_blank" rel="noopener noreferrer"
+                      style={{ flexShrink: 0, fontSize: "12px", fontWeight: 900, color: "#111" }}>@{formState.XHandle} ↗</a>
+                  )}
+                </div>
               </FieldRow>
               <FieldRow label="Bio (shown on player page)">
                 <textarea
@@ -6613,6 +6630,22 @@ function RecruitsSection() {
                   )}
                 </div>
                 {selectedRecruit?.promotedPlayerId && <div style={{ fontSize: "11px", fontWeight: 700, color: "#888", marginTop: "3px" }}>Promoted: manage it in Admin → Social.</div>}
+              </FieldRow>
+              {/* Carried to the player on promotion (recruitToPlayer); after
+                  that, edit it on the player. */}
+              <FieldRow label="X (Twitter)">
+                <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                  <input
+                    value={formState.XHandle || ""}
+                    onChange={(e) => handleFieldChange("XHandle", cleanXHandle(e.target.value))}
+                    placeholder="handle (no @)"
+                    style={{ ...inputStyle, flex: 1 }}
+                  />
+                  {formState.XHandle && (
+                    <a href={xProfileUrl(formState.XHandle)} target="_blank" rel="noopener noreferrer"
+                      style={{ flexShrink: 0, fontSize: "12px", fontWeight: 900, color: "#111" }}>@{formState.XHandle} ↗</a>
+                  )}
+                </div>
               </FieldRow>
               <FieldRow label="Flag">
                 <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>

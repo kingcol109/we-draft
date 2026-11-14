@@ -30,12 +30,13 @@ const metaErr = (msg, code = 9004, status = 400) => Object.assign(new Error(msg)
 
 // Meta, as far as publishing goes. script: the status_code each poll of a
 // new container returns, in turn (the last one sticks).
-function fakeMeta({ script = ["IN_PROGRESS", "FINISHED"], used = 0, publishError = null, publishThrowsAfter = false, readBackFails = false } = {}) {
+function fakeMeta({ script = ["IN_PROGRESS", "FINISHED"], used = 0, publishError = null, publishThrowsAfter = false, readBackFails = false, rejectTag = null } = {}) {
   const m = { containers: {}, media: [], calls: [], published: 0, n: 0, script, used, publishError, publishThrowsAfter, readBackFails };
   m.graph = async (path, { method = "GET", params = {} } = {}) => {
     m.calls.push({ method, path, params });
     if (path === "/IG1/content_publishing_limit") return { data: [{ quota_usage: m.used, config: { quota_total: 100, quota_duration: 86400 } }] };
     if (method === "POST" && path === "/IG1/media") {
+      if (rejectTag && String(params.user_tags || "").includes(`"${rejectTag}"`)) throw metaErr("Invalid user id", 100);
       const id = `C${++m.n}`;
       m.containers[id] = { params, polls: 0, script: [...m.script] };
       return { id };
@@ -456,4 +457,74 @@ test("deleting a post deletes its clips unless another saved post uses them", as
   bucket.files.set(shared, Buffer.from("2"));
   await pub.deletePost(ctx, "admin1", { postId: "P1" });
   assert.deepEqual([...bucket.files.keys()], [shared]);
+});
+
+test("tags: each player's current handle on his slide, a reel by username, carousel videos untagged", async () => {
+  const meta = fakeMeta();
+  const clip = `ig-videos/${"b".repeat(32)}.mp4`;
+  const db = fakeFirestore({
+    "instagramPosts/P1": {
+      type: "mock", name: "Mock", status: "ready", caption: "Mock. #NFLDraft", slides: 3, videoPaths: [clip],
+      userTags: [
+        { playerId: "row_1", username: "old_handle", slide: 0, x: 0.25, y: 0.4 },
+        { playerId: "row_2", username: "@Second.Guy", slide: 2, x: 1.7, y: -1 },
+        { playerId: "row_3", username: "on_video", slide: 1 },
+        { playerId: "row_4", username: "bad handle!", slide: 0 },
+        { playerId: "row_5", username: "far_away", slide: 9 },
+      ],
+    },
+    "instagramContacts/K1": { playerId: "row_1", instagramUsername: "New_Handle", active: true },
+    "instagramContacts/K0": { playerId: "row_2", instagramUsername: "gone", active: false },
+  });
+  const bucket = fakeBucket();
+  bucket.files.set(clip, Buffer.from("mp4"));
+  const ctx = { db, bucket, graph: meta.graph, userId: "IG1", now: () => clock, sleep: async (ms) => { clock += ms; }, pollMs: [1000] };
+  const { attempt } = await pub.startPublish(ctx, "admin1", { postId: "P1", slides: 3, videos: { 1: clip } });
+  assert.deepEqual(post(db).ig.tags, { 0: [{ username: "New_Handle", x: 0.25, y: 0.4 }], 2: [{ username: "Second.Guy", x: 1, y: 0 }] });
+  for (const i of [0, 2]) await pub.stageSlide(ctx, "admin1", { postId: "P1", attempt, index: i, jpeg: jpeg() });
+  assert.equal((await pub.runPublish(ctx, "admin1", { postId: "P1", attempt })).published, true);
+  const items = meta.calls.filter((c) => c.method === "POST" && c.path === "/IG1/media" && c.params.is_carousel_item);
+  assert.deepEqual(JSON.parse(items[0].params.user_tags), [{ username: "New_Handle", x: 0.25, y: 0.4 }]);
+  assert.equal(items[1].params.user_tags, undefined);
+  assert.deepEqual(JSON.parse(items[2].params.user_tags), [{ username: "Second.Guy", x: 1, y: 0 }]);
+  const carousel = meta.calls.find((c) => c.params.media_type === "CAROUSEL");
+  assert.equal(carousel.params.user_tags, undefined);
+
+  // A lone reel: usernames, no spot.
+  const reelMeta = fakeMeta();
+  const db2 = fakeFirestore({ "instagramPosts/P1": { type: "spotlight", status: "ready", caption: "Reel", slides: 1, videoPaths: [clip], userTags: [{ playerId: "row_9", username: "reel_guy", slide: 0, x: 0.5, y: 0.5 }] } });
+  const b2 = fakeBucket();
+  b2.files.set(clip, Buffer.from("mp4"));
+  const ctx2 = { ...ctx, db: db2, bucket: b2, graph: reelMeta.graph };
+  const s2 = await pub.startPublish(ctx2, "admin1", { postId: "P1", slides: 1, videos: { 0: clip } });
+  assert.equal((await pub.runPublish(ctx2, "admin1", { postId: "P1", attempt: s2.attempt })).published, true);
+  const reel = reelMeta.calls.find((c) => c.params.media_type === "REELS");
+  assert.deepEqual(JSON.parse(reel.params.user_tags), [{ username: "reel_guy" }]);
+});
+
+test("tags: an account Instagram won't tag drops its tags, never the post", async () => {
+  const meta = fakeMeta({ rejectTag: "private_guy" });
+  const { db, ctx } = setup(meta, { userTags: [{ playerId: "row_939", username: "private_guy", slide: 0, x: 0.5, y: 0.5 }] });
+  const { attempt } = await pub.startPublish(ctx, "admin1", { postId: "P1", slides: 1 });
+  await stageAll(ctx, attempt, 1);
+  const r = await pub.runPublish(ctx, "admin1", { postId: "P1", attempt });
+  assert.equal(r.published, true);
+  assert.equal(publishCalls(meta), 1);
+  const made = meta.calls.filter((c) => c.method === "POST" && c.path === "/IG1/media");
+  assert.equal(made.length, 2);
+  assert.equal(made[1].params.user_tags, undefined);
+  assert.equal(made[1].params.caption, "Mark Bowman. #NFLDraft");
+  const p = post(db);
+  assert.equal(p.status, "published");
+  assert.deepEqual(p.ig.tagsDropped.map((d) => [d.slide, d.usernames]), [[0, ["private_guy"]]]);
+});
+
+test("tags: a post without userTags sends none", async () => {
+  const meta = fakeMeta();
+  const { db, ctx } = setup(meta);
+  const { attempt } = await pub.startPublish(ctx, "admin1", { postId: "P1", slides: 1 });
+  assert.deepEqual(post(db).ig.tags, {});
+  await stageAll(ctx, attempt, 1);
+  await pub.runPublish(ctx, "admin1", { postId: "P1", attempt });
+  assert.equal(meta.calls.find((c) => c.method === "POST" && c.path === "/IG1/media").params.user_tags, undefined);
 });

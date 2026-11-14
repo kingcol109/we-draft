@@ -39,6 +39,10 @@ const BODY = "Arial, sans-serif";
 // labels and numbers flip over where they sit, the pick card turns over,
 // one soft light sweep crosses the stage per beat. Nothing flashes.
 export const SIM_CSS = `
+  [data-sim-fs]:fullscreen { background: #070d18; overflow: hidden; }
+  [data-sim-fs]:fullscreen [data-sim-col] { max-width: none !important; padding: 0 !important; margin: 0 !important; }
+  .wd-fit-school { display: none; }
+  @container (min-width: 300px) { .wd-fit-school { display: block; } }
   @keyframes wdSimFlip { from { opacity: 0; transform: perspective(600px) rotateX(-70deg); } to { opacity: 1; transform: none; } }
   @keyframes wdSimCardFlip { from { opacity: 0; transform: perspective(900px) rotateY(-75deg) scale(.97); } to { opacity: 1; transform: none; } }
   @keyframes wdSimSweep { from { transform: translateX(-120%) skewX(-18deg); } to { transform: translateX(380%) skewX(-18deg); } }
@@ -99,7 +103,7 @@ function TeamLogo({ brand, team, size, dark = true }) {
   const src = dark ? brand.LogoDark || brand.Logo1 : brand.Logo1 || brand.LogoDark;
   return src
     ? <img src={src} alt={team} style={{ width: size, height: size, objectFit: "contain", flexShrink: 0 }} />
-    : <span style={{ width: size, height: size, display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 900, color: "#fff", fontSize: size * 0.3, flexShrink: 0 }}>{team}</span>;
+    : <span style={{ width: size, height: size, display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 900, color: "#fff", fontSize: typeof size === "number" ? size * 0.3 : 11, flexShrink: 0 }}>{team}</span>;
 }
 
 // "Leave the draft?" before Settings — fixed over the page (and over the
@@ -271,6 +275,10 @@ function BroadcastBar({ s, data, isMobile, onSettings }) {
 // Desktop: the sim's frame (DraftSim.jsx DesktopFill, data-sim-frame) to
 // the whole screen and back — only where the browser allows it.
 const SIM_FRAME = "[data-sim-frame]";
+// What goes fullscreen: the page's wrapper around the run (pages/DraftSim.jsx
+// data-sim-fs), which stays put from one run to the next — so a double's
+// screen in between and its second draft stay fullscreen — else the frame.
+const SIM_FS = "[data-sim-fs]";
 function FullscreenButton() {
   const [on, setOn] = useState(() => !!document.fullscreenElement);
   useEffect(() => {
@@ -281,7 +289,7 @@ function FullscreenButton() {
   if (!document.fullscreenEnabled) return null;
   const toggle = () => {
     if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
-    else (document.querySelector(SIM_FRAME) || document.documentElement).requestFullscreen?.().catch(() => {});
+    else (document.querySelector(SIM_FS) || document.querySelector(SIM_FRAME) || document.documentElement).requestFullscreen?.().catch(() => {});
   };
   // Just the icon, beside Settings: arrows out to go fullscreen, in to leave.
   return (
@@ -999,7 +1007,17 @@ const EMPTY = { padding: 20, color: "#6f7f99", fontSize: 13, fontFamily: BODY };
 // Draft tab: the picks so far, round by round (or just the user's).
 // onTradePick(pick): open a pick that's still to come in Trades. fit (the
 // anchored desktop screen): the round's rows share the console's height,
-// so every pick shows without scrolling.
+// so every pick shows without scrolling — and each pick grows into its
+// cell (FIT: sizes in container units of the cell, capped), with the
+// player's school logo at its right.
+// (Each by the cell's height and width both, so a short, wide cell and a
+// tall, narrow one each stay in proportion; the school logo only in a cell
+// wide enough for it — .wd-fit-school in SIM_CSS.)
+const FIT = {
+  num: "clamp(11px, min(18cqh, 5.5cqw), 20px)", logo: "clamp(22px, min(58cqh, 17cqw), 60px)", name: "clamp(12px, min(26cqh, 7cqw), 26px)",
+  sub: "clamp(10px, min(16cqh, 4.6cqw), 16px)", school: "clamp(0px, min(52cqh, 12cqw), 56px)", gap: "clamp(6px, min(10cqh, 3cqw), 16px)",
+  pad: "clamp(2px, 6cqh, 10px) clamp(8px, 4cqw, 18px)",
+};
 function DraftTab({ s, data, isMobile, onTradePick, fit = false }) {
   const rounds = [...new Set(s.sim.picks.map((p) => p.round))];
   const current = currentPick(s.sim);
@@ -1029,19 +1047,23 @@ function DraftTab({ s, data, isMobile, onTradePick, fit = false }) {
             <div key={p.overall} onClick={tradeable ? () => onTradePick(p) : undefined} role={tradeable ? "button" : undefined} tabIndex={tradeable ? 0 : undefined}
               onKeyDown={tradeable ? (e) => { if (e.key === "Enter") onTradePick(p); } : undefined}
               title={tradeable ? `Trade ${mine ? "this pick" : `for No. ${p.overall}`}` : undefined} style={{
-              display: "flex", alignItems: "center", gap: 7, padding: fit ? "2px 8px" : "7px 8px", borderRadius: 10, minWidth: 0, minHeight: 0, overflow: "hidden", cursor: tradeable ? "pointer" : "default",
+              display: "flex", alignItems: "center", gap: fit ? FIT.gap : 7, padding: fit ? FIT.pad : "7px 8px", borderRadius: 10, minWidth: 0, minHeight: 0, overflow: "hidden", cursor: tradeable ? "pointer" : "default",
+              ...(fit ? { containerType: "size" } : {}),
               background: live ? "rgba(246,162,29,0.16)" : pl ? "#121c2f" : "#0b1322",
               border: `1px solid ${live ? GOLD : mine ? "#3a5a8c" : "#1a2640"}`,
             }}>
-              <span style={{ color: "#6f7f99", fontWeight: 900, fontSize: 11, width: 22, textAlign: "right", flexShrink: 0 }}>{p.overall}</span>
-              <TeamLogo brand={b} team={p.owner} size={22} />
-              <span style={{ minWidth: 0, flex: 1, ...(fit ? { lineHeight: 1.1 } : {}) }}>
+              <span style={{ color: "#6f7f99", fontWeight: 900, fontSize: fit ? FIT.num : 11, width: fit ? "1.9em" : 22, textAlign: "right", flexShrink: 0 }}>{p.overall}</span>
+              <TeamLogo brand={b} team={p.owner} size={fit ? FIT.logo : 22} />
+              <span style={{ minWidth: 0, flex: 1, ...(fit ? { lineHeight: 1.15 } : {}) }}>
                 {pl
-                  ? <Link className="wd-sim-plink" to={`/player/${pl.Slug}`} target="_blank" rel="noopener noreferrer" style={{ display: "block", textDecoration: "none" }}><PlayerName p={pl} style={{ color: "#fff", fontSize: 12, fontWeight: 900 }} /></Link>
-                  : <span style={{ display: "block", color: "#55657e", fontSize: 12, fontWeight: 900, whiteSpace: "nowrap" }}>{live ? "On the clock" : "—"}</span>}
+                  ? <Link className="wd-sim-plink" to={`/player/${pl.Slug}`} target="_blank" rel="noopener noreferrer" style={{ display: "block", textDecoration: "none" }}><PlayerName p={pl} style={{ color: "#fff", fontSize: fit ? FIT.name : 12, fontWeight: 900 }} /></Link>
+                  : <span style={{ display: "block", color: live ? GOLD : "#55657e", fontSize: fit ? FIT.name : 12, fontWeight: 900, whiteSpace: "nowrap" }}>{live ? "On the clock" : "—"}</span>}
                 {/* Always two lines, so an open slot is already its full size and just fills in. */}
-                <span style={{ display: "block", color: "#8b9bb4", fontSize: 10, fontWeight: 800, textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pl ? `${pl.Position} ${pl.School}` : " "}</span>
+                <span style={{ display: "block", color: "#8b9bb4", fontSize: fit ? FIT.sub : 10, fontWeight: 800, textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {pl ? `${pl.Position} ${pl.School}${fit && p.via ? ` · via ${p.via}` : ""}` : fit && p.via ? `via ${p.via}` : " "}
+                </span>
               </span>
+              {fit && pl && logoOf(pl) && <img className="wd-fit-school" src={logoOf(pl)} alt="" style={{ width: FIT.school, height: FIT.school, objectFit: "contain", flexShrink: 0, opacity: 0.9 }} />}
             </div>
           );
         })}
@@ -1100,7 +1122,8 @@ function MobileDraftList({ s, data, rounds, shownRound, setRound, picks, current
 
 // My Picks tab: the user's teams' selections so far — pick, player, board
 // value or reach, the need he filled — then the picks still to come, with
-// how far off each one is.
+// how far off each one is; in a sim carried over from last year's
+// (data.prior), the picks each team made in that one after them.
 function MyPicksTab({ s, data, isMobile }) {
   const teams = s.sim.userTeams;
   return (
@@ -1169,10 +1192,38 @@ function MyPicksTab({ s, data, isMobile }) {
                 </div>
               );
             })}
+            <PriorPicks data={data} team={team} isMobile={isMobile} />
           </div>
         );
       })}
     </div>
+  );
+}
+
+// A team's picks in last year's sim, under its picks in this one (My Picks).
+function PriorPicks({ data, team, isMobile }) {
+  const prior = (data.prior?.picks || []).filter((p) => p.owner === team && p.player).sort((a, b) => a.overall - b.overall);
+  if (!prior.length) return null;
+  return (
+    <>
+      <div style={{ padding: "12px 14px 4px", color: PRIOR, fontSize: 10, fontWeight: 900, letterSpacing: "0.16em", borderTop: "1px solid #1f2b42" }}>YOUR {data.prior.year} PICKS</div>
+      {prior.map((p) => {
+        const pl = p.player;
+        return (
+          <div key={p.overall} style={{ display: "flex", alignItems: "center", gap: 10, padding: isMobile ? "9px 14px" : "8px 14px", borderBottom: "1px solid #18233a", minWidth: 0 }}>
+            <span style={{ color: "#6f7f99", fontWeight: 900, fontSize: 11, width: isMobile ? 30 : 52, flexShrink: 0, lineHeight: 1.25, textAlign: "center", whiteSpace: "nowrap" }}>R{p.round}<br />{isMobile ? "" : "No. "}{p.overall}</span>
+            {logoOf(pl) ? <img src={logoOf(pl)} alt="" style={{ width: 26, height: 26, objectFit: "contain", flexShrink: 0 }} /> : <span style={{ width: 26, flexShrink: 0 }} />}
+            <span style={{ flex: 1, minWidth: 0 }}>
+              {pl.Slug
+                ? <Link className="wd-sim-plink" to={`/player/${pl.Slug}`} target="_blank" rel="noopener noreferrer" style={{ display: "block", textDecoration: "none" }}><PlayerName p={pl} style={{ color: "#fff", fontWeight: 900, fontSize: 13 }} /></Link>
+                : <PlayerName p={pl} style={{ color: "#fff", fontWeight: 900, fontSize: 13 }} />}
+              <span style={{ display: "block", color: "#8b9bb4", fontSize: 11, fontWeight: 800, textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pl.Position} · {pl.School}</span>
+            </span>
+            <span style={{ flexShrink: 0, borderRadius: 5, padding: "1px 6px", fontSize: 9, fontWeight: 900, letterSpacing: "0.08em", background: PRIOR, color: "#111" }}>{data.prior.year}</span>
+          </div>
+        );
+      })}
+    </>
   );
 }
 
@@ -1591,7 +1642,9 @@ function DavinCard({ davin, school }) {
 
 // Roster tab: a team's current roster by position group, in the team
 // page's Depth Chart order (utils/nflRoster.js), with the rookies it's
-// drafted in this sim slotted into their groups. Follows the team on the
+// drafted in this sim slotted into their groups — and, in a sim carried
+// over from last year's (data.prior — weeklyMock.js carryOverData), the
+// players it took in that one. Follows the team on the
 // clock until another team is picked.
 const rosterCache = {};
 const loadRoster = (team) => rosterCache[team] || (rosterCache[team] = Promise.all([
@@ -1624,7 +1677,11 @@ function RosterTab({ s, data, isMobile }) {
     const pl = s.sim.byId[p.selection];
     return { id: `sim-${pl.id}`, fullName: `${pl.First} ${pl.Last}`, position: subsOf(pl)[0] || pl.Position, rosterStatus: "active", rookie: p, prospect: pl };
   });
-  const groups = got ? groupRoster([...got.roster, ...rookies], got.order) : null;
+  const prior = (data.prior?.picks || []).filter((p) => p.owner === team && p.player).map((p) => ({
+    id: `prior-${p.player.id}`, fullName: `${p.player.First} ${p.player.Last}`, position: subsOf(p.player)[0] || p.player.Position,
+    rosterStatus: "active", rookie: p, prospect: p.player, priorYear: data.prior.year,
+  }));
+  const groups = got ? groupRoster([...got.roster, ...prior, ...rookies], got.order) : null;
   const look = colors(brand);
   const nameOf = (t) => (brandOf(data, t).Team ? `${brandOf(data, t).City || ""} ${brandOf(data, t).Team}`.trim() : t);
   return (
@@ -1632,6 +1689,7 @@ function RosterTab({ s, data, isMobile }) {
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid #1f2b42", flexWrap: "wrap" }}>
         <TeamLogo brand={brand} team={team} size={24} />
         <span style={{ color: "#fff", fontWeight: 900, fontSize: 12, letterSpacing: "0.12em" }}>{(brand.Team || team).toUpperCase()} ROSTER</span>
+        {prior.length > 0 && <span style={{ color: PRIOR, fontSize: 11, fontWeight: 900, letterSpacing: "0.08em" }}>+{prior.length} FROM {data.prior.year}</span>}
         {rookies.length > 0 && <span style={{ color: GOLD, fontSize: 11, fontWeight: 900, letterSpacing: "0.08em" }}>+{rookies.length} DRAFTED</span>}
         <select value={team} onChange={(e) => setChosen(e.target.value)} aria-label="Team" style={{ ...selectStyle, marginLeft: "auto", padding: "5px 10px", fontSize: 12 }}>
           {NFL_TEAM_ABBRS.map((t) => <option key={t} value={t}>{nameOf(t)}{s.sim.userTeams.includes(t) ? " (your team)" : t === onClock ? " (on the clock)" : ""}</option>)}
@@ -1655,8 +1713,11 @@ function RosterTab({ s, data, isMobile }) {
 }
 
 const ROSTER_TAGS = { reserve: "IR", suspended: "SUSP", ps: "PS" };
+// Last year's picks in a carried-over sim, apart from this draft's (gold).
+const PRIOR = "#58a6ff";
 function RosterChip({ pl, c1, year }) {
   const r = pl.rookie;
+  const hue = pl.priorYear ? PRIOR : GOLD;
   const tag = ROSTER_TAGS[pl.rosterStatus];
   const exp = pl.experience === 0 ? "Rookie" : pl.experience != null ? `${pl.experience} yr${pl.experience === 1 ? "" : "s"}` : null;
   const sub = r
@@ -1665,14 +1726,14 @@ function RosterChip({ pl, c1, year }) {
   return (
     <div style={{
       display: "flex", alignItems: "center", gap: 7, padding: "6px 9px", borderRadius: 10, minWidth: 0,
-      background: r ? "rgba(246,162,29,0.12)" : "#121c2f", border: `1px solid ${r ? GOLD : "#1a2640"}`,
-      borderLeft: `3px solid ${r ? GOLD : c1}`, opacity: tag ? 0.6 : 1,
+      background: r ? (pl.priorYear ? "rgba(88,166,255,0.12)" : "rgba(246,162,29,0.12)") : "#121c2f", border: `1px solid ${r ? hue : "#1a2640"}`,
+      borderLeft: `3px solid ${r ? hue : c1}`, opacity: tag ? 0.6 : 1,
     }}>
       <span style={{ minWidth: 0, flex: 1 }}>
         <span style={{ display: "block", color: "#fff", fontSize: 12, fontWeight: 900, textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pl.fullName}</span>
-        <span style={{ display: "block", color: r ? GOLD : "#8b9bb4", fontSize: 10, fontWeight: 800, fontFamily: BODY, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sub}</span>
+        <span style={{ display: "block", color: r ? hue : "#8b9bb4", fontSize: 10, fontWeight: 800, fontFamily: BODY, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sub}</span>
       </span>
-      {(r || tag) && <span style={{ flexShrink: 0, borderRadius: 5, padding: "1px 5px", fontSize: 9, fontWeight: 900, letterSpacing: "0.08em", background: r ? GOLD : "#2a3550", color: r ? "#111" : "#c9d4e5" }}>{r ? `${year} DRAFT PICK` : tag}</span>}
+      {(r || tag) && <span style={{ flexShrink: 0, borderRadius: 5, padding: "1px 5px", fontSize: 9, fontWeight: 900, letterSpacing: "0.08em", background: r ? hue : "#2a3550", color: r ? "#111" : "#c9d4e5" }}>{r ? `${pl.priorYear || year} DRAFT PICK` : tag}</span>}
     </div>
   );
 }
