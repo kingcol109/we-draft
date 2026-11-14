@@ -1,6 +1,7 @@
 // src/pages/AdminPanel.js
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { matchHighSchool } from "../utils/highSchoolMatch";
+import { isUnreleasedYear } from "../utils/prospectYears";
 import { igApi } from "../utils/instagram/api";
 import { collection, collectionGroup, getDocs, getDoc, addDoc, doc, updateDoc, setDoc, deleteDoc, deleteField, query, where, serverTimestamp, arrayUnion, arrayRemove, writeBatch, increment, Timestamp } from "firebase/firestore";
 import AdminDailyVisitors from "../components/AdminDailyVisitors";
@@ -3780,7 +3781,8 @@ function CompSnapshotRebuild({ records }) {
         nflTeams: nflSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
         coaches: coachSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
         latestDraftYear: LATEST_DRAFT_YEAR,
-        activeYears: ACTIVE_YEARS,
+        // Unreleased classes (utils/prospectYears.js) stay out of the public snapshots.
+        activeYears: ACTIVE_YEARS.filter((y) => !isUnreleasedYear(y)),
       });
       built.forEach(({ id, data }) => {
         const bytes = new Blob([JSON.stringify(data)]).size;

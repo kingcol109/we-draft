@@ -13,8 +13,32 @@
 import { useEffect, useState } from "react";
 import { collection, getDocs, limit, query, where } from "firebase/firestore";
 import { db } from "../firebase";
+import { useAuth } from "../context/AuthContext";
 
 export const PROSPECT_YEARS = ["2027", "2028", "2029", "2030"];
+
+// Unreleased classes: their players exist, but only admins can see them —
+// player pages 404, the class board isn't routable, and they're left off
+// team/HS pages, boards, comparison, the sitemap and the snapshots. Take a
+// year out of this list to launch the class publicly.
+export const UNRELEASED_YEARS = ["2030"];
+export const isUnreleasedYear = (y) => UNRELEASED_YEARS.includes(String(y ?? "").slice(0, 4));
+// A player slug carries its class: "first-last-2030-pos".
+export const isUnreleasedSlug = (slug) => UNRELEASED_YEARS.some((y) => String(slug || "").includes(`-${y}-`));
+export const PUBLIC_PROSPECT_YEARS = PROSPECT_YEARS.filter((y) => !isUnreleasedYear(y));
+
+// { isAdmin, authReady } — unreleased classes are shown to admins only.
+export function useIsAdmin() {
+  const { user, profile, authReady } = useAuth();
+  return { isAdmin: !!user && profile?.role === "admin", authReady };
+}
+
+// The prospect classes this viewer may see: all for admins, the released
+// ones for everyone else.
+export function useProspectYears() {
+  const { isAdmin } = useIsAdmin();
+  return isAdmin ? PROSPECT_YEARS : PUBLIC_PROSPECT_YEARS;
+}
 // Classes known to have players — no lookup needed for these.
 const ESTABLISHED = new Set(["2027", "2028", "2029"]);
 
@@ -32,6 +56,7 @@ function classHasPlayers(year) {
 // The prospect years to show as tabs/chips: the established ones at once,
 // a newer class once it has a player. `years` defaults to PROSPECT_YEARS.
 export function useVisibleProspectYears(years = PROSPECT_YEARS) {
+  const { isAdmin } = useIsAdmin();
   const [shown, setShown] = useState(() => years.filter((y) => ESTABLISHED.has(y)));
   const key = years.join(",");
   useEffect(() => {
@@ -42,5 +67,5 @@ export function useVisibleProspectYears(years = PROSPECT_YEARS) {
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
-  return shown;
+  return isAdmin ? shown : shown.filter((y) => !isUnreleasedYear(y));
 }

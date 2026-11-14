@@ -4,7 +4,8 @@ import { collection, getDocs } from "firebase/firestore";
 export default async function handler(req, res) {
   try {
     const snapshot = await getDocs(collection(db, "players"));
-    const slugs = snapshot.docs.map((doc) => doc.data().Slug);
+    // Unreleased classes (src/utils/prospectYears.js) stay out.
+    const slugs = snapshot.docs.filter((doc) => String(doc.data().Eligible) !== "2030").map((doc) => doc.data().Slug);
 
     const baseUrl = "we-draft.com"; // change to your domain
     const urls = slugs

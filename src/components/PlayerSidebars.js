@@ -24,6 +24,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { collection, getDocs, query, where, orderBy, limit } from "firebase/firestore";
 import { db } from "../firebase";
+import { isUnreleasedYear } from "../utils/prospectYears";
 
 const SITE_BLUE = "#0055a5";
 const SIDEBAR_NEWS_LIMIT = 8;
@@ -46,7 +47,7 @@ export async function fetchTeammateVideos(player, max = 3) {
   const now = new Date();
   const minClass = now.getFullYear() + (now.getMonth() >= 4 ? 1 : 0);
   const mates = await getDocs(query(collection(db, "players"), where("School", "==", player.School)));
-  const ids = mates.docs.filter((d) => d.id !== player.id && Number(d.data().Eligible) >= minClass).map((d) => d.id);
+  const ids = mates.docs.filter((d) => d.id !== player.id && Number(d.data().Eligible) >= minClass && !isUnreleasedYear(d.data().Eligible)).map((d) => d.id);
   if (!ids.length) return [];
   const idSet = new Set(ids);
   const chunks = [];

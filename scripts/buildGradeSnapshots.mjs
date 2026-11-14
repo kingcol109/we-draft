@@ -24,7 +24,9 @@ const { getFirestore } = require("./firebaseAdmin");
 const { FieldValue } = require("firebase-admin/firestore");
 
 // Keep in sync with buildSiteSnapshots.mjs.
-const ACTIVE_YEARS = ["2027", "2028", "2029", "2030"]; // src/utils/prospectYears.js
+// 2030 is unreleased (src/utils/prospectYears.js UNRELEASED_YEARS): admin-only
+// until launch, so it stays out of the public snapshots. Add it back here at launch.
+const ACTIVE_YEARS = ["2027", "2028", "2029"]; // src/utils/prospectYears.js
 const EVAL_READ_CHUNK = 100;
 const DRY_RUN = process.argv.includes("--dry-run");
 

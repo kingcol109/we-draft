@@ -25,6 +25,10 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
+// Unreleased draft classes — admin-only, kept out of the sitemap. Keep in sync
+// with src/utils/prospectYears.js UNRELEASED_YEARS.
+const UNRELEASED_YEARS = ["2030"];
+
 /**
  * SAFETY:
  * Slug must be lowercase, hyphenated, ascii only
@@ -149,6 +153,8 @@ async function generateSitemap() {
   for (const doc of allPlayers) {
     const data = doc.data();
     const slug = data?.Slug;
+    // Unreleased classes are admin-only (src/utils/prospectYears.js).
+    if (UNRELEASED_YEARS.includes(String(data?.Eligible))) continue;
 
     if (!isValidSlug(slug)) {
       console.warn("⚠️ Skipping invalid player slug:", slug);
@@ -332,8 +338,9 @@ for (const doc of allTeams) {
   ========================= */
   const COMMUNITY_ARCHIVE_YEARS = ["2026"];
   // 2030 (src/utils/prospectYears.js) is listed only once it has players,
-  // the same rule the board's year tabs follow.
+  // the same rule the board's year tabs follow — and not while unreleased.
   const COMMUNITY_ACTIVE_YEARS = ["2027", "2028", "2029", "2030"]
+    .filter((y) => !UNRELEASED_YEARS.includes(y))
     .filter((y) => y <= "2029" || allPlayers.some((d) => String(d.data()?.Eligible) === y));
   const COMMUNITY_POSITIONS = [
     "QB", "RB", "WR", "TE", "OL", "OT", "OG", "C",

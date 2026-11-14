@@ -19,7 +19,7 @@ import { scheduleGameHref } from "../utils/live";
 import { cssRect } from "../utils/pageZoom";
 import { textOn } from "../utils/teamColors";
 import FitText from "../components/FitLine";
-import { PROSPECT_YEARS } from "../utils/prospectYears";
+import { PROSPECT_YEARS, useProspectYears } from "../utils/prospectYears";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -943,7 +943,10 @@ export default function TeamPage() {
   const { teamId: slug } = useParams();
   const [school, setSchool] = useState(null);
   const [branding, setBranding] = useState(null);
-  const [prospects, setProspects] = useState({});
+  const [prospectsByYear, setProspects] = useState({});
+  // An unreleased class (utils/prospectYears.js) only shows to admins.
+  const prospectYears = useProspectYears();
+  const prospects = useMemo(() => Object.fromEntries(Object.entries(prospectsByYear).filter(([yr]) => prospectYears.includes(yr))), [prospectsByYear, prospectYears]);
   const [archivePlayers, setArchivePlayers] = useState([]);
   const [historicalPlayers, setHistoricalPlayers] = useState([]);
   const [draftMap, setDraftMap] = useState({});
@@ -1424,7 +1427,7 @@ export default function TeamPage() {
   const sideC2 = colorLightness(sideAccentRaw) < 0.9 ? sideAccentRaw : GOLD;
   const sideTint = `color-mix(in srgb, ${sideC1} 7%, #fff)`;
   const sideSelfTint = `color-mix(in srgb, ${sideC2} 14%, #fff)`;
-  const totalProspects = PROSPECT_YEARS.reduce((acc, yr) => acc + (prospects[yr]?.length || 0), 0);
+  const totalProspects = prospectYears.reduce((acc, yr) => acc + (prospects[yr]?.length || 0), 0);
 
   // Blocks first paint only until branding (the school doc itself) has
   // resolved — the fast first query in the effect above — not the whole
@@ -1442,10 +1445,10 @@ export default function TeamPage() {
   // present, plus the distinct positions among this team's prospects (e.g.
   // "QB, WR, EDGE") — both pulled from already-loaded data rather than
   // hardcoded, so the description stays accurate as rosters change. ──
-  const allProspectsFlat = PROSPECT_YEARS.flatMap((yr) => prospects[yr] || []);
+  const allProspectsFlat = prospectYears.flatMap((yr) => prospects[yr] || []);
   const prospectPositions = [...new Set(allProspectsFlat.map((p) => p.Position).filter(Boolean))];
-  const yearsWithProspects = PROSPECT_YEARS.filter((yr) => (prospects[yr]?.length || 0) > 0);
-  const draftClassesLabel = yearsWithProspects.length > 0 ? yearsWithProspects.join(", ") : PROSPECT_YEARS.join(", ");
+  const yearsWithProspects = prospectYears.filter((yr) => (prospects[yr]?.length || 0) > 0);
+  const draftClassesLabel = yearsWithProspects.length > 0 ? yearsWithProspects.join(", ") : prospectYears.join(", ");
 
   const pageDescription = `${teamLabel} NFL Draft prospects — scouting reports, community grades, and mock draft projections for every ${canonicalSchool} prospect in the ${draftClassesLabel} draft classes${prospectPositions.length > 0 ? `, including ${prospectPositions.join(", ")} evaluations` : ""}. Plus ${canonicalSchool} draft history back to 2000 — free on We-Draft.com.`;
 

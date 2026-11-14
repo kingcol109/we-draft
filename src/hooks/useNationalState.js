@@ -50,6 +50,7 @@ import { db } from "../firebase";
 import { useLiveGameDocs } from "./useLiveFeed";
 import { communityFor, gradeLabel } from "../utils/communityGrades";
 import { useFbsTeamStats } from "../utils/fbsTeamStats";
+import { isUnreleasedYear } from "../utils/prospectYears";
 import {
   railCards, railAt, topPerformers, isFinalEntry, playerOfGame, topPerformanceList, idleStories, PERF_ROTATE_MS, nationalPhase, scoreChanges, scoreSnapshot, NATIONAL_PROMOS, storylines, quietStory,
   eventForBigPlay, eventForNationalInsight, nationalInsights, queueBigPlays, playerLinesFor, leadersFromBox,
@@ -99,7 +100,7 @@ function loadSchoolProspects(school) {
   if (!schoolCache.has(school)) {
     schoolCache.set(school, (async () => {
       const snap = await getDocs(query(collection(db, "players"), where("School", "==", school)));
-      const list = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((p) => p.Slug && !HIDDEN_LIVE.includes(p.Live) && p.Eligible != null);
+      const list = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((p) => p.Slug && !HIDDEN_LIVE.includes(p.Live) && p.Eligible != null && !isUnreleasedYear(p.Eligible));
       const comm = list.length ? await communityFor(list.map((p) => p.id)).catch(() => ({})) : {};
       return list.map((p) => ({
         id: p.id, name: `${p.First || ""} ${p.Last || ""}`.trim(), slug: p.Slug, pos: p.Position || null, cls: String(p.Eligible),

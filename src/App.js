@@ -16,6 +16,7 @@ import Footer from "./components/Footer";
 import LoadingSpinner from "./components/LoadingSpinner";
 import PlayerHeaderShell from "./components/PlayerHeaderShell";
 import { prefetchPlayerFromUrl } from "./utils/playerPrefetch";
+import { isUnreleasedYear, isUnreleasedSlug, useIsAdmin } from "./utils/prospectYears";
 import { WEEKLY_YEARS, MAIN_WEEKLY_YEAR, weeklyMockHref, weeklyYearHref, hasTeamPages } from "./utils/weeklyMockNews";
 
 // A cold landing on /player/:slug starts its player query now, alongside
@@ -194,18 +195,18 @@ function MainLayout() {
             <Route path="/news" element={<News />} />
             <Route path="/news/:id" element={<NewsArticle />} />
             <Route path="/community" element={<CommunityBoard />} />
-            <Route path="/community/:year" element={<CommunityBoard />} />
+            <Route path="/community/:year" element={<UnreleasedGate><CommunityBoard /></UnreleasedGate>} />
             {/* Position-specific rankings pages, e.g. /community/2027/qb —
                 distinct from the year-only route above since it's a separate
                 two-segment path shape; React Router matches by segment count/
                 literal-vs-dynamic parts, not route order, so this coexists
                 cleanly with /community/:year. */}
-            <Route path="/community/:year/:position" element={<CommunityBoard />} />
-            <Route path="/player/:slug" element={<Suspense fallback={<PlayerHeaderShell />}><PlayerProfile /></Suspense>} />
+            <Route path="/community/:year/:position" element={<UnreleasedGate><CommunityBoard /></UnreleasedGate>} />
+            <Route path="/player/:slug" element={<UnreleasedGate><Suspense fallback={<PlayerHeaderShell />}><PlayerProfile /></Suspense></UnreleasedGate>} />
             <Route path="/comparison" element={<Comparison />} />
             {/* /comparison/:slug preloads that prospect — same Slug format
                 /player/:slug uses (e.g. "jeremiah-smith-2027-wr"). */}
-            <Route path="/comparison/:slug" element={<Comparison />} />
+            <Route path="/comparison/:slug" element={<UnreleasedGate><Comparison /></UnreleasedGate>} />
             {/* Redirect old /player2 URLs to canonical /player URLs */}
             <Route path="/player2/:slug" element={<RedirectPlayer2 />} />
             <Route path="/team/:teamId" element={<TeamPage />} />
@@ -255,7 +256,7 @@ function MainLayout() {
             <Route path="/privacy" element={<PrivacyPolicy />} />
             <Route path="/guidelines" element={<CommunityGuidelines />} />
             <Route path="/cookies" element={<CookiePolicy />} />
-            <Route path="*" element={<div style={{ textAlign: "center", color: "red", fontWeight: "bold" }}>404 – Route not found</div>} />
+            <Route path="*" element={<RouteNotFound />} />
           </Routes>
         </Suspense>
       </div>
@@ -294,6 +295,21 @@ function TeamMockYear() {
   if (WEEKLY_YEARS.includes(year) && !hasTeamPages(year)) return <Navigate to={weeklyYearHref(year)} replace />;
   if (year === MAIN_WEEKLY_YEAR || (mockId !== team && WEEKLY_YEARS.includes(year))) return <Navigate to={weeklyMockHref(team, year)} replace />;
   return <WeeklyTeamMock key={`${team}-${year}`} team={WEEKLY_YEARS.includes(year) && /^[a-z]{2,3}$/.test(team) ? team.toUpperCase() : ""} year={year} />;
+}
+
+const RouteNotFound = () => <div style={{ textAlign: "center", color: "red", fontWeight: "bold" }}>404 – Route not found</div>;
+
+// An unreleased class (utils/prospectYears.js UNRELEASED_YEARS) is admin-only:
+// its board (/community/:year), player pages and comparison pages (slug
+// carries the class) 404 for everyone else. Waits on auth so a signed-in
+// admin isn't turned away on a fresh load.
+function UnreleasedGate({ children }) {
+  const { year, slug } = useParams();
+  const { isAdmin, authReady } = useIsAdmin();
+  const hidden = (year && isUnreleasedYear(year)) || (slug && isUnreleasedSlug(slug));
+  if (!hidden || isAdmin) return children;
+  if (!authReady) return <LoadingSpinner size={48} minHeight="calc(60vh / var(--pz, 1))" />;
+  return <RouteNotFound />;
 }
 
 // Redirect /player2/:slug → /player/:slug

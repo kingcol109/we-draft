@@ -44,7 +44,7 @@ import {
   decodeCompSnapshotRows, COMP_SNAPSHOT_VERSION, recommendedCompWindow, inRecommendedWindow, doubleExtendedFor,
 } from "../utils/historicalStats";
 import { cssRect } from "../utils/pageZoom";
-import { PROSPECT_YEARS } from "../utils/prospectYears";
+import { PROSPECT_YEARS, isUnreleasedYear } from "../utils/prospectYears";
 import NflFitView from "../components/NflFitView";
 import { communityAverage } from "../utils/gradeWindow";
 
@@ -554,6 +554,8 @@ function fetchActivePlayers() {
         }
         return fetchActivePlayersLive();
       })
+      // An unreleased class (utils/prospectYears.js) stays out of search.
+      .then((rows) => rows.filter((r) => !isUnreleasedYear(r.Eligible)))
       .catch((e) => { activePlayersPromise = null; throw e; });
   }
   return activePlayersPromise;

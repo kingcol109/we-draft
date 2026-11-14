@@ -24,6 +24,7 @@ import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog"
 import { useCurrentRankMap } from "../utils/rankings";
 import { useSchools } from "../components/DraftArchiveList";
 import { currentDraftClass } from "../utils/eligibility";
+import { isUnreleasedYear, isUnreleasedSlug, useIsAdmin } from "../utils/prospectYears";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -147,6 +148,7 @@ const TABS = [
 ];
 
 export default function HighSchoolTeamPage() {
+  const { isAdmin } = useIsAdmin();
   const { slug } = useParams();
   const [school, setSchool] = useState(null); // null = loading, false = not available
   const [players, setPlayers] = useState([]);
@@ -207,7 +209,9 @@ export default function HighSchoolTeamPage() {
           getDocs(query(collection(db, "historical"), where("HighSchool", "==", school.Name))),
           getDoc(doc(db, "hsAlumni", school.id)).catch(() => null),
         ]);
-        const allAlumni = allPlayersSnap.docs.map((d) => ({ id: d.id, ...d.data() })).filter(sameState);
+        // An unreleased class (utils/prospectYears.js) only shows to admins.
+        const allAlumni = allPlayersSnap.docs.map((d) => ({ id: d.id, ...d.data() })).filter(sameState)
+          .filter((p) => isAdmin || !isUnreleasedYear(p.Eligible));
         if (cancelled) return;
 
         // Everyone in college now: CFBD's rows (a We-Draft link when there
@@ -217,7 +221,7 @@ export default function HighSchoolTeamPage() {
         const C = Number(currentDraftClass());
         const rows = cfbd.map((r) => {
           const wd = r.id ? byId[r.id] : null;
-          return { key: `c${r.c}`, name: r.n, pos: wd?.Position || r.pos, college: wd?.School || r.s, hsClass: r.rc || Number(wd?.RecruitYear) || null, stars: r.st, id: wd?.id || null, slug: wd?.Slug || r.slug || null };
+          return { key: `c${r.c}`, name: r.n, pos: wd?.Position || r.pos, college: wd?.School || r.s, hsClass: r.rc || Number(wd?.RecruitYear) || null, stars: r.st, id: wd?.id || null, slug: wd?.Slug || (r.slug && (isAdmin || !isUnreleasedSlug(r.slug)) ? r.slug : null) };
         });
         const inList = new Set(rows.map((r) => r.id).filter(Boolean));
         allAlumni.filter((p) => !inList.has(p.id) && Number(p.Eligible) >= C).forEach((p) => rows.push({
@@ -296,7 +300,7 @@ export default function HighSchoolTeamPage() {
     };
     loadContent();
     return () => { cancelled = true; };
-  }, [school]);
+  }, [school, isAdmin]);
 
   // Top 25 sidebar — the current published poll, resolved to real school
   // docs for logos/slugs. Only fetched once currentRankMap actually has
