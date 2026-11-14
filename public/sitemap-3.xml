@@ -2,6 +2,11 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 
   <url>
+    <loc>https://we-draft.com/player/michael-fasusi-2028-ol</loc>
+    <lastmod>2026-11-14</lastmod>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://we-draft.com/player/michael-hawkins-jr-2027-qb</loc>
     <lastmod>2026-11-13</lastmod>
     <priority>0.7</priority>
@@ -893,7 +898,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/savion-hiter-2029-rb</loc>
-    <lastmod>2026-09-20</lastmod>
+    <lastmod>2026-11-14</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -2018,6 +2023,11 @@
   </url>
   <url>
     <loc>https://we-draft.com/comparison/aidan-hubbard-2026-edge</loc>
+    <lastmod>2026-11-14</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/comparison/aidan-mizell-2027-wr</loc>
     <lastmod>2026-11-14</lastmod>
     <priority>0.6</priority>
   </url>
@@ -4989,16 +4999,6 @@
   <url>
     <loc>https://we-draft.com/comparison/jackie-marshall-2026-dl</loc>
     <lastmod>2026-11-14</lastmod>
-    <priority>0.6</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/comparison/jackson-bennee-2027-db</loc>
-    <lastmod>2026-11-14</lastmod>
-    <priority>0.6</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/comparison/jackson-cantwell-2029-ol</loc>
-    <lastmod>2026-09-16</lastmod>
     <priority>0.6</priority>
   </url>
 </urlset>
