@@ -15,7 +15,16 @@ export const DEFAULT_CONFIG = {
   // Then `windows` portal windows. Players enter the portal only in opening
   // window 2 (user, 2026-11-14) — lateEntryWindows (portal windows that add
   // late entries) stays empty.
-  windows: 10,
+  windows: 5,
+  // The run's choices at the start (user, 2026-11-15): portal length (5 —
+  // the default — or 10 windows; each has its own list narrowing) and
+  // transfer frequency — × each player's modeled chance of wanting out
+  // (capped at entryCap). Default = the tuned model. Admin likeliness
+  // (0–3) isn't scaled — those chances are set by hand.
+  windowOptions: [5, 10],
+  listSizeByWindows: { 5: [null, null, 8, 5, 3, 3], 10: [null, null, 10, 8, 6, 5, 4, 3, 3, 3, 3] },
+  frequency: { less: 0.6, default: 1, more: 1.6, crazy: 2.6 },
+  entryCap: 0.97,
   lateEntryWindows: [],
   lateEntryFactor: 0.15,
 
@@ -111,7 +120,7 @@ export const DEFAULT_CONFIG = {
   // Narrowing his list: the schools he's still listening to after each
   // portal window (index = window; null = all). The rest are cut — and can't
   // offer him again.
-  listSize: [null, null, 10, 8, 6, 5, 4, 3, 3, 3, 3],
+  listSize: [null, null, 8, 5, 3, 3],
   ambition: { perTier: 0.15, role: { starter: 1, rotation: 0.6, reserve: 0.15, none: 0 }, stars: { 6: 1.3, 5: 1.2, 4: 1.1, 3: 1, 2: 0.4 } },
   // Transfer likeliness (user, 2026-11-14), set per player on the admin's
   // Grades tab: his chance of entering, replacing the model's — 3 every time

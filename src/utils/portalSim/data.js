@@ -71,8 +71,9 @@ export function attachDraftGrades(pool, rows) {
   return pool;
 }
 
-// The admin's locks: a locked grade replaces the pool's stars, likeliness
-// (0–3) rides along for the entry model. Pure — headless runs use it.
+// The admin's locks: a locked grade replaces the pool's stars (the auto
+// grade — no lock, the auto grade stands), likeliness (0–3) rides along for
+// the entry model. Pure — headless runs use it.
 export function attachLocks(pool, rows) {
   if (!rows) return pool;
   // An FCS player is in only while graded — unlocked since the pool was

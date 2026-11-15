@@ -219,8 +219,8 @@ function MainLayout() {
             {/* Redirect old /player2 URLs to canonical /player URLs */}
             <Route path="/player2/:slug" element={<RedirectPlayer2 />} />
             <Route path="/team/:teamId" element={<TeamPage />} />
-            <Route path="/portalsim" element={<AdminRoute><PortalSim /></AdminRoute>} />
-            <Route path="/portalsim/:team" element={<AdminRoute><PortalSim /></AdminRoute>} />
+            <Route path="/portalsim" element={<SimRoute signInPrompt><PortalSim /></SimRoute>} />
+            <Route path="/portalsim/:team" element={<SimRoute signInPrompt><PortalSim /></SimRoute>} />
             <Route path="/portal" element={<TransferPortal />} />
             <Route path="/portal/updates" element={<TransferPortal view="updates" />} />
             <Route path="/portal/:position" element={<TransferPortal />} />

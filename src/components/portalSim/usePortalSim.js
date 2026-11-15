@@ -20,8 +20,12 @@ import {
   userOffer, retractOffer, userRetain, clearRetain, teamView, portalPlayers,
 } from "../../utils/portalSim/engine";
 
-export default function usePortalSim({ data, team, seed, live = false }) {
-  const [state, setState] = useState(() => initPortalSim(data.pool, { config: data.config, tiers: data.tiers, factors: data.factors, userTeams: [team], seed, live }));
+// The desk stays on screen but quiet for now (user, 2026-11-14: "keep it
+// there but don't roll any messages") — true turns its posts back on.
+const DESK_LIVE = false;
+
+export default function usePortalSim({ data, team, seed, live = false, frequency = "default", windows = 5 }) {
+  const [state, setState] = useState(() => initPortalSim(data.pool, { config: data.config, tiers: data.tiers, factors: data.factors, userTeams: [team], seed, live, frequency, windows }));
   const [phase, setPhase] = useState("ready");
   const [recap, setRecap] = useState(null);
   const [error, setError] = useState("");
@@ -30,6 +34,7 @@ export default function usePortalSim({ data, team, seed, live = false }) {
   const [feed, setFeed] = useState([]);
   const desk = useRef({ team, records: data.records, last: { id: null }, seq: 0 });
   const post = useCallback((s, events) => {
+    if (!DESK_LIVE) return;
     const posts = deskPosts(s, events, desk.current);
     if (posts.length) setFeed((f) => [...posts, ...f]);
   }, []);

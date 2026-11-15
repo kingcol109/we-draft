@@ -9,7 +9,8 @@ const GOLD = "#f6a21d";
 
 // Admins, plus users granted Sim Beta (users/{uid}.simBeta, toggled from
 // AdminPanel.js's Users section). (The Draft Sim launched — it's open to
-// everyone; this gates the Football Sim Lab.)
+// everyone; this gates the Football Sim Lab and the Portal Sim — both linked
+// from the user's profile.)
 export const canUseSim = (user, profile) => !!user && (profile?.role === "admin" || profile?.simBeta === true);
 
 // ── Gate for /sim (Football Sim Lab) — see canUseSim. Same authReady wait as

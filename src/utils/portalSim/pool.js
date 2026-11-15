@@ -17,7 +17,7 @@ export function expandPool(teamsDoc, chunks) {
   });
   const players = [];
   (chunks || []).forEach((c) => (c?.rows || []).forEach((s) => {
-    const [id, name, pos, ti, stars, elig, role, hlat, hlng, wdId, flags, likely, ht, wt, rStars, state, stats] = JSON.parse(s);
+    const [id, name, pos, ti, stars, elig, role, hlat, hlng, wdId, flags, likely, ht, wt, rStars, state, stats, sub] = JSON.parse(s);
     const team = teams[ti];
     if (!team) return;
     players.push({
@@ -27,6 +27,7 @@ export function expandPool(teamsDoc, chunks) {
       likely: likely ?? null,
       // Info / Stats views: height (in), weight, recruiting stars, home state, last season.
       ht: ht || null, wt: wt || null, rStars: rStars || null, state: state || "", stats: unpackStats(stats),
+      sub: sub || "", // a DB's CB / S, an OL's OT / IOL
     });
   }));
   return { season: teamsDoc?.season || null, teams, players };

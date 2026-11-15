@@ -126,6 +126,9 @@ export const listSize = (w, cfg) => (w < cfg.listSize.length ? cfg.listSize[w] :
 export function leaveChance(home, market, cfg) {
   return cfg.maxEntry / (1 + Math.exp(-((market - home - cfg.entryBias) / cfg.entryTemp)));
 }
+// The run's transfer frequency (cfg.frequency — Less / Default / More /
+// Crazy): × his modeled chance of wanting out, capped.
+export const scaleEntry = (chance, scale, cfg) => (scale == null || scale === 1 ? chance : Math.min(cfg.entryCap ?? 0.97, chance * scale));
 // Transfer likeliness (the admin's 0–3, p.likely) SETS his chance of
 // entering (user, 2026-11-14: a 1 enters about once every 4 runs): 0 never,
 // 1–3 cfg.likeliness. A retention offer still works — it scales that chance

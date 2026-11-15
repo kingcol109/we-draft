@@ -10,8 +10,9 @@
 //   cfbRosters                players, recruiting class, class year, home,
 //                             hometown coordinates (hl), season stats
 //   portalStars               transfer stars (server/portal/stars.js)
-//   config/portalGrades       the admin's locked grades (they win) and
-//                             transfer likeliness (Grades tab)
+//   config/portalGrades       which FCS players are in (graded ones) — the
+//                             locked grades and likeliness themselves are
+//                             applied when a sim loads (data.js attachLocks)
 //   pffGrades                 snaps → a number-free ROLE (starter /
 //                             rotation / reserve / none) and PFF's finer
 //                             positions (EDGE vs DL…). No PFF number is
@@ -28,7 +29,9 @@
 //                          role, homeLat, homeLng, wdId, flags,
 //                          likeliness (0–3, null = model only),
 //                          height (in), weight, recruit stars, home state,
-//                          packed stats (src/utils/portalSim/stats.mjs)]] }
+//                          packed stats (src/utils/portalSim/stats.mjs),
+//                          sub-position: DB "CB" | "S", OL "OT" | "IOL",
+//                          else ""]] }
 //     role: s starter, r rotation, v reserve, n none
 //     flags: "d" declared for the draft, "l" in the real portal
 //
@@ -53,6 +56,9 @@ const STATE_CENTER = {
 // Roster / PFF positions → the sim's.
 const CFBD_POS = { QB: "QB", RB: "RB", FB: "RB", WR: "WR", TE: "TE", OL: "OL", OT: "OL", OG: "OL", G: "OL", C: "OL", T: "OL", IOL: "OL", DE: "EDGE", EDGE: "EDGE", DT: "DL", NT: "DL", DL: "DL", LB: "LB", OLB: "LB", ILB: "LB", MLB: "LB", DB: "DB", CB: "DB", S: "DB", FS: "DB", SS: "DB", K: "K", PK: "K", P: "P" };
 const PFF_POS = { QB: "QB", HB: "RB", FB: "RB", WR: "WR", TE: "TE", T: "OL", G: "OL", C: "OL", DI: "DL", ED: "EDGE", LB: "LB", CB: "DB", S: "DB", K: "K", P: "P" };
+// A DB's / OL's finer position — PFF's when it has one, else the roster's.
+const DB_SUB = { CB: "CB", S: "S", FS: "S", SS: "S", SAF: "S" };
+const OL_SUB = { T: "OT", OT: "OT", LT: "OT", RT: "OT", G: "IOL", OG: "IOL", LG: "IOL", RG: "IOL", C: "IOL", IOL: "IOL" };
 // Starters per position (src/utils/portalSim/config.js starters).
 const STARTERS = { QB: 1, RB: 1, WR: 3, TE: 1, OL: 5, DL: 2, EDGE: 2, LB: 2, DB: 4, K: 1, P: 1 };
 const MIN_SNAPS = { passing: 100, rushing: 60, receiving: 100, blocking: 200, defense: 150, kicking: 8, punting: 15 };
@@ -108,7 +114,9 @@ async function buildPortalSimPool(db, { dry = false } = {}) {
     const players = (t.players || []).map((p) => {
       const rec = pff.get(String(p.id));
       const pos = (rec && PFF_POS[rec.pos]) || CFBD_POS[String(p.pos || "").toUpperCase()] || null;
-      return { p, rec, pos };
+      const SUB = pos === "DB" ? DB_SUB : pos === "OL" ? OL_SUB : null;
+      const sub = SUB ? SUB[rec?.pos] || SUB[String(p.pos || "").toUpperCase()] || "" : "";
+      return { p, rec, pos, sub };
     }).filter((x) => x.pos);
     const byPos = {};
     players.forEach((x) => { (byPos[x.pos] = byPos[x.pos] || []).push(x); });
@@ -126,7 +134,7 @@ async function buildPortalSimPool(db, { dry = false } = {}) {
       });
     });
 
-    players.forEach(({ p, pos, role }) => {
+    players.forEach(({ p, pos, role, sub }) => {
       if (fcs && !(graded(p) && eligLeft(p, t.season) > 0)) return;
       const id = String(p.id);
       const elig = eligLeft(p, t.season);
@@ -136,8 +144,11 @@ async function buildPortalSimPool(db, { dry = false } = {}) {
       const w = wdId ? wd.get(wdId) : null;
       const flags = `${w?.Declared ? "d" : ""}${w?.InPortal ? "l" : ""}`;
       const lock = decodeGrade(locks[id] || (wdId && locks[`wd:${wdId}`]));
-      rows.push([id, `${p.first || ""} ${p.last || ""}`.trim(), pos, teamIdx.get(slug), lock.s || stars.get(id) || 2, elig, role, home[0], home[1], wdId, flags, lock.l,
-        Number(p.ht) || null, Number(p.wt) || null, Number(p.stars) || null, st || p.hss || "", packStats(p.s)]);
+      // Stars: the AUTO grade — the admin's locks are applied when a sim
+      // loads (utils/portalSim/data.js attachLocks), so a lock or unlock
+      // counts right away without a rebuild.
+      rows.push([id, `${p.first || ""} ${p.last || ""}`.trim(), pos, teamIdx.get(slug), stars.get(id) || 2, elig, role, home[0], home[1], wdId, flags, lock.l,
+        Number(p.ht) || null, Number(p.wt) || null, Number(p.stars) || null, st || p.hss || "", packStats(p.s), sub]);
     });
   });
 

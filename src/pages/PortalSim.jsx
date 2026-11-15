@@ -14,6 +14,13 @@
 // promised), every other FBS school makes its own and players decide. Ten
 // portal windows (config). Admin-only (App.js AdminRoute) for now.
 //
+// Setup choices (user, 2026-11-15): transfer frequency (Less / Default /
+// More / Crazy — Default is the tuned model) and portal length (5 windows,
+// the default, or 10). Beta: open to admins and Sim Beta users (App.js
+// SimRoute), linked from their profile.
+// Fullscreen (user, 2026-11-14), like the Draft Sim's: the icon beside
+// Settings sends the whole run (header, console, desk, player cards) to the
+// screen; the list and desk stretch to fill it.
 // The analyst desk (utils/portalSim/desk.js, components/draftSim/SimFeed.jsx)
 // runs beside the console on desktop — its own tab on phones. Roster & Needs
 // can show any FBS roster. A single position in the Portal / Around the
@@ -25,7 +32,7 @@
 // team-colored stage header, then the Console (tabs).
 //   engine   utils/portalSim/engine.js     data   utils/portalSim/data.js
 //   flow     components/portalSim/usePortalSim.js
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import LoadingSpinner from "../components/LoadingSpinner";
@@ -53,6 +60,41 @@ const GONE_LABEL = { exhausted: "Out of eligibility", declared: "Declared", grad
 const WANTS_LABEL = { level: "Wants a bigger stage", snaps: "Wants snaps", money: "Wants a bigger NIL deal", home: "Wants to be closer to home", winning: "Wants to win", development: "Wants to develop" };
 const DESK_FILTERS = [["all", "All"], ["mine", "My Team"]];
 const DESK_HEIGHT = 772; // the console: its tab bar + the 720px list
+// Fullscreen: the list and desk fill the screen under the header.
+const FS_LIST = "calc(100vh / var(--pz, 1) - 240px)"; // the page zoom (--pz) scales CSS px
+const FS_DESK = "calc(100vh / var(--pz, 1) - 188px)";
+
+// Is the run fullscreen? (and the toggle) — the browser's Fullscreen API on
+// the run's wrapper; null where the browser can't (iPhone Safari).
+function useFullscreen(ref) {
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    const node = ref.current;
+    const sync = () => setOn(!!document.fullscreenElement && document.fullscreenElement === node);
+    document.addEventListener("fullscreenchange", sync);
+    return () => {
+      document.removeEventListener("fullscreenchange", sync);
+      // Leaving the run (Settings, a new team) leaves fullscreen too.
+      if (document.fullscreenElement && document.fullscreenElement === node) document.exitFullscreen?.().catch(() => {});
+    };
+  }, [ref]);
+  if (typeof document === "undefined" || !document.fullscreenEnabled) return [false, null];
+  const toggle = () => {
+    if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+    else ref.current?.requestFullscreen?.().catch(() => {});
+  };
+  return [on, toggle];
+}
+function FullscreenBtn({ on, onClick }) {
+  return (
+    <button type="button" onClick={onClick} title={on ? "Exit fullscreen (Esc)" : "Fullscreen"} aria-label={on ? "Exit fullscreen" : "Fullscreen"} aria-pressed={on}
+      style={{ ...pillBtn(false), padding: "6px 9px", lineHeight: 0, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        {on ? <path d="M9 3v6H3M15 3v6h6M9 21v-6H3M15 21v-6h6" /> : <path d="M3 9V3h6M21 9V3h-6M3 15v6h6M21 15v6h-6" />}
+      </svg>
+    </button>
+  );
+}
 const STAGE_TITLE = { nfl: "NFL Decisions", retain: "Retention" };
 const pct = (x) => `${Math.round((x || 0) * 100)}%`;
 // How a draft prospect is leaning (chance he leaves).
@@ -104,7 +146,7 @@ export default function PortalSim() {
   useEffect(() => { document.documentElement.classList.add("wd-sim-dark"); return () => document.documentElement.classList.remove("wd-sim-dark"); }, []);
   // /portalsim/ohio-state starts as that team.
   useEffect(() => {
-    if (data && teamParam && !run && data.branding[teamParam] && !data.pool.teams.find((t) => t.slug === teamParam)?.fcs) setRun({ team: teamParam, seed: Math.floor(Math.random() * 1e9), live: false });
+    if (data && teamParam && !run && data.branding[teamParam] && !data.pool.teams.find((t) => t.slug === teamParam)?.fcs) setRun({ team: teamParam, seed: Math.floor(Math.random() * 1e9), live: false, frequency: "default", windows: 5 });
   }, [data, teamParam, run]);
 
   return (
@@ -117,9 +159,24 @@ export default function PortalSim() {
       <div style={{ maxWidth: 1320, margin: "0 auto", padding: isMobile ? "10px 10px 60px" : "18px 24px 60px" }}>
         {failed ? <div style={{ ...PANEL, padding: 40, textAlign: "center", color: SUB }}>{failed}</div>
           : !data ? <LoadingSpinner label="Loading every roster" size={48} minHeight="60vh" />
-            : run ? <LiveSim key={`${run.team}-${run.seed}`} data={data} run={run} isMobile={isMobile} onSettings={() => { setRun(null); navigate("/portalsim"); }} onRerun={() => setRun({ ...run, seed: Math.floor(Math.random() * 1e9) })} />
+            : run ? <LiveSim key={`${run.team}-${run.seed}-${run.frequency}-${run.windows}`} data={data} run={run} isMobile={isMobile} onSettings={() => { setRun(null); navigate("/portalsim"); }} onRerun={() => setRun({ ...run, seed: Math.floor(Math.random() * 1e9) })} onOptions={(o) => setRun({ ...run, ...o })} />
               : <Setup data={data} isMobile={isMobile} onStart={(r) => { setRun(r); navigate(`/portalsim/${r.team}`); }} />}
       </div>
+    </div>
+  );
+}
+
+// A setting: a label, its pill options, a note under them.
+const FREQ_OPTIONS = [["less", "Less"], ["default", "Default"], ["more", "More"], ["crazy", "Crazy"]];
+const FREQ_NOTE = { less: "Fewer players hit the portal.", default: "The portal as we project it.", more: "More players looking to move.", crazy: "Everybody's on the move." };
+function Choice({ label, note, options, value, onChange, on = BLUE }) {
+  return (
+    <div>
+      <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.14em", color: GOLD, textTransform: "uppercase", marginBottom: 6 }}>{label}</div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {options.map(([k, text]) => <button key={k} type="button" style={{ ...pillBtn(value === k, on), ...(value === k ? {} : { background: "rgba(0,0,0,0.2)" }) }} onClick={() => onChange(k)}>{text}</button>)}
+      </div>
+      {note && <div style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.7)", marginTop: 6 }}>{note}</div>}
     </div>
   );
 }
@@ -128,6 +185,8 @@ export default function PortalSim() {
 function Setup({ data, isMobile, onStart }) {
   const [team, setTeam] = useState("");
   const [live, setLive] = useState(false);
+  const [frequency, setFrequency] = useState("default");
+  const [windows, setWindows] = useState(5);
   const cfg = mergeConfig(data.config);
   const liveCount = data.pool.players.filter((p) => p.live).length;
   const byConf = useMemo(() => {
@@ -144,7 +203,7 @@ function Setup({ data, isMobile, onStart }) {
         <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: "0.2em", color: GOLD }}>BETA · {data.pool.season ? data.pool.season + 1 : ""} TRANSFER PORTAL</div>
         <h1 style={{ margin: "6px 0 6px", fontSize: isMobile ? 30 : 46, fontWeight: 900, textTransform: "uppercase", lineHeight: 1 }}>Portal Sim</h1>
         <div style={{ color: SUB, fontWeight: 700, fontSize: isMobile ? 13 : 15, maxWidth: 680 }}>
-          Run a program through the offseason: decide who you can keep from the NFL, fight to hold the players who want to transfer, then work {cfg.windows} portal windows while every FBS school chases its needs with its NIL budget.
+          Run a program through the offseason: decide who you can keep from the NFL, fight to hold the players who want to transfer, then work {windows} portal windows while every FBS school chases its needs with its NIL budget.
         </div>
         <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
           <button type="button" style={pillBtn(!live)} onClick={() => setLive(false)}>Projected portal</button>
@@ -152,6 +211,11 @@ function Setup({ data, isMobile, onStart }) {
             title={liveCount ? `${liveCount} players in the real portal` : "Opens with the real portal"}>
             Real portal{liveCount ? ` (${liveCount})` : " · opens with the portal"}
           </button>
+        </div>
+        {/* The run's settings. */}
+        <div style={{ display: "flex", gap: isMobile ? 14 : 28, marginTop: 16, flexWrap: "wrap" }}>
+          <Choice label="Transfer frequency" note={FREQ_NOTE[frequency]} options={FREQ_OPTIONS} value={frequency} onChange={setFrequency} />
+          <Choice label="Portal windows" note={windows === 5 ? "The default — a quick offseason." : "A longer portal: more rounds of offers."} options={(cfg.windowOptions || [5, 10]).map((n) => [n, `${n}`])} value={windows} onChange={setWindows} />
         </div>
       </div>
 
@@ -181,7 +245,7 @@ function Setup({ data, isMobile, onStart }) {
       <div style={{ position: "sticky", bottom: 10, marginTop: 12, ...PANEL, padding: "12px 14px", display: "flex", alignItems: "center", gap: 12, background: b ? `linear-gradient(120deg, ${b.Color1 || BLUE}, #0e1626)` : "#0e1626" }}>
         {b ? <Logo b={b} size={40} /> : null}
         <div style={{ flex: 1, minWidth: 0, fontWeight: 900, fontSize: isMobile ? 14 : 17 }}>{b ? b.School : "Pick a program"}</div>
-        <button type="button" disabled={!team} onClick={() => onStart({ team, seed: Math.floor(Math.random() * 1e9), live })} style={{
+        <button type="button" disabled={!team} onClick={() => onStart({ team, seed: Math.floor(Math.random() * 1e9), live, frequency, windows })} style={{
           border: "none", borderRadius: 999, padding: "11px 22px", fontWeight: 900, fontSize: 14, letterSpacing: "0.06em", textTransform: "uppercase", fontFamily: "inherit",
           background: team ? (b?.Color2 || GOLD) : "#1a2438", color: "#fff", cursor: team ? "pointer" : "default",
         }}>Continue →</button>
@@ -191,8 +255,8 @@ function Setup({ data, isMobile, onStart }) {
 }
 
 // ── The sim ──
-function LiveSim({ data, run, isMobile, onSettings, onRerun }) {
-  const sim = usePortalSim({ data, team: run.team, seed: run.seed, live: run.live });
+function LiveSim({ data, run, isMobile, onSettings, onRerun, onOptions }) {
+  const sim = usePortalSim({ data, team: run.team, seed: run.seed, live: run.live, frequency: run.frequency, windows: run.windows });
   const { state, phase, view, stage } = sim;
   const portalOpen = stage === "window" || stage === "done";
   const b = data.branding[run.team] || {};
@@ -225,12 +289,14 @@ function LiveSim({ data, run, isMobile, onSettings, onRerun }) {
         : state.window >= state.windows ? (isMobile ? "Close →" : "Close the Portal →") : isMobile ? "End Window →" : `End Window ${state.window} →`, sim.end]
         : null;
   const pctOf = (n) => `${Math.min(100, (n / Math.max(1, view.budget)) * 100)}%`;
+  const fsRef = useRef(null);
+  const [fs, toggleFs] = useFullscreen(fsRef);
 
   return (
-    <>
-      {/* The header — anchored under the navbar; every window advances from
-          its button. */}
-      <div style={{ ...PANEL, position: "sticky", top: 66 /* the navbar, in CSS px (page zoom scales both) */, zIndex: 50, marginBottom: 12, background: `linear-gradient(115deg, ${c1} 0%, ${c1} 55%, color-mix(in srgb, ${c2} 60%, ${c1}) 100%)`, boxShadow: "0 8px 24px rgba(0,0,0,0.45)" }}>
+    <div ref={fsRef} className={fs ? "wd-sim-scroll" : undefined} style={fs ? { background: BG, padding: 14, overflowY: "auto", height: "calc(100vh / var(--pz, 1))", boxSizing: "border-box", color: INK, fontFamily: "Arial, sans-serif" } : undefined}>
+      {/* The header — anchored under the navbar (the screen's top when
+          fullscreen); every window advances from its button. */}
+      <div style={{ ...PANEL, position: "sticky", top: fs ? 0 : 66 /* the navbar, in CSS px (page zoom scales both) */, zIndex: 50, marginBottom: 12, background: `linear-gradient(115deg, ${c1} 0%, ${c1} 55%, color-mix(in srgb, ${c2} 60%, ${c1}) 100%)`, boxShadow: "0 8px 24px rgba(0,0,0,0.45)" }}>
         <div style={{ position: "absolute", inset: 0, background: "linear-gradient(rgba(0,0,0,0.25), rgba(0,0,0,0.45))" }} />
         <div style={{ position: "relative", display: "flex", alignItems: "center", gap: isMobile ? 10 : 18, padding: isMobile ? "10px 12px 8px" : "12px 20px 10px" }}>
           <Logo b={b} size={isMobile ? 40 : 58} />
@@ -277,11 +343,7 @@ function LiveSim({ data, run, isMobile, onSettings, onRerun }) {
         </div>
       </div>
 
-      {phase === "ready" && (
-        <Moment title="Ready when you are" isMobile={isMobile}>
-          First, the NFL: see who's leaving for the draft and try to keep the ones on the fence. Then the players trying to leave for the portal — keep them or lose them. Then the portal opens. Press <b style={{ color: INK }}>Start</b> up top.
-        </Moment>
-      )}
+      {phase === "ready" && <Ready sim={sim} data={data} run={run} isMobile={isMobile} onOptions={onOptions} onSettings={onSettings} />}
       {phase === "done" && <Final state={state} team={run.team} brand={brand} isMobile={isMobile} onRerun={onRerun} onSettings={onSettings} />}
 
       {/* The Console. */}
@@ -291,9 +353,10 @@ function LiveSim({ data, run, isMobile, onSettings, onRerun }) {
           {tabs.map(([k, text]) => <button key={k} type="button" onClick={() => setTab(k)} style={pillBtn(tab === k, c1)}>{text}</button>)}
           <span style={{ flex: 1 }} />
           <button type="button" onClick={onSettings} style={pillBtn(false)}>Settings</button>
+          {toggleFs && !isMobile && <FullscreenBtn on={fs} onClick={toggleFs} />}
         </div>
         {sim.error && <div style={{ padding: "8px 14px", background: "#3a1219", color: "#ffb3a8", fontWeight: 800, fontSize: 13 }}>{sim.error}</div>}
-        <div className="wd-sim-scroll" style={{ maxHeight: isMobile ? "70vh" : 720, overflowY: "auto" }}>
+        <div className="wd-sim-scroll" style={{ maxHeight: isMobile ? "70vh" : fs ? FS_LIST : 720, minHeight: fs ? FS_LIST : undefined, overflowY: "auto" }}>
           {tab === "desk" ? <SimFeed feed={sim.feed} branding={data.branding} height="auto" isMobile filters={DESK_FILTERS} />
             : tab === "nfl" ? <NflTab sim={sim} team={run.team} isMobile={isMobile} />
             : tab === "leaving" ? <LeavingTab sim={sim} team={run.team} brand={brand} isMobile={isMobile} />
@@ -305,7 +368,7 @@ function LiveSim({ data, run, isMobile, onSettings, onRerun }) {
       </div>
       {!isMobile && (
         <div style={{ width: 340, flexShrink: 0 }}>
-          <SimFeed feed={sim.feed} branding={data.branding} height={DESK_HEIGHT} isMobile={false} filters={DESK_FILTERS} />
+          <SimFeed feed={sim.feed} branding={data.branding} height={fs ? FS_DESK : DESK_HEIGHT} isMobile={false} filters={DESK_FILTERS} />
         </div>
       )}
       </div>}
@@ -313,18 +376,82 @@ function LiveSim({ data, run, isMobile, onSettings, onRerun }) {
       <div style={{ marginTop: 10, fontSize: 11, color: SUB, fontWeight: 700 }}>
         Beta — the models are first passes. Seed {run.seed}. <Link to="/portal" style={{ color: SUB }}>Real portal →</Link>
       </div>
-    </>
+    </div>
   );
 }
 
-function Moment({ title, children, action, onAction, isMobile }) {
+// ── Ready: the branded start screen (user, 2026-11-15) ──
+// The program in its colors — tier, NIL budget, last season, roster — the
+// run's settings (changeable until Start), what's ahead, and Start.
+function Ready({ sim, data, run, isMobile, onOptions, onSettings }) {
+  const { state, view } = sim;
+  const b = data.branding[run.team] || {};
+  const c1 = b.Color1 || BLUE;
+  const c2 = b.Color2 || GOLD;
+  const t = view.team;
+  const rec = data.records?.teams?.[t.school];
+  const last = rec?.[rec.length - 1];
+  const roster = Object.values(state.players).filter((p) => p.team === run.team).length;
+  const cfg = state.cfg;
+  const facts = [
+    ["Program", cfg.tierLabels?.[t.tier] || `Tier ${t.tier}`],
+    ["NIL budget", money(view.budget)],
+    [last ? `${last[0]} record` : "Last season", last ? `${last[1]}-${last[2]}` : "—"],
+    ["Roster", `${roster} players`],
+  ];
+  const steps = [
+    ["NFL Decisions", "Who's leaving for the draft — try to keep the ones on the fence."],
+    ["Retention", "Players who want out. Keep them, or lose them to the portal."],
+    [`The Portal · ${state.windows} windows`, "Offer NIL every window while every FBS school chases its needs."],
+  ];
   return (
-    <div className="wd-sim-pop" style={{ ...PANEL, marginBottom: 12, padding: isMobile ? "16px 14px" : "18px 24px", display: "flex", alignItems: isMobile ? "stretch" : "center", gap: 16, flexDirection: isMobile ? "column" : "row" }}>
-      <div style={{ flex: 1 }}>
-        <div style={{ fontSize: isMobile ? 18 : 22, fontWeight: 900, textTransform: "uppercase", marginBottom: 6 }}>{title}</div>
-        <div style={{ color: SUB, fontWeight: 700, fontSize: 14, lineHeight: 1.5 }}>{children}</div>
+    <div className="wd-sim-pop" style={{ ...PANEL, marginBottom: 12, position: "relative", background: `linear-gradient(120deg, ${c1} 0%, ${c1} 52%, color-mix(in srgb, ${c2} 65%, ${c1}) 100%)` }}>
+      <div style={{ position: "absolute", inset: 0, background: "radial-gradient(circle at 85% 30%, rgba(0,0,0,0.05), rgba(0,0,0,0.55) 75%)" }} />
+      {(b.LogoDark || b.Logo1) && <img src={b.LogoDark || b.Logo1} alt="" aria-hidden="true" style={{ position: "absolute", right: isMobile ? -60 : -30, top: isMobile ? -30 : -60, width: isMobile ? 260 : 440, opacity: 0.12, pointerEvents: "none" }} />}
+      <div style={{ position: "relative", padding: isMobile ? "20px 16px" : "30px 34px" }}>
+        {/* Who you are. */}
+        <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 14 : 22 }}>
+          <Logo b={b} size={isMobile ? 70 : 108} />
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: "0.2em", color: GOLD }}>{state.season ? `${state.season + 1} ` : ""}TRANSFER PORTAL · {t.conference}</div>
+            <div style={{ fontSize: isMobile ? 30 : 52, fontWeight: 900, textTransform: "uppercase", lineHeight: 0.95, marginTop: 4, textShadow: "0 2px 14px rgba(0,0,0,0.35)" }}>{t.school}</div>
+          </div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(${isMobile ? 2 : 4}, minmax(0, 1fr))`, gap: 8, marginTop: isMobile ? 16 : 22 }}>
+          {facts.map(([k, v]) => (
+            <div key={k} style={{ background: "rgba(0,0,0,0.3)", borderRadius: 12, padding: "10px 12px" }}>
+              <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.14em", opacity: 0.8, textTransform: "uppercase" }}>{k}</div>
+              <div style={{ fontSize: isMobile ? 16 : 20, fontWeight: 900, marginTop: 2 }}>{v}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* The run's settings, then what's ahead. */}
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0,1fr) minmax(0,1.2fr)", gap: isMobile ? 14 : 22, marginTop: isMobile ? 16 : 22 }}>
+          <div style={{ background: "rgba(0,0,0,0.32)", borderRadius: 14, padding: isMobile ? 14 : 18, display: "flex", flexDirection: "column", gap: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: "0.16em" }}>SETTINGS</div>
+            <Choice label="Transfer frequency" note={FREQ_NOTE[run.frequency || "default"]} options={FREQ_OPTIONS} value={run.frequency || "default"} onChange={(frequency) => onOptions({ frequency })} on={GOLD} />
+            <Choice label="Portal windows" note={(run.windows || 5) === 5 ? "The default — a quick offseason." : "A longer portal: more rounds of offers."} options={(cfg.windowOptions || [5, 10]).map((n) => [n, `${n}`])} value={run.windows || 5} onChange={(windows) => onOptions({ windows })} on={GOLD} />
+          </div>
+          <div style={{ background: "rgba(0,0,0,0.32)", borderRadius: 14, padding: isMobile ? 14 : 18 }}>
+            <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: "0.16em", marginBottom: 10 }}>THE OFFSEASON</div>
+            {steps.map(([title, text], i) => (
+              <div key={title} style={{ display: "flex", gap: 12, alignItems: "flex-start", marginTop: i ? 12 : 0 }}>
+                <span style={{ width: 28, height: 28, borderRadius: "50%", background: GOLD, color: "#111", fontWeight: 900, fontSize: 14, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{i + 1}</span>
+                <div>
+                  <div style={{ fontWeight: 900, fontSize: 15 }}>{title}</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, opacity: 0.85, lineHeight: 1.4 }}>{text}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: isMobile ? 18 : 24, flexWrap: "wrap" }}>
+          <button type="button" onClick={sim.start} style={{ border: "none", borderRadius: 999, padding: isMobile ? "14px 28px" : "16px 40px", fontWeight: 900, fontSize: isMobile ? 16 : 18, letterSpacing: "0.08em", textTransform: "uppercase", background: GOLD, color: "#fff", cursor: "pointer", fontFamily: "inherit", boxShadow: "0 8px 24px rgba(0,0,0,0.35)" }}>Start the Offseason →</button>
+          <button type="button" onClick={onSettings} style={{ ...pillBtn(false), background: "rgba(0,0,0,0.3)", borderColor: "transparent" }}>Change team</button>
+        </div>
       </div>
-      {action && <button type="button" onClick={onAction} style={{ border: "none", borderRadius: 999, padding: "12px 22px", fontWeight: 900, fontSize: 14, textTransform: "uppercase", letterSpacing: "0.06em", background: GOLD, color: "#fff", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>{action}</button>}
     </div>
   );
 }
@@ -334,7 +461,7 @@ function PlayerLine({ p, brand, to, isMobile, right, extra, onOpen }) {
   return (
     <div className="wd-sim-row" style={{ display: "flex", alignItems: "center", gap: isMobile ? 8 : 12, padding: isMobile ? "9px 10px" : "10px 16px", borderBottom: `1px solid ${LINE}` }}>
       <TransferStars stars={p.stars} size="sm" />
-      <span style={{ width: isMobile ? 38 : 46, flexShrink: 0, textAlign: "center", fontSize: 12, fontWeight: 900, color: "#9fc3ff", background: "#13233f", borderRadius: 6, padding: "4px 0" }}>{p.pos}</span>
+      <span style={{ width: isMobile ? 38 : 46, flexShrink: 0, textAlign: "center", fontSize: 12, fontWeight: 900, color: "#9fc3ff", background: "#13233f", borderRadius: 6, padding: "4px 0" }}>{p.sub || p.pos}</span>
       {brand(p.team, p) ? <Logo b={brand(p.team, p)} size={isMobile ? 22 : 26} /> : null}
       {to && <><span style={{ color: SUB, fontWeight: 900 }}>→</span><Logo b={brand(to)} size={isMobile ? 22 : 26} /></>}
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -461,7 +588,7 @@ function PlayerRow({ cols, p, brand, to, isMobile, right, extra, onOpen }) {
         {to && <><span style={{ color: SUB, fontWeight: 900 }}>→</span><Logo b={brand(to)} size={22} /></>}
         <div style={{ minWidth: 0 }}>
           <button type="button" onClick={() => onOpen?.(p.id)} style={{ all: "unset", cursor: onOpen ? "pointer" : "default", fontWeight: 900, fontSize: 14, display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: onOpen ? "underline" : "none", textDecorationColor: "rgba(255,255,255,0.25)", textUnderlineOffset: 3 }}>{p.name}</button>
-          <div style={{ fontSize: 11, fontWeight: 800, color: SUB }}>{p.pos}{extra ? <span style={{ color: "#9fc3ff" }}> · {extra}</span> : null}</div>
+          <div style={{ fontSize: 11, fontWeight: 800, color: SUB }}>{p.sub || p.pos}{extra ? <span style={{ color: "#9fc3ff" }}> · {extra}</span> : null}</div>
         </div>
       </div>
       {cols.map(([k, , fmt]) => {
@@ -477,7 +604,10 @@ function PlayerRow({ cols, p, brand, to, isMobile, right, extra, onOpen }) {
 // The Portal tab's filters — position (K/P together), stars, my needs,
 // search — shared with Results → Around the Country.
 function useFilters(view) {
-  const [pos, setPos] = useState("");
+  const [pos, setPosRaw] = useState("");
+  // Under DB: CB or S; under OL: OT or IOL (user, 2026-11-14).
+  const [sub, setSub] = useState("");
+  const setPos = (x) => { setPosRaw(x); setSub(""); };
   const [minStars, setMinStars] = useState(2); // every star level
   const [q, setQ] = useState("");
   const [needsOnly, setNeedsOnly] = useState(false);
@@ -488,13 +618,15 @@ function useFilters(view) {
   return useMemo(() => {
     const needle = q.trim().toLowerCase();
     return {
-      pos, setPos, minStars, setMinStars, q, setQ, needsOnly, setNeedsOnly,
+      pos, setPos, sub, setSub, minStars, setMinStars, q, setQ, needsOnly, setNeedsOnly,
       view: view_, setView, sort,
       sortBy: (k) => setSort((s) => (s.key === k ? { key: k, dir: -s.dir } : { key: k, dir: k === "name" || k === "state" ? 1 : -1 })),
-      match: (p) => (!pos || posGroup(pos).includes(p.pos)) && p.stars >= minStars && (!needsOnly || view.needs[p.pos] > 0) && (!needle || p.name.toLowerCase().includes(needle)),
+      match: (p) => (!pos || posGroup(pos).includes(p.pos)) && (!sub || p.sub === sub) && p.stars >= minStars && (!needsOnly || view.needs[p.pos] > 0) && (!needle || p.name.toLowerCase().includes(needle)),
     };
-  }, [pos, minStars, q, needsOnly, view.needs, view_, sort]);
+  }, [pos, sub, minStars, q, needsOnly, view.needs, view_, sort]); // eslint-disable-line react-hooks/exhaustive-deps
 }
+// Sub-positions under a position filter.
+const SUBS = { DB: [["", "All DBs"], ["CB", "CB"], ["S", "S"]], OL: [["", "All OL"], ["OT", "OT"], ["IOL", "IOL"]] };
 function FilterBar({ f, view }) {
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 6, padding: "10px 12px", borderBottom: `1px solid ${LINE}` }}>
@@ -505,6 +637,15 @@ function FilterBar({ f, view }) {
       </select>
       <button type="button" style={pillBtn(f.needsOnly, GOLD)} onClick={() => f.setNeedsOnly((v) => !v)}>My needs</button>
       <input value={f.q} onChange={(e) => f.setQ(e.target.value)} placeholder="Search…" style={{ flex: "1 1 140px", minWidth: 0, background: "#111a2b", color: INK, border: `1px solid ${LINE}`, borderRadius: 999, padding: "6px 12px", fontWeight: 700, fontSize: 13, outline: "none" }} />
+      {/* DB: cornerbacks or safeties; OL: tackles or interior. */}
+      {SUBS[f.pos] && (
+        <div style={{ display: "flex", gap: 4, flexBasis: "100%", alignItems: "center" }}>
+          <span style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.12em", color: SUB, marginRight: 4 }}>{f.pos}</span>
+          {SUBS[f.pos].map(([k, label]) => (
+            <button key={k || "all"} type="button" style={pillBtn(f.sub === k)} onClick={() => f.setSub(k)}>{label}</button>
+          ))}
+        </div>
+      )}
       {/* A single position: Info and (not OL) Stats tables. */}
       {f.pos && (
         <div style={{ display: "flex", gap: 4, flexBasis: "100%", alignItems: "center" }}>
@@ -910,7 +1051,14 @@ function CountryResults({ sim, team, brand, isMobile }) {
   );
 }
 
-// ── The end: your class and the country's best ──
+// ── The end: your signing class, like a draft class (user, 2026-11-15) ──
+// A report card in your colors — class rank and grade among every school's
+// class, what it cost, the needs it filled — then your signings revealed one
+// by one, reading down two columns (memory: boards fill columns), then the
+// country's top classes.
+// A class's letter by where it ranks (share of schools ahead of it).
+const CLASS_GRADES = [[0.05, "A+"], [0.12, "A"], [0.2, "A-"], [0.3, "B+"], [0.42, "B"], [0.55, "B-"], [0.67, "C+"], [0.78, "C"], [0.88, "C-"], [1.01, "D"]];
+const gradeColorOf = (g) => (g.startsWith("A") ? "#7ee2a8" : g.startsWith("B") ? "#9fc3ff" : g.startsWith("C") ? GOLD : "#ff8a7a");
 function Final({ state, team, brand, isMobile, onRerun, onSettings }) {
   const classes = {};
   state.log.filter((e) => e.kind === "committed").forEach((e) => {
@@ -918,17 +1066,78 @@ function Final({ state, team, brand, isMobile, onRerun, onSettings }) {
     c.n += 1; c.score += state.players[e.pid].stars ** 2; c.spent += e.nil;
   });
   const ranked = Object.values(classes).sort((a, b) => b.score - a.score);
-  const mineRank = ranked.findIndex((c) => c.slug === team) + 1;
+  const rank = ranked.findIndex((c) => c.slug === team) + 1;
+  const grade = rank ? CLASS_GRADES.find(([share]) => (rank - 1) / Math.max(1, ranked.length) < share)[1] : null;
+  const mine = classes[team] || { n: 0, spent: 0 };
+  // The class: best first (stars, then the deal).
+  const signings = state.log.filter((e) => e.kind === "committed" && e.to === team).map((e) => ({ e, p: state.players[e.pid] }))
+    .sort((a, b) => b.p.stars - a.p.stars || b.e.nil - a.e.nil);
+  // Needs: positions that lost starters / rotation players — filled by a signing, or still open.
+  const lost = Object.entries(urgencyOf(state, team)).filter(([, u]) => u.lost > 0).map(([pos]) => pos);
+  const signedAt = new Set(signings.map(({ p }) => p.pos));
+  const filled = lost.filter((pos) => signedAt.has(pos));
+  const open = lost.filter((pos) => !signedAt.has(pos));
+  const kept = state.log.filter((e) => e.kind === "retained" && e.team === team).length;
+  const b = brand(team) || {};
+  const c1 = b.Color1 || BLUE;
+  const c2 = b.Color2 || GOLD;
+  const rows = Math.ceil(signings.length / 2);
   return (
     <div className="wd-sim-pop" style={{ ...PANEL, marginBottom: 12 }}>
-      <div style={{ padding: isMobile ? 14 : "18px 24px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-        <div style={{ flex: 1, minWidth: 220 }}>
-          <div style={{ fontSize: isMobile ? 20 : 26, fontWeight: 900, textTransform: "uppercase" }}>The portal is closed</div>
-          <div style={{ color: SUB, fontWeight: 700, fontSize: 14 }}>{mineRank ? `Your class ranks #${mineRank} of ${ranked.length}.` : "You didn't sign anyone."}</div>
+      {/* The report card header, in your colors. */}
+      <div style={{ position: "relative", overflow: "hidden", background: `linear-gradient(115deg, ${c1} 0%, ${c1} 58%, color-mix(in srgb, ${c2} 70%, ${c1}) 100%)` }}>
+        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(rgba(0,0,0,0.2), rgba(0,0,0,0.45))" }} />
+        {(b.LogoDark || b.Logo1) && <img src={b.LogoDark || b.Logo1} alt="" aria-hidden="true" style={{ position: "absolute", right: -40, top: -50, width: isMobile ? 200 : 300, opacity: 0.1, pointerEvents: "none" }} />}
+        <div style={{ position: "relative", display: "flex", alignItems: "center", gap: isMobile ? 12 : 18, padding: isMobile ? "16px 14px" : "20px 24px", flexWrap: "wrap" }}>
+          <Logo b={b} size={isMobile ? 52 : 72} />
+          <div style={{ flex: "1 1 220px", minWidth: 0 }}>
+            <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.18em", opacity: 0.85 }}>{state.season ? `${state.season + 1} ` : ""}PORTAL SIGNING CLASS</div>
+            <div style={{ fontSize: isMobile ? 24 : 34, fontWeight: 900, textTransform: "uppercase", lineHeight: 1.02, marginTop: 2 }}>{b.School || state.teams[team]?.school}</div>
+            <div style={{ fontSize: 13, fontWeight: 800, opacity: 0.9, marginTop: 4 }}>
+              {mine.n} signed · {money(mine.spent)} NIL{kept ? ` · ${kept} kept from the portal` : ""}{rank ? ` · Class rank #${rank} of ${ranked.length}` : ""}
+            </div>
+          </div>
+          <div style={{ textAlign: "center", background: "rgba(0,0,0,0.35)", borderRadius: 14, padding: isMobile ? "8px 14px" : "10px 20px" }}>
+            <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.16em", opacity: 0.85 }}>CLASS GRADE</div>
+            <div style={{ fontSize: isMobile ? 34 : 46, fontWeight: 900, lineHeight: 1, color: grade ? gradeColorOf(grade) : SUB }}>{grade || "—"}</div>
+          </div>
         </div>
-        <button type="button" onClick={onRerun} style={pillBtn(true, GOLD)}>Run It Again</button>
-        <button type="button" onClick={onSettings} style={pillBtn(false)}>New Team</button>
+        <div style={{ position: "relative", display: "flex", gap: 8, padding: isMobile ? "0 14px 14px" : "0 24px 18px", flexWrap: "wrap" }}>
+          <button type="button" onClick={onRerun} style={pillBtn(true, GOLD)}>Run It Again</button>
+          <button type="button" onClick={onSettings} style={{ ...pillBtn(false), background: "rgba(0,0,0,0.3)" }}>New Team</button>
+        </div>
       </div>
+      {/* Needs filled / still open. */}
+      {lost.length > 0 && (
+        <div style={{ display: "flex", gap: 14, flexWrap: "wrap", padding: "10px 16px", borderBottom: `1px solid ${LINE}`, fontSize: 12, fontWeight: 800 }}>
+          <span style={{ color: "#7ee2a8" }}>Needs filled: {filled.length ? filled.join(", ") : "none"}</span>
+          {open.length > 0 && <span style={{ color: "#ff8a7a" }}>Still open: {open.join(", ")}</span>}
+        </div>
+      )}
+      {/* The class, revealed one by one, reading down two columns. */}
+      {signings.length === 0 ? <Empty>You didn't sign anyone out of the portal.</Empty> : (
+        <div style={isMobile || signings.length < 3 ? { display: "grid" } : { display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: `repeat(${rows}, auto)`, gridAutoFlow: "column" }}>
+          {signings.map(({ e, p }, i) => (
+            <div key={p.id} className="wd-sim-pop" style={{ animationDelay: `${0.25 + i * 0.12}s`, display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", borderBottom: `1px solid ${LINE}`, minWidth: 0 }}>
+              <span style={{ width: 22, textAlign: "right", fontWeight: 900, color: i < 3 ? GOLD : SUB, flexShrink: 0 }}>{i + 1}</span>
+              <Headshot id={p.id} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 900, fontSize: 15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3, fontSize: 11, fontWeight: 800, color: SUB, minWidth: 0 }}>
+                  <TransferStars stars={p.stars} size="sm" />
+                  <span style={{ color: "#9fc3ff" }}>{p.sub || p.pos}</span>
+                  <Logo b={brand(p.team)} size={16} />
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{state.teams[p.team]?.school}</span>
+                </div>
+              </div>
+              <div style={{ textAlign: "right", flexShrink: 0 }}>
+                <div style={{ fontWeight: 900, fontSize: 14, color: "#7ee2a8" }}>{money(e.nil)}</div>
+                <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.08em", color: SUB }}>WINDOW {e.w}{e.blowout ? " · ON THE SPOT" : ""}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
       <Section title="Top portal classes">
         {ranked.slice(0, 10).map((c, i) => (
           <div key={c.slug} className="wd-sim-row" style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 16px", borderBottom: `1px solid ${LINE}`, background: c.slug === team ? "#13233f" : "transparent" }}>
@@ -938,8 +1147,25 @@ function Final({ state, team, brand, isMobile, onRerun, onSettings }) {
             <span style={{ fontSize: 12, fontWeight: 800, color: SUB }}>{c.n} signed · {money(c.spent)}</span>
           </div>
         ))}
+        {rank > 10 && (
+          <div className="wd-sim-row" style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 16px", borderBottom: `1px solid ${LINE}`, background: "#13233f" }}>
+            <span style={{ width: 24, textAlign: "right", fontWeight: 900, color: SUB }}>{rank}</span>
+            <Logo b={b} size={26} />
+            <span style={{ flex: 1, fontWeight: 900 }}>{state.teams[team]?.school}</span>
+            <span style={{ fontSize: 12, fontWeight: 800, color: SUB }}>{mine.n} signed · {money(mine.spent)}</span>
+          </div>
+        )}
       </Section>
     </div>
+  );
+}
+// His ESPN headshot (CFBD ids are ESPN ids), or a blank circle.
+function Headshot({ id, size = 42 }) {
+  const [ok, setOk] = useState(true);
+  return (
+    <span style={{ width: size, height: size, borderRadius: "50%", background: "#1a2438", overflow: "hidden", flexShrink: 0, display: "inline-flex", alignItems: "flex-end", justifyContent: "center" }}>
+      {ok && <img src={`https://a.espncdn.com/i/headshots/college-football/players/full/${id}.png`} alt="" onError={() => setOk(false)} style={{ height: "125%", width: "auto", maxWidth: "none", objectFit: "cover", objectPosition: "center top", marginBottom: "-12%" }} />}
+    </span>
   );
 }
 

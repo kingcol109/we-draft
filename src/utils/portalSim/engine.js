@@ -80,7 +80,11 @@ export const boardTaste = (state, team, pid) => signedDraw(state, `board|${team}
 //   seed, live (use the real portal's entries), factors ({ [school]:
 //   { success, dev } } — ./factors.js; missing → neutral) }
 export function initPortalSim(pool, opts = {}) {
-  const cfg = mergeConfig(opts.config);
+  let cfg = mergeConfig(opts.config);
+  // The run's choices (pages/PortalSim.jsx setup): portal length and
+  // transfer frequency.
+  if (opts.windows && cfg.listSizeByWindows?.[opts.windows]) cfg = { ...cfg, windows: opts.windows, listSize: cfg.listSizeByWindows[opts.windows] };
+  cfg = { ...cfg, entryScale: cfg.frequency?.[opts.frequency] ?? 1 };
   const seed = opts.seed ?? Math.floor(Math.random() * 1e9);
   const userTeams = opts.userTeams || [];
   const state = { seed, cfg, season: pool.season, window: 0, windows: cfg.windows, phase: "ready", userTeams, live: !!opts.live, teams: {}, players: {}, log: [] };
@@ -229,9 +233,10 @@ export const transferLeave = (state, p, offer = null) => {
   const tier = state.teams[p.team].tier;
   const pull = M.ambition(p, state.cfg, tier) + M.benchFrustration(p, ptAt(state, p.team, p), state.cfg);
   const market = M.marketGrade(p, state.cfg, tier) + pull;
-  const chance = M.leaveChance(homeGrade(state, p, offer), market, state.cfg);
+  const scale = state.cfg.entryScale;
+  const chance = M.scaleEntry(M.leaveChance(homeGrade(state, p, offer), market, state.cfg), scale, state.cfg);
   if (p.likely == null) return chance;
-  return M.withLikeliness(chance, p.likely, state.cfg, offer ? M.leaveChance(homeGrade(state, p), market, state.cfg) : chance);
+  return M.withLikeliness(chance, p.likely, state.cfg, offer ? M.scaleEntry(M.leaveChance(homeGrade(state, p), market, state.cfg), scale, state.cfg) : chance);
 };
 // Interest an offer has built by standing: offering early helps
 // (earlyInterest per window it's been out, capped).
@@ -448,7 +453,7 @@ function openRetainWindow(state) {
     const scores = homeScores(state, p);
     const homeTier = state.teams[p.team].tier;
     const pull = M.ambition(p, state.cfg, homeTier) + M.benchFrustration(p, scores.pt, state.cfg);
-    const lean = M.withLikeliness(M.leaveChance(M.gradeFrom(p, scores), M.marketGrade(p, state.cfg, homeTier) + pull, state.cfg), p.likely, state.cfg);
+    const lean = M.withLikeliness(M.scaleEntry(M.leaveChance(M.gradeFrom(p, scores), M.marketGrade(p, state.cfg, homeTier) + pull, state.cfg), state.cfg.entryScale, state.cfg), p.likely, state.cfg);
     if (draw(state, `enter|${p.id}`) >= lean) return;
     players[p.id] = { ...p, status: "considering", considering: "transfer", lean, reason: M.transferReason(p, scores, state.cfg, homeTier) };
   });

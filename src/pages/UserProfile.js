@@ -416,7 +416,10 @@ export default function UserProfile() {
 
           <div style={{ height: "1px", backgroundColor: "#eee", margin: "18px 0 16px" }} />
           {(simBeta || role === "admin") && (
-            <Link to="/sim" style={{ display: "block", textAlign: "center", color: BLUE, fontWeight: 900, fontSize: "13px", marginBottom: "12px" }}>🎮 Football Sim (beta) →</Link>
+            <>
+              <Link to="/sim" style={{ display: "block", textAlign: "center", color: BLUE, fontWeight: 900, fontSize: "13px", marginBottom: "12px" }}>🎮 Football Sim (beta) →</Link>
+              <Link to="/portalsim" style={{ display: "block", textAlign: "center", color: BLUE, fontWeight: 900, fontSize: "13px", marginBottom: "12px" }}>🔁 Portal Sim (beta) →</Link>
+            </>
           )}
           <button onClick={logout} style={btnStyle("secondary")}>Log Out</button>
       </div>

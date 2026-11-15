@@ -11,10 +11,15 @@
 //             weaknesses — when he has one
 //   stats     last season (cfbRosters players[].s — one read per team,
 //             cached: cfbRosters where school ==); hidden when there are none
-//   interest  every school that's offered (and yours as you build it): NIL,
+//   interest  every school that's offered (yours once it's SENT — no
+//             preview of his interest before you offer, user 2026-11-15;
+//             top 5 shown, the rest behind an expand): NIL,
 //             where he'd fit in that room, and how interested he is — his grade
 //             of the offer plus what it's built by standing (offering early
 //             helps), the leader marked, the bar he needs to commit
+//   sent      sending an offer (portal or retention) plays a short animation
+//             (user, 2026-11-15): a band in YOUR colors sweeps the header,
+//             your logo pops, OFFER SENT stamps with the amount.
 //   offer     NIL only — players judge the room, not promised roles (user,
 //             2026-11-14): where he'd fit in yours and how he sees your offer
 //             — each factor with his interest letter (A's first, F last) and
@@ -55,6 +60,9 @@ const CELEBRATE_CSS = `
   @keyframes wdcStamp { 0% { transform: scale(2.4) rotate(-14deg); opacity: 0; } 60% { transform: scale(0.92) rotate(-8deg); opacity: 1; } 100% { transform: scale(1) rotate(-8deg); opacity: 1; } }
   @keyframes wdcFall { 0% { transform: translate3d(0,-20px,0) rotate(0); opacity: 1; } 100% { transform: translate3d(var(--dx), var(--dy), 0) rotate(var(--rot)); opacity: 0; } }
   @keyframes wdcOut { 0%, 75% { opacity: 1; } 100% { opacity: 0; } }
+  /* The new school's watermark on a commit: pops in bold, holds, then eases down to its resting fade (0.12) — no jump when the celebration ends. */
+  @keyframes wdcMark { 0% { transform: scale(0) rotate(-12deg); opacity: 0; } 12% { transform: scale(1.2) rotate(4deg); opacity: 0.9; } 18% { transform: scale(1) rotate(0); opacity: 0.9; } 55% { opacity: 0.9; } 100% { transform: scale(1); opacity: 0.12; } }
+  @keyframes wdcBand { 0% { transform: translateX(-105%); } 18%, 82% { transform: translateX(0); } 100% { transform: translateX(105%); } }
   @keyframes wdcShine { from { transform: translateX(-120%) skewX(-20deg); } to { transform: translateX(380%) skewX(-20deg); } }
   @media (prefers-reduced-motion: reduce) { .wdc-anim { animation-duration: 1ms !important; animation-delay: 0s !important; } }
 `;
@@ -114,6 +122,10 @@ const Logo = ({ b, size = 26 }) => {
   const src = b?.LogoDark || b?.Logo1;
   return <span style={{ width: size, height: size, flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>{src ? <img src={src} alt={b?.School || ""} style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} /> : null}</span>;
 };
+// A small tag beside a school's name (You / Not sent / Leader).
+const Tag = ({ color, children }) => (
+  <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color, border: `1px solid ${color}`, borderRadius: 999, padding: "2px 6px", lineHeight: 1.2 }}>{children}</span>
+);
 const Box = ({ label, children }) => (
   <div style={{ background: "#111a2b", border: `1px solid ${LINE}`, borderRadius: 10, padding: "8px 10px" }}>
     <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.12em", color: SUB, textTransform: "uppercase" }}>{label}</div>
@@ -143,6 +155,19 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
     const t = setTimeout(() => setCelebrate(0), 3600);
     return () => clearTimeout(t);
   }, [celebrate]);
+  // Offer sent: plays when your offer (or retention offer) on him changes.
+  const [sent, setSent] = useState(null); // { at, nil, keep }
+  const sentKey = p?.status === "considering" ? (p.retain ? `k${p.retain.nil}` : null) : p?.offers?.[team] ? `o${p.offers[team].nil}|${p.offers[team].window}` : null;
+  const prevSent = useRef(sentKey);
+  useEffect(() => {
+    if (sentKey && sentKey !== prevSent.current) setSent({ at: Date.now(), nil: p.status === "considering" ? p.retain.nil : p.offers[team].nil, keep: p.status === "considering" });
+    prevSent.current = sentKey;
+  }, [sentKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!sent) return undefined;
+    const t = setTimeout(() => setSent(null), 2300);
+    return () => clearTimeout(t);
+  }, [sent]);
   const confetti = useMemo(() => Array.from({ length: celebrate ? 70 : 0 }, (_, i) => ({
     left: Math.random() * 100, delay: Math.random() * 0.5, dur: 1.4 + Math.random() * 1.2, dx: `${(Math.random() - 0.5) * 220}px`,
     dy: `${260 + Math.random() * 380}px`, rot: `${(Math.random() - 0.5) * 900}deg`, w: 6 + Math.random() * 7, i,
@@ -165,15 +190,15 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
   const canRetain = sim.phase === "window" && keeping && p?.team === team;
   // His interest in every offer — yours as you're building it (it keeps the
   // interest it's built if you're raising an offer that's out there).
+  // His interest in every offer that's out there — yours only once it's
+  // sent, at what you sent (the slider never previews it).
   const interest = useMemo(() => {
     if (!p) return [];
-    const list = Object.entries(p.offers).filter(([k]) => k !== team).map(([slug, o]) => ({ slug, o, ...gradeOffer(state, slug, p, o), fit: fitAt(state, slug, p).fit }));
-    if (canOffer || mine) {
-      const o = { nil, since: mine?.since ?? state.window };
-      list.push({ slug: team, o, ...gradeOffer(state, team, p, o), fit: fitAt(state, team, p).fit, yours: true, draft: !mine || mine.nil !== nil });
-    }
+    const list = Object.entries(p.offers).map(([slug, o]) => ({ slug, o, ...gradeOffer(state, slug, p, o), fit: fitAt(state, slug, p).fit, yours: slug === team }));
     return list.sort((a, b) => b.grade - a.grade);
-  }, [p, state, team, nil, canOffer, mine]);
+  }, [p, state, team]);
+  const [allOffers, setAllOffers] = useState(false);
+  const TOP_OFFERS = 5;
   if (!p) return null;
 
   const max = view.available + (mine?.nil || 0);
@@ -230,7 +255,7 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
           {celebrate ? <div key={celebrate} className="wdc-anim" style={{ position: "absolute", inset: 0, background: `linear-gradient(115deg, ${c1} 0%, ${c1} 50%, color-mix(in srgb, ${c2} 70%, ${c1}) 100%)`, animation: "wdcWipe .9s cubic-bezier(.6,0,.2,1) both" }} /> : null}
           <div style={{ position: "absolute", inset: 0, background: "radial-gradient(circle at 85% 120%, rgba(0,0,0,0.05), rgba(0,0,0,0.55) 70%)" }} />
           {/* A big faint logo behind it all — his new school's once committed. */}
-          {(hb.LogoDark || hb.Logo1) && <img key={hb.School} src={hb.LogoDark || hb.Logo1} alt="" aria-hidden="true" className="wdc-anim" style={{ position: "absolute", right: -30, top: -40, width: isMobile ? 190 : 280, opacity: 0.12, pointerEvents: "none", animation: celebrate ? "wdcPop .8s .4s both" : undefined }} />}
+          {(hb.LogoDark || hb.Logo1) && <img key={hb.School} src={hb.LogoDark || hb.Logo1} alt="" aria-hidden="true" className="wdc-anim" style={{ position: "absolute", right: -30, top: -40, width: isMobile ? 190 : 280, opacity: 0.12, pointerEvents: "none", animation: celebrate ? "wdcMark 3.2s .4s ease-out both" : undefined }} />}
           {celebrate ? <div key={`s${celebrate}`} className="wdc-anim" style={{ position: "absolute", top: 0, bottom: 0, left: 0, width: "30%", background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent)", animation: "wdcShine 1.1s .5s ease-out both", pointerEvents: "none" }} /> : null}
           <div style={{ position: "relative", display: "flex", alignItems: "flex-end", gap: isMobile ? 10 : 18, padding: isMobile ? "14px 14px 0" : "18px 22px 0" }}>
             <div style={{ flex: 1, minWidth: 0, paddingBottom: isMobile ? 14 : 18 }}>
@@ -254,6 +279,22 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
             {shot && <img src={`https://a.espncdn.com/i/headshots/college-football/players/full/${p.id}.png`} alt="" onError={() => setShot(false)}
               style={{ flexShrink: 0, height: isMobile ? 110 : 160, width: "auto", objectFit: "contain", alignSelf: "flex-end", filter: "drop-shadow(0 4px 10px rgba(0,0,0,0.45))" }} />}
           </div>
+          {/* Offer sent: your colors sweep across, your logo, the stamp. */}
+          {sent && !celebrate ? (() => {
+            const yb = brand(team) || {};
+            const y1 = yb.Color1 || BLUE;
+            const y2 = yb.Color2 || GOLD;
+            return (
+              <div key={`s${sent.at}`} aria-live="polite" className="wdc-anim" style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 4, animation: "wdcBand 2.3s cubic-bezier(.7,0,.3,1) both", background: `linear-gradient(115deg, ${y1} 0%, ${y1} 55%, color-mix(in srgb, ${y2} 70%, ${y1}) 100%)`, display: "flex", alignItems: "center", justifyContent: "center", gap: isMobile ? 12 : 20, overflow: "hidden" }}>
+                <div className="wdc-anim" style={{ position: "absolute", top: 0, bottom: 0, left: 0, width: "30%", background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent)", animation: "wdcShine 1s .35s ease-out both" }} />
+                <span className="wdc-anim" style={{ display: "inline-flex", animation: "wdcPop .6s .3s cubic-bezier(.2,.8,.2,1) both" }}><Logo b={yb} size={isMobile ? 72 : 112} /></span>
+                <div className="wdc-anim" style={{ animation: "wdcStamp .5s .45s cubic-bezier(.2,.8,.2,1) both", border: "3px solid #fff", borderRadius: 12, padding: isMobile ? "6px 12px" : "8px 18px", background: "rgba(0,0,0,0.35)" }}>
+                  <div style={{ fontSize: isMobile ? 20 : 30, fontWeight: 900, letterSpacing: "0.08em", lineHeight: 1 }}>{sent.keep ? "OFFER TO STAY" : "OFFER SENT"}</div>
+                  <div style={{ fontSize: isMobile ? 13 : 16, fontWeight: 900, letterSpacing: "0.1em", marginTop: 4, color: GOLD }}>{money(sent.nil)} NIL</div>
+                </div>
+              </div>
+            );
+          })() : null}
           {celebrate ? (
             <div key={`c${celebrate}`} aria-live="polite" style={{ position: "absolute", inset: 0, pointerEvents: "none", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <div className="wdc-anim" style={{ animation: "wdcOut 3.6s both" }}>
@@ -346,7 +387,9 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
             </div>
           ) : interest.length === 0 ? <div style={{ fontSize: 13, color: SUB, fontWeight: 700 }}>No offers yet.</div> : (
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {interest.map((x, i) => {
+              {/* Top 5 (yours pinned under them if it's further down), the rest behind the expand. */}
+              {(allOffers ? interest : interest.filter((x, j) => j < TOP_OFFERS || x.yours)).map((x) => {
+                const i = interest.indexOf(x);
                 const g = Math.round(x.grade * 100);
                 const color = x.yours ? GOLD : i === 0 ? GREEN : "#9fc3ff";
                 // NIL, where he'd fit, interest built, how he feels about
@@ -359,10 +402,15 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
                   </>
                 );
                 return (
-                  <div key={x.slug} style={{ display: "grid", gridTemplateColumns: isMobile ? "28px minmax(0,1fr) 40px" : "30px 170px minmax(0,1fr) 270px 44px", alignItems: "center", gap: 10, background: x.yours ? "rgba(246,162,29,0.08)" : "#111a2b", border: `1px solid ${x.yours ? "rgba(246,162,29,0.45)" : LINE}`, borderRadius: 10, padding: "8px 10px" }}>
+                  <div key={x.slug} style={{ display: "grid", gridTemplateColumns: isMobile ? "28px minmax(0,1fr) 40px" : "30px 250px minmax(120px,1fr) 230px 44px", alignItems: "center", gap: 10, background: x.yours ? "rgba(246,162,29,0.08)" : "#111a2b", border: `1px solid ${x.yours ? "rgba(246,162,29,0.45)" : LINE}`, borderRadius: 10, padding: "8px 10px" }}>
                     <Logo b={brand(x.slug)} size={26} />
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ fontWeight: 900, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{state.teams[x.slug]?.school}{x.yours ? (x.draft ? " · not sent" : " · you") : ""}{i === 0 ? " · leader" : ""}</div>
+                      {/* The school, then small tags — the name never loses room to them. */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                        <span style={{ fontWeight: 900, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{state.teams[x.slug]?.school}</span>
+                                {x.yours && <Tag color={GOLD}>{i >= TOP_OFFERS ? `You · #${i + 1}` : "You"}</Tag>}
+                        {i === 0 && <Tag color={GREEN}>Leader</Tag>}
+                      </div>
                       {isMobile && <div style={{ fontSize: 11, fontWeight: 800, color: SUB }}>{meta}</div>}
                       {isMobile && <div style={{ height: 6, borderRadius: 3, background: "#1a2438", marginTop: 4, overflow: "hidden" }}><div style={{ width: `${Math.min(100, g)}%`, height: "100%", background: color }} /></div>}
                     </div>
@@ -377,6 +425,14 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
                   </div>
                 );
               })}
+              {interest.length > TOP_OFFERS && (
+                <button type="button" onClick={() => setAllOffers((v) => !v)} style={{ alignSelf: "center", marginTop: 2, background: "none", border: `1px solid ${LINE}`, borderRadius: 999, color: GOLD, fontWeight: 900, fontSize: 12, padding: "6px 14px", cursor: "pointer", fontFamily: "inherit" }}>
+                  {(() => {
+                    const hidden = interest.filter((x, j) => j >= TOP_OFFERS && !x.yours).length;
+                    return allOffers ? "Show top 5" : `Show ${hidden} more offer${hidden === 1 ? "" : "s"}`;
+                  })()}
+                </button>
+              )}
             </div>
           )}
 
@@ -386,7 +442,7 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
             </div>
           )}
           {/* Keep him: a retention offer (opening windows). */}
-          {canRetain && <Retain p={p} sim={sim} team={team} nil={nil} setNil={setNil} isMobile={isMobile} onClose={onClose} />}
+          {canRetain && <Retain p={p} sim={sim} team={team} nil={nil} setNil={setNil} isMobile={isMobile} />}
 
           {/* The offer: NIL. He judges your room himself. */}
           {canOffer && (
@@ -419,16 +475,19 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
                     <span style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.12em", color: SUB }}>HOW HE SEES YOUR OFFER</span>
                     <span style={{ fontSize: 22, fontWeight: 900, color: yours && top && yours.slug === top.slug ? GREEN : GOLD }}>{yours ? Math.round(yours.grade * 100) : "—"}</span>
                   </div>
-                  {yours && order.map((k) => {
-                    const v = yours.scores[k] || 0;
+                  {/* His letters always; how you score on each only once
+                      you've sent an offer. */}
+                  {order.map((k) => {
+                    const v = yours ? yours.scores[k] || 0 : null;
                     return (
                       <div key={k} style={{ display: "grid", gridTemplateColumns: "22px 96px minmax(0,1fr)", alignItems: "center", gap: 8, marginTop: 7 }}>
                         <Letter l={letterOf(p, k, state.cfg)} />
                         <span style={{ fontSize: 12, fontWeight: 800 }}>{VALUE_LABEL[k]}</span>
-                        <div style={{ height: 8, borderRadius: 4, background: "#1a2438", overflow: "hidden" }}><div style={{ width: `${Math.round(v * 100)}%`, height: "100%", background: v >= 0.66 ? GREEN : v >= 0.33 ? GOLD : RED }} /></div>
+                        {v == null ? <span /> : <div style={{ height: 8, borderRadius: 4, background: "#1a2438", overflow: "hidden" }}><div style={{ width: `${Math.round(v * 100)}%`, height: "100%", background: v >= 0.66 ? GREEN : v >= 0.33 ? GOLD : RED }} /></div>}
                       </div>
                     );
                   })}
+                  {!yours && <div style={{ fontSize: 12, fontWeight: 800, color: SUB, marginTop: 10 }}>Make an offer to see how he sees it.</div>}
                   {/* The recruiting process — happiness with you and interest built. */}
                   {yours && (
                     <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${LINE}` }}>
@@ -442,7 +501,7 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
                       </div>
                     </div>
                   )}
-                  <div style={{ fontSize: 11, fontWeight: 700, color: SUB, marginTop: 8 }}>Bars: how your school scores. Letters: how much he cares (A's first). The factors count 3× the process.</div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: SUB, marginTop: 8 }}>{yours ? "Bars: how your school scores with the offer you sent. " : ""}Letters: how much he cares (A's first). The factors count 3× the process.</div>
                 </div>
               </div>
               {moved ? (
@@ -452,8 +511,8 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
               ) : null}
               {sim.error && <div style={{ marginTop: 10, padding: "8px 12px", background: "#3a1219", color: "#ffb3a8", fontWeight: 800, fontSize: 13, borderRadius: 8 }}>{sim.error}</div>}
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12, flexWrap: "wrap" }}>
-                {mine && !moved && <button type="button" style={pill(false)} onClick={() => { sim.retract(p.id); onClose(); }}>Pull Offer</button>}
-                <button type="button" disabled={nil > max || moved} style={{ ...pill(true, "#2e7d32"), padding: "11px 22px", fontSize: 14, opacity: nil > max || moved ? 0.5 : 1 }} onClick={() => { if (sim.offer(p.id, { nil }) === true) onClose(); }}>{mine ? "New Offer" : "Make Offer"}</button>
+                {mine && !moved && <button type="button" style={pill(false)} onClick={() => sim.retract(p.id)}>Pull Offer</button>}
+                <button type="button" disabled={nil > max || moved} style={{ ...pill(true, "#2e7d32"), padding: "11px 22px", fontSize: 14, opacity: nil > max || moved ? 0.5 : 1 }} onClick={() => sim.offer(p.id, { nil })}>{mine ? "New Offer" : "Make Offer"}</button>
               </div>
             </>
           )}
@@ -466,7 +525,7 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
 // ── Keep him: one of yours deciding in an opening window ──
 // NFL: his chance of leaving, before → with your offer. Transfer: his chance
 // of staying with it, and how he sees staying, factor by factor (A's first).
-function Retain({ p, sim, team, nil, setNil, isMobile, onClose }) {
+function Retain({ p, sim, team, nil, setNil, isMobile }) {
   const { state, view } = sim;
   const nfl = p.considering === "nfl";
   const base = retainOdds(state, p, null);
@@ -533,8 +592,8 @@ function Retain({ p, sim, team, nil, setNil, isMobile, onClose }) {
       </div>
       {sim.error && <div style={{ marginTop: 10, padding: "8px 12px", background: "#3a1219", color: "#ffb3a8", fontWeight: 800, fontSize: 13, borderRadius: 8 }}>{sim.error}</div>}
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12, flexWrap: "wrap" }}>
-        {p.retain && <button type="button" style={pill(false)} onClick={() => { sim.unretain(p.id); onClose(); }}>Pull Offer</button>}
-        <button type="button" disabled={nil > max} style={{ ...pill(true, "#2e7d32"), padding: "11px 22px", fontSize: 14, opacity: nil > max ? 0.5 : 1 }} onClick={() => { if (sim.retain(p.id, { nil })) onClose(); }}>{p.retain ? "Update Offer" : "Make Offer"}</button>
+        {p.retain && <button type="button" style={pill(false)} onClick={() => sim.unretain(p.id)}>Pull Offer</button>}
+        <button type="button" disabled={nil > max} style={{ ...pill(true, "#2e7d32"), padding: "11px 22px", fontSize: 14, opacity: nil > max ? 0.5 : 1 }} onClick={() => sim.retain(p.id, { nil })}>{p.retain ? "Update Offer" : "Make Offer"}</button>
       </div>
     </>
   );
