@@ -41,6 +41,11 @@ const HUB_TABS = [
   ["feed", "Feed"], ["following", "Following"], ["boards", "Boards"], ["draftclass", "My Draft Class"],
   ["sim", "Draft Sim"], ["wepick", "We-Pick"], ["friends", "Friends"], ["messages", "Messages"], ["settings", "Settings"],
 ];
+// The Beta tab's entries — shown to Sim Beta users and admins.
+const BETA_ITEMS = [
+  { to: "/sim", icon: "🎮", title: "Football Sim", blurb: "Call plays against live defenses and run full drives in the Football Simulation Lab." },
+  { to: "/portalsim", icon: "🔁", title: "Portal Sim", blurb: "Run a transfer portal cycle — entries, offers, and commitments across every window." },
+];
 const SIM_VIEWS = [["profile", "Profile"], ["drafts", "My Drafts"]];
 
 const BLUE = "#0055a5";
@@ -123,7 +128,11 @@ export default function UserProfile() {
   const [showRequest, setShowRequest] = useState(false);
   const [showIssue, setShowIssue] = useState(false);
   const [params, setParams] = useSearchParams();
-  const tabs = HUB_TABS.concat(role === "writer" ? [["articles", "My Articles"]] : []);
+  // Beta testers (and admins) get a Beta tab, just ahead of Settings.
+  const hasBeta = simBeta || role === "admin";
+  const tabs = HUB_TABS.slice(0, -1)
+    .concat(hasBeta ? [["beta", "Beta"]] : [], [HUB_TABS[HUB_TABS.length - 1]])
+    .concat(role === "writer" ? [["articles", "My Articles"]] : []);
   const tab = tabs.some(([k]) => k === params.get("tab")) ? params.get("tab") : "feed";
   const openTab = (k) => setParams(k === "feed" ? {} : { tab: k }, { replace: true });
   const [simView, setSimView] = useState("profile");
@@ -333,6 +342,29 @@ export default function UserProfile() {
         {lazyTab(simView === "drafts" ? <SavedSims branding={branding} isMobile={isMobile} /> : <SimProfile branding={branding} names={names} isMobile={isMobile} />)}
       </div>
     );
+  } else if (tab === "beta") {
+    // Everything behind Sim Beta access (users/{uid}.simBeta, granted from
+    // AdminPanel.js's Users table) — see SimRoute.js's canUseSim.
+    body = (
+      <div>
+        <div style={{ color: GOLD, fontSize: 12, fontWeight: 900, letterSpacing: "0.16em", marginBottom: 4 }}>BETA ACCESS</div>
+        <div style={{ color: "#555", fontSize: 13, fontWeight: 700, fontFamily: "Arial, sans-serif", marginBottom: 14 }}>
+          Early looks at what we&apos;re building. Expect rough edges — tell us what you think in Settings → Report an Issue.
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(300px, 1fr))", gap: 14 }}>
+          {BETA_ITEMS.map((b) => (
+            <Link key={b.to} to={b.to} style={{ ...card, display: "flex", flexDirection: "column", gap: 8, padding: isMobile ? 16 : 20, textDecoration: "none", color: "#0f1b2d" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ fontSize: 26 }} aria-hidden="true">{b.icon}</span>
+                <span style={{ fontSize: 17, fontWeight: 900 }}>{b.title}</span>
+              </div>
+              <div style={{ fontSize: 13, color: "#555", fontFamily: "Arial, sans-serif", lineHeight: 1.45, flex: 1 }}>{b.blurb}</div>
+              <div style={{ color: BLUE, fontSize: 13, fontWeight: 900 }}>Open {b.title} →</div>
+            </Link>
+          ))}
+        </div>
+      </div>
+    );
   } else if (tab === "settings") {
     body = (
       <div style={{ ...card, padding: isMobile ? 16 : 24, maxWidth: 560 }}>
@@ -415,12 +447,6 @@ export default function UserProfile() {
 
 
           <div style={{ height: "1px", backgroundColor: "#eee", margin: "18px 0 16px" }} />
-          {(simBeta || role === "admin") && (
-            <>
-              <Link to="/sim" style={{ display: "block", textAlign: "center", color: BLUE, fontWeight: 900, fontSize: "13px", marginBottom: "12px" }}>🎮 Football Sim (beta) →</Link>
-              <Link to="/portalsim" style={{ display: "block", textAlign: "center", color: BLUE, fontWeight: 900, fontSize: "13px", marginBottom: "12px" }}>🔁 Portal Sim (beta) →</Link>
-            </>
-          )}
           <button onClick={logout} style={btnStyle("secondary")}>Log Out</button>
       </div>
     );
