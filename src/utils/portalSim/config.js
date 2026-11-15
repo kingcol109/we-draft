@@ -15,14 +15,15 @@ export const DEFAULT_CONFIG = {
   // Then `windows` portal windows. Players enter the portal only in opening
   // window 2 (user, 2026-11-14) — lateEntryWindows (portal windows that add
   // late entries) stays empty.
-  windows: 5,
-  // The run's choices at the start (user, 2026-11-15): portal length (5 —
-  // the default — or 10 windows; each has its own list narrowing) and
+  // 7 by default (user, 2026-11-15: "draw out recruiting more").
+  windows: 7,
+  // The run's choices at the start (user, 2026-11-15): portal length (5, 7
+  // — the default — or 10 windows; each has its own list narrowing) and
   // transfer frequency — × each player's modeled chance of wanting out
   // (capped at entryCap). Default = the tuned model. Admin likeliness
   // (0–3) isn't scaled — those chances are set by hand.
-  windowOptions: [5, 10],
-  listSizeByWindows: { 5: [null, null, 8, 5, 3, 3], 10: [null, null, 10, 8, 6, 5, 4, 3, 3, 3, 3] },
+  windowOptions: [5, 7, 10],
+  listSizeByWindows: { 5: [null, null, 8, 5, 3, 3], 7: [null, null, 10, 8, 6, 4, 3, 3], 10: [null, null, 10, 8, 6, 5, 4, 3, 3, 3, 3] },
   frequency: { less: 0.6, default: 1, more: 1.6, crazy: 2.6 },
   entryCap: 0.97,
   lateEntryWindows: [],
@@ -34,13 +35,28 @@ export const DEFAULT_CONFIG = {
   tierLabels: { 1: "Blue Blood", 2: "Power Contender", 3: "Power Program", 4: "Group of 5 Plus", 5: "Group of 5" },
   // Portal NIL budget by tier ($).
   budgets: { 1: 20000000, 2: 12000000, 3: 7000000, 4: 3000000, 5: 1500000 },
-  // Offers a CPU team makes per window, by tier.
-  offersPerWindow: { 1: 9, 2: 9, 3: 8, 4: 8, 5: 7 },
+  // Offers a CPU team makes per window, by tier — lower tiers fill more of
+  // their rosters from the portal (user, 2026-11-15: roster targets).
+  offersPerWindow: { 1: 12, 2: 12, 3: 14, 4: 16, 5: 18 },
   // How hard a tier bids, × the player's ask.
   aggressiveness: { 1: 1.15, 2: 1.05, 3: 1.0, 4: 0.9, 5: 0.85 },
 
   // Players. What a transfer star asks for in NIL ($), before his own noise.
   askByStars: { 6: 2500000, 5: 1200000, 4: 500000, 3: 150000, 2: 40000 },
+  // × his ask by position (audit 2026-11-15: a 3★ QB and a 3★ punter were
+  // priced the same). Sub-position first (a DB's CB / S, an OL's OT / IOL),
+  // then position.
+  posAsk: { QB: 2.5, OT: 1.3, EDGE: 1.3, WR: 1.15, CB: 1.15, OL: 1.1, DL: 1.05, DB: 1.05, IOL: 0.95, S: 0.95, LB: 0.9, RB: 0.85, TE: 0.85, K: 0.3, P: 0.25 },
+  // Recent recruits (user, 2026-11-15): the class of 2026 are basically
+  // still freshmen — schools judge them on their recruiting profile, not
+  // just their portal grade. A school's read of him is at least this level
+  // (≈ stars; recruit stars → level, or a national rank of at most n →
+  // level), less classPenalty by seasons of eligibility left (4 = class of
+  // 2026, full; 3 = class of 2025, a bit less; older: portal grade only).
+  recruits: { level: { 5: 4.5, 4: 3.5, 3: 2 }, top: [[50, 4.75], [100, 4.25], [250, 3.75]], classPenalty: { 4: 0, 3: 0.75 } },
+  // Service academies: their players rarely transfer (× the modeled chance;
+  // admin likeliness still wins), and CPU academies don't recruit the portal.
+  academies: { schools: ["Army", "Navy", "Air Force"], entry: 0.15 },
   // The tier a player "belongs" at, by stars — the bigger the gap to his
   // school's tier, the likelier he leaves.
   idealTier: { 6: 1, 5: 1.5, 4: 2.5, 3: 3.5, 2: 4.5 },
@@ -120,7 +136,7 @@ export const DEFAULT_CONFIG = {
   // Narrowing his list: the schools he's still listening to after each
   // portal window (index = window; null = all). The rest are cut — and can't
   // offer him again.
-  listSize: [null, null, 8, 5, 3, 3],
+  listSize: [null, null, 10, 8, 6, 4, 3, 3],
   ambition: { perTier: 0.15, role: { starter: 1, rotation: 0.6, reserve: 0.15, none: 0 }, stars: { 6: 1.3, 5: 1.2, 4: 1.1, 3: 1, 2: 0.4 } },
   // Transfer likeliness (user, 2026-11-14), set per player on the admin's
   // Grades tab: his chance of entering, replacing the model's — 3 every time
@@ -145,11 +161,33 @@ export const DEFAULT_CONFIG = {
   roleWorth: { starter: 1, rotation: 0.7, reserve: 0.35, none: 0.2 },
   retainMinWorth: 15,
 
-  // Home this close to campus counts as near (for "closer to home").
-  homeStayMiles: 250,
+  // Roster sizes by position (user, 2026-11-15 — real FBS numbers): [avg,
+  // sd]. Each school draws its target when the portal opens (within 2 sd);
+  // DL covers DL + EDGE. K / P aren't in them (teams keep what they have).
+  // The draws are then scaled so the whole roster (K / P included) comes to
+  // rosterCap, and no position goes under its starters + depth + 1 (or avg
+  // − sd). Bodies and depth signings stop at the cap; starters (holes,
+  // upgrades) don't.
+  rosterSize: { QB: [5.3, 0.9], RB: [7.6, 1.5], WR: [15, 2.4], TE: [7.3, 1.4], OL: [19.3, 3], DL: [17.9, 3.5], LB: [13.3, 5.2], DB: [21.5, 2.8] },
+  rosterCap: 105,
+  // Room a CPU school keeps for portal signings when it makes room (engine
+  // shedRosters, user 2026-11-15): over rosterCap with who's staying + its
+  // high school class + this, it cuts its least valuable players into the
+  // portal.
+  portalRoom: { 1: 8, 2: 10, 3: 12, 4: 14, 5: 16 },
+  // The implied high school class (the sim has no freshmen): this many of
+  // each school's roster gap, spread over its shortages; the portal fills
+  // the rest.
+  hsClass: 22,
 
   // Roster targets by position (starters a team wants) — drives needs.
   starters: { QB: 1, RB: 1, WR: 3, TE: 1, OL: 5, DL: 2, EDGE: 2, LB: 2, DB: 4, K: 1, P: 1 },
+
+  // NIL in a player's grade of an offer (models nilScore): saturating —
+  // (1 − e^(−curve × NIL/ask)), full at `full` × his ask — blended (rel)
+  // with how it stacks up against the best other offer (none: field0 × his
+  // ask; relSpan × ask over it scores 1).
+  nilModel: { curve: 2, full: 2, rel: 0.4, relSpan: 1, field0: 1 },
 
   // Recruitments: interest an offer builds each window it stands (grade
   // points, capped) — offering early helps.
@@ -170,43 +208,109 @@ export const DEFAULT_CONFIG = {
   // Commit when the best offer's grade reaches this share of his market
   // grade, falling window by window (start → end), so players get less
   // picky as the portal winds down.
-  commitShare: [1.0, 0.75],
+  commitShare: [1.3, 0.75],
+  // Windows an offer must stand before he can take it, by stars — top
+  // players' recruitments run longer (user, 2026-11-15). The last window he
+  // takes his best offer regardless.
+  patience: { 6: 3, 5: 2, 4: 2, 3: 1, 2: 1 },
 
 
-  // Team boards: how much each team's own taste moves its rankings (±).
-  boardNoise: 0.25,
+  // Boards (contacts) & the evaluation period (user, 2026-11-15). Portal
+  // window evalWindow is the evaluation period — no offers. Contacting a
+  // player puts him on a school's board, and interest builds from then.
+  // sizes: contacts by portal window (the last carries on) — 10 in the
+  // evaluation period, 15 in window 2, 25 after
+  // (earlyInterest). CPU schools work their boards in cpuPlan (engine): a
+  // school is "in it" for a player within `gap` of the school he likes best
+  // AND in his top maxRank; it drops the ones it isn't, feels out perSpot
+  // contacts per open want, and offers the best one it's in it for. snub:
+  // grade points a school loses with a player while it chases others at his
+  // position (× others offered ÷ its wants there, capped at 1) — all of it
+  // if it hasn't offered him, half if it has.
+  board: { sizes: [10, 15, 25], evalWindow: 1, gap: 0.12, maxRank: 6, perSpot: 2, snub: 0.12 },
 
   // CPU schools' offers (user, 2026-11-14). An open offer counts as a
   // signing (one QB spot → one QB chased at a time).
   cpu: {
-    // Rotation players a team wants behind its starters (open spots fill
-    // these too); a depth-only spot ranks at depthNeed.
+    // Rotation players a team wants behind its starters.
     depth: { QB: 0, RB: 1, WR: 2, TE: 1, OL: 2, DL: 2, EDGE: 1, LB: 1, DB: 2, K: 0, P: 0 },
-    depthNeed: 0.4,
-    // How hard a team chases a transfer by stars (× its interest) — the
-    // top of the portal draws the most.
-    starPull: { 6: 3, 5: 2.3, 4: 1.6, 3: 1, 2: 0.6 },
-    // Its board's taste moves its price: ask × e^(taste × this), taste −1..1
-    // (× valueCenter — ≈ 0.55×–1.8× before the best bid wins) — the market's randomness.
-    valueSpread: 0.6,
+    // Starters by sub-position (the pool's CB / S, OT / IOL): a team wants
+    // its corners and safeties, tackles and interior linemen, separately.
+    // A player with no sub-position fills whichever is shorter.
+    subStarters: { DB: { CB: 2, S: 2 }, OL: { OT: 2, IOL: 3 } },
     // Where teams' prices center, × his ask. Several bidders → the best bid
     // wins, so a bit under 1 keeps the deals themselves averaging near his
     // ask (the market price): some well over, some at a discount.
-    valueCenter: 0.7,
-    // Extra for a top transfer at a position it really needs.
-    topPremium: { 6: 1.25, 5: 1.2, 4: 1.1 },
+    valueCenter: 0.65,
     // ± half of this on its price each window.
     windowNoise: 0.1,
-    // Kept back for each other open spot: the ask of a typical target at
-    // its tier (stars) × reserveShare.
-    reserveStars: { 1: 4, 2: 4, 3: 3, 4: 3, 5: 2 },
+    // Kept back for each important open want after this one: a typical
+    // target's ask at its level × reserveShare.
     reserveShare: 0.75,
+    // Who might fit a want: the best `pool` players at the position (as it
+    // sees them); for bodies / depth, his level less bodyCrowd per school
+    // already on him (it looks past the most contested).
+    pool: 80,
+    bodyCrowd: 0.4,
+    // At most this many upgrade wants (its biggest), by tier — a school
+    // works on a handful of spots, not every starter under its standard.
+    // Kickers / punters are never upgrades (only holes).
+    maxUpgrades: { 1: 5, 2: 5, 3: 4, 4: 4, 5: 3 },
+    // Paying to get in (audit 2026-11-15: money couldn't buy standing): for
+    // a want of payUpPri or more, a school counts itself in for a player if
+    // an offer up to its most (bid cap, and payShare of what it has left —
+    // payShareQB at QB) would put it in.
+    payUpPri: 1,
+    payShare: 0.4,
+    payShareQB: 0.65,
+    // Desperation at a hole, growing from the first offer window (0) to the
+    // last (1): the bar drops by up to minDrop (never to a player no better
+    // than who it has), "in it" widens by up to gap and rank. In its last
+    // freeFrom offer passes it offers the best fit it can find, in it or not.
+    desperate: { minDrop: 1.25, gap: 0.18, rank: 4, freeFrom: 2 },
     // Short on money, it offers what's left if that's at least this share
     // of its price and of his ask — else it moves on.
     stretch: 0.85,
-    // Realistic targets only: his grade of the school with its offer must
-    // reach this share of his commit bar this window.
-    realism: 0.9,
+    // The plan (engine cpuPlan, user 2026-11-15). standard: the level (eff
+    // ≈ stars) a tier wants in its starters — under it by upgradeGap or more
+    // is an upgrade want (a player must beat the starter by upgradeBy); more
+    // than holeBelow under it, or no one, is a hole. Rotation players short
+    // of cpu.depth (within depthBelow of the standard) are depth wants.
+    // posWeight: how much a position matters. A want of backupPri or more it
+    // isn't leading for can carry a second offer. directFrom: windows after
+    // the evaluation period before it offers players it never contacted.
+    // standardBonus: positions held higher (a blue blood with a 4★ QB still
+    // looks to upgrade; a Group of 5 with one is content).
+    standard: { 1: 4.25, 2: 3.9, 3: 3.5, 4: 3.1, 5: 2.75 },
+    standardBonus: { QB: 0.75 },
+    upgradeGap: 0.5,
+    upgradeBy: 0.75,
+    holeBelow: 2.25,
+    holeMin: 1.25,
+    depthBelow: 1.25,
+    holePri: 2.5,
+    depthPri: 0.5,
+    backupPri: 2,
+    directFrom: 2,
+    // Money held back while bidding: for its next few important wants only.
+    reserveWants: 3,
+    // A school's own read of a player: his stars ± a normal draw this wide
+    // (engine opinionOf) — it drives whom it wants and what it bids.
+    opinionSd: 0.45,
+    // Bidding (engine bidFor): his ask is the starting point. +competition
+    // per other school offering (up to competitionCap of them), +scarcity at
+    // a big want with fewer than scarceAlts others it's in it for. Behind on
+    // a player it wants: raise its offer by `raise`, or to overField past
+    // the best one on the table — never past maxMult × ask × likeBase^(its opinion).
+    // likeBase: its price × likeBase^(its opinion − his stars). floor: it
+    // never opens under this × his ask.
+    bid: { competition: 0.04, competitionCap: 6, scarcity: 0.3, scarceAlts: 3, raise: 0.1, overField: 0.04, maxMult: 1.6, likeBase: 1.7, floor: 0.75 },
+    // Filling its roster (cfg.rosterSize, cfg.hsClass): a body is anyone
+    // within bodyBelowStd of its standard (never under bodyFloor).
+    bodyBelowStd: 2.5,
+    bodyFloor: 0.25,
+    bodyPri: 0.3,
+    posWeight: { QB: 1.6, EDGE: 1.2, OL: 1, WR: 1, DB: 1, DL: 1, LB: 0.9, RB: 0.8, TE: 0.7, K: 0.3, P: 0.3 },
   },
 };
 

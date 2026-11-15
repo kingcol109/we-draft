@@ -71,13 +71,30 @@ export const FACTORS = ["tier", "nil", "loc", "pt", "success", "dev"];
 export function schoolScores(p, team, ctx, cfg) {
   return {
     tier: Math.max(0, (5 - (team.tier || 5)) / 4), // FCS (tier 6): 0
-    nil: Math.min(1.5, (ctx.nil || 0) / Math.max(1, p.ask)) / 1.5,
+    nil: nilScore(ctx.nil, p.ask, ctx.field, cfg),
     loc: proximity(milesBetween(p.home, team.loc)),
     pt: ctx.pt ?? 0,
     success: team.success ?? 0.5,
     // Development only pays off for a player who sees the field.
     dev: (team.dev?.[p.pos] ?? 0) * (cfg.devPtFloor + (1 - cfg.devPtFloor) * (ctx.pt ?? 0)),
   };
+}
+// NIL, 0..1 (user, 2026-11-15). Weighing offers (ctx.field — the best
+// other offer on the table): money saturates (nilModel.curve, ~full at
+// nilModel.full × his ask — past that more barely moves him), and part of it
+// (nilModel.rel) is how it stacks up against the field (none: his ask ×
+// field0), so blowing past the field matters — most to a player who cares
+// about NIL, whose letters weight this factor. No field (his home school,
+// the market he weighs entering against): the original linear scale, so the
+// entry model is unchanged.
+export function nilScore(nil, ask, field, cfg) {
+  const r = Math.max(0, nil || 0) / Math.max(1, ask);
+  if (field == null) return Math.min(1.5, r) / 1.5;
+  const n = cfg.nilModel;
+  const sat = Math.min(1, (1 - Math.exp(-n.curve * r)) / (1 - Math.exp(-n.curve * n.full)));
+  const f = Math.max(field, ask * n.field0);
+  const rel = Math.max(0, Math.min(1, 0.5 + (nil - f) / (n.relSpan * Math.max(1, ask))));
+  return (1 - n.rel) * sat + n.rel * rel;
 }
 // His grade of a school: his personality's weighted average of the scores.
 export function gradeFrom(p, scores) {
@@ -171,8 +188,23 @@ export function transferReason(p, homeScores, cfg, homeTier) {
 export const topValues = (p, n = 3) => byLetter(p).slice(0, n);
 
 // ── A player's price and taste ──
-// His NIL ask, with his own ±25% noise (rand 0..1).
-export const askFor = (p, cfg, rand) => Math.round((cfg.askByStars[p.stars] || cfg.askByStars[2]) * (0.75 + rand * 0.5));
+// His NIL ask: his stars' price × his position's (cfg.posAsk — sub-position
+// first), with his own ±25% noise (rand 0..1).
+export const posAskOf = (p, cfg) => cfg.posAsk?.[p.sub] ?? cfg.posAsk?.[p.pos] ?? 1;
+export const askFor = (p, cfg, rand) => Math.round((cfg.askByStars[p.stars] || cfg.askByStars[2]) * posAskOf(p, cfg) * (0.75 + rand * 0.5));
+// A recent recruit's level from his recruiting profile (user, 2026-11-15:
+// the class of 2026 are basically still freshmen) — recruit stars or
+// national rank (cfg.recruits), less his class's penalty. null: not a
+// recent recruit, or no profile.
+export function recruitLevel(p, cfg) {
+  const r = cfg.recruits;
+  const pen = r?.classPenalty?.[p.elig];
+  if (pen == null) return null;
+  const rank = Number(p.rRank) || 0;
+  let lvl = r.level?.[p.rStars] ?? null;
+  if (rank) for (const [n, v] of r.top || []) if (rank <= n) { lvl = Math.max(lvl ?? v, v); break; }
+  return lvl == null ? null : lvl - pen;
+}
 // His interests (user, 2026-11-14): letters, not percentages — three A's,
 // then a B, a C and an F (cfg.letterWeights: the A's make 80% of what he
 // weighs, 26.67% each; B 10%, C 7%, F 3%). Which factors land where is drawn
@@ -226,78 +258,14 @@ export function instantAsk(p, cfg) {
 }
 // A player's worth to a team (before team taste): stars, then seasons left.
 export const playerValue = (p) => p.stars * 10 + Math.min(p.elig || 0, 4);
-
-// ── Team needs ──
-// have = { [pos]: { starter, rotation } } still on the roster (after the
-// draft and transfers out, plus anyone signed), lost = { [pos]: starters
-// lost }. → { [pos]: need score } (0 = set).
-export function needsFrom(have, lost, cfg) {
-  const out = {};
-  Object.entries(cfg.starters).forEach(([pos, target]) => {
-    const h = have[pos] || { starter: 0, rotation: 0 };
-    const depth = h.starter + h.rotation * 0.5;
-    out[pos] = Math.max(0, target - depth) + (lost[pos] || 0) * 0.5;
-  });
-  return out;
-}
-
-// ── CPU offers (user, 2026-11-14) ──
-// Schools offer as if every offer will be accepted: an open offer fills a
-// roster spot, so a team with one QB spot chases one QB at a time and moves
-// on only when he signs elsewhere or cuts them. They spend with a plan (money
-// kept back for the other spots still open), chase players they can
-// realistically land, and go hard after top transfers at positions of need.
-// Every team prices players its own way — its board (boardTaste) moves both
-// its ranking and its price, so a player can go well over his ask or be had
-// at a discount. His ask is the market average.
-
-// Open spots by position: the starters it's short (a rotation player covers
-// half a spot), or the starters + rotation (cfg.cpu.depth) it wants minus
-// both — whichever is more. A lost starter's extra need ranks the spot, it
-// doesn't add one.
-export function openSlots(have, cfg) {
-  const out = {};
-  Object.entries(cfg.starters).forEach(([pos, target]) => {
-    const h = have[pos] || { starter: 0, rotation: 0 };
-    const starters = Math.ceil(target - h.starter - h.rotation * 0.5 - 1e-9);
-    const depth = target + (cfg.cpu.depth?.[pos] ?? 0) - h.starter - h.rotation;
-    out[pos] = Math.max(0, starters, depth);
-  });
-  return out;
-}
-// How much a CPU team wants a portal player: value (top transfers pull
-// hardest — cfg.cpu.starPull) × need × fit to its tier × its own board
-// (boardTaste, ±cfg.boardNoise). 0 = not interested.
-export function teamInterest(team, p, need, boardTaste, cfg) {
-  if (!need) return 0;
-  const ideal = cfg.idealTier[p.stars] ?? 4.5;
-  // Teams aim at players around their level: reaching up is a long shot.
-  const fit = 1 / (1 + Math.max(0, team.tier - ideal - 0.5) * 0.4 + Math.max(0, ideal - team.tier - 1.5) * 0.3);
-  return playerValue(p) * (cfg.cpu.starPull[p.stars] ?? 1) * Math.min(need, 3) * fit * (1 + boardTaste * cfg.boardNoise);
-}
-// What a team thinks he's worth: his ask × valueCenter × its tier's aggressiveness × its
-// board's taste (e^(taste × cfg.cpu.valueSpread)) × a premium for a top
-// transfer at a real need, ± a little noise each window (rand 0..1).
-export function teamValuation(team, p, boardTaste, need, cfg, rand) {
-  const c = cfg.cpu;
-  const premium = need >= 1 ? (c.topPremium[p.stars] ?? 1) : 1;
-  const mult = (c.valueCenter ?? 1) * (cfg.aggressiveness[team.tier] || 1) * Math.exp(boardTaste * c.valueSpread) * premium * (1 + (rand - 0.5) * c.windowNoise);
-  return Math.round((p.ask * mult) / 1000) * 1000;
-}
-// Money a team keeps back for each other open spot while it bids.
-export const slotReserve = (team, cfg) => (cfg.askByStars[cfg.cpu.reserveStars[team.tier] ?? 2] || 0) * cfg.cpu.reserveShare;
-// The offer: NIL at the team's valuation. (pt: a leftover the engine
-// ignores — players judge the room, not promises.)
-export function offerFor(team, p, wouldStart, cfg, rand, { boardTaste = 0, need = 1 } = {}) {
-  return { nil: teamValuation(team, p, boardTaste, need, cfg, rand), pt: wouldStart ? "starter" : "rotation" };
-}
+// (CPU wants, bids and offers live in the engine — cpuPlan, wantsOf, bidFor.)
 
 // ── The player's choice ──
 // An offer's appeal: his grade of that school with the NIL offered and the
 // playing time he'd get (ctx.pt from the engine — the room, or a believable
 // promise), plus a little noise.
 export function offerUtility(p, team, offer, ctx, cfg, noise) {
-  return schoolGrade(p, team, { nil: offer.nil, pt: ctx.pt }, cfg) + noise * cfg.choiceNoise;
+  return schoolGrade(p, team, { nil: offer.nil, pt: ctx.pt, field: ctx.field }, cfg) + noise * cfg.choiceNoise;
 }
 // The bar an offer's overall grade must clear to commit, in window w of n:
 // a share of his market (a typical school's A–F grade with a fresh, happy

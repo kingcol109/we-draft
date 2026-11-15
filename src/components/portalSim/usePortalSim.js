@@ -18,19 +18,18 @@ import { deskPosts } from "../../utils/portalSim/desk";
 import {
   initPortalSim, openNflWindow, endNflWindow, endRetainWindow, endWindow,
   userOffer, retractOffer, userRetain, clearRetain, teamView, portalPlayers,
+  toggleEval, boardOf, boardLimit, isEvalWindow,
 } from "../../utils/portalSim/engine";
 
 // The desk stays on screen but quiet for now (user, 2026-11-14: "keep it
 // there but don't roll any messages") — true turns its posts back on.
 const DESK_LIVE = false;
 
-export default function usePortalSim({ data, team, seed, live = false, frequency = "default", windows = 5 }) {
+export default function usePortalSim({ data, team, seed, live = false, frequency = "default", windows = 7 }) {
   const [state, setState] = useState(() => initPortalSim(data.pool, { config: data.config, tiers: data.tiers, factors: data.factors, userTeams: [team], seed, live, frequency, windows }));
   const [phase, setPhase] = useState("ready");
   const [recap, setRecap] = useState(null);
   const [error, setError] = useState("");
-  // Players the user starred onto My Board (for this run).
-  const [starred, setStarred] = useState(() => new Set());
   const [feed, setFeed] = useState([]);
   const desk = useRef({ team, records: data.records, last: { id: null }, seq: 0 });
   const post = useCallback((s, events) => {
@@ -38,11 +37,6 @@ export default function usePortalSim({ data, team, seed, live = false, frequency
     const posts = deskPosts(s, events, desk.current);
     if (posts.length) setFeed((f) => [...posts, ...f]);
   }, []);
-  const toggleStar = useCallback((pid) => setStarred((cur) => {
-    const next = new Set(cur);
-    if (next.has(pid)) next.delete(pid); else next.add(pid);
-    return next;
-  }), []);
 
   // Start: opening window 1 opens and the user can negotiate right away.
   const start = useCallback(() => {
@@ -62,6 +56,16 @@ export default function usePortalSim({ data, team, seed, live = false, frequency
   }, [state, post]);
   const offer = useCallback((pid, terms) => apply(userOffer(state, team, pid, terms)), [state, team, apply]);
   const retract = useCallback((pid) => setState((s) => retractOffer(s, team, pid)), [team]);
+  // Your board (user, 2026-11-15): Contact — up to board.sizes[window] portal players
+  // you're evaluating (engine toggleEval); interest builds from the day
+  // they're on it. Kept on players after they sign, for Results.
+  const toggleStar = useCallback((pid) => apply(toggleEval(state, team, pid)), [state, team, apply]);
+  const starred = useMemo(() => new Set(Object.values(state.players).filter((p) => p.evals?.[team] != null).map((p) => p.id)), [state.players, team]);
+  const board = useMemo(() => {
+    const count = boardOf(state, team).length;
+    const max = boardLimit(state);
+    return { count, limit: max, full: count >= max, evalPeriod: isEvalWindow(state) };
+  }, [state, team]);
   const retain = useCallback((pid, terms) => apply(userRetain(state, team, pid, terms)), [state, team, apply]);
   const unretain = useCallback((pid) => setState((s) => clearRetain(s, team, pid)), [team]);
   // End the window: "Simming" for a beat, then straight into the next window
@@ -89,5 +93,5 @@ export default function usePortalSim({ data, team, seed, live = false, frequency
 
   const view = useMemo(() => teamView(state, team), [state, team]);
   const portal = useMemo(() => portalPlayers(state), [state]);
-  return { state, stage: state.phase, phase, recap, error, view, portal, feed, start, offer, retract, retain, unretain, end, dismissRecap, starred, toggleStar, card, openCard, closeCard, clearError: () => setError("") };
+  return { state, stage: state.phase, phase, recap, error, view, portal, feed, start, offer, retract, retain, unretain, end, dismissRecap, starred, toggleStar, board, card, openCard, closeCard, clearError: () => setError("") };
 }

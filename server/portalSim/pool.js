@@ -31,7 +31,7 @@
 //                          height (in), weight, recruit stars, home state,
 //                          packed stats (src/utils/portalSim/stats.mjs),
 //                          sub-position: DB "CB" | "S", OL "OT" | "IOL",
-//                          else ""]] }
+//                          else "", recruit national rank (null: none)]] }
 //     role: s starter, r rotation, v reserve, n none
 //     flags: "d" declared for the draft, "l" in the real portal
 //
@@ -68,18 +68,18 @@ async function buildPortalSimPool(db, { dry = false } = {}) {
   const { packStats } = await import("../../src/utils/portalSim/stats.mjs");
   const [teamsSnap, schoolsSnap, rosterSnap, starsSnap, pffSnap, linkSnap, wdSnap, gradesSnap] = await Promise.all([
     db.collection("compSnapshots").doc("_cfbTeams").get(),
-    db.collection("schools").select("School", "Latitude", "Longitude", "Logo1", "LogoDark", "Color1", "Color2").get(),
+    db.collection("schools").select("School", "Latitude", "Longitude", "Logo1", "LogoDark", "LogoBlack", "Color1", "Color2").get(),
     db.collection("cfbRosters").get(),
     db.collection("portalStars").get(),
     db.collection("pffGrades").get(),
     db.collection("cfbdPlayers").where("mappingStatus", "in", ["suggested", "verified"]).select("wedraftPlayerId").get(),
-    db.collection("players").select("Declared", "InPortal", "Eligible").get(),
+    db.collection("players").select("Declared", "InPortal", "Eligible", "RecruitYear").get(),
     db.collection("config").doc("portalGrades").get(),
   ]);
   const locks = gradesSnap.data()?.rows || {};
   const fbs = teamsSnap.data()?.teams || {};
   const slugBySchool = new Map(Object.entries(fbs).map(([slug, t]) => [t.School, slug]));
-  const brandBySchool = new Map(schoolsSnap.docs.map((d) => d.data()).filter((s) => s.School).map((s) => [s.School, { School: s.School, Logo1: s.Logo1 || "", LogoDark: s.LogoDark || "", Color1: s.Color1 || "", Color2: s.Color2 || "" }]));
+  const brandBySchool = new Map(schoolsSnap.docs.map((d) => d.data()).filter((s) => s.School).map((s) => [s.School, { School: s.School, Logo1: s.Logo1 || "", LogoDark: s.LogoDark || "", LogoBlack: s.LogoBlack || "", Color1: s.Color1 || "", Color2: s.Color2 || "" }]));
   const fcsSlug = (school) => `fcs-${String(school).toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
   const locBySchool = new Map(schoolsSnap.docs.map((d) => d.data()).filter((s) => s.School).map((s) => [s.School, [Number(s.Latitude) || null, Number(s.Longitude) || null]]));
   const stars = new Map();
@@ -88,6 +88,14 @@ async function buildPortalSimPool(db, { dry = false } = {}) {
   pffSnap.docs.forEach((d) => Object.entries(d.data().players || {}).forEach(([id, r]) => pff.set(id, r)));
   const wdOf = new Map(linkSnap.docs.map((d) => [d.id, d.data().wedraftPlayerId]).filter(([, v]) => v));
   const wd = new Map(wdSnap.docs.map((d) => [d.id, d.data()]));
+
+  // Seasons left: our saved RecruitYear first (the admin's — CFBD often has
+  // no class for transfers; user 2026-11-15: class of 2022 or earlier must
+  // leave), then CFBD's recruiting class / class year.
+  const eligOf = (p, season) => {
+    const ry = Number(wd.get(wdOf.get(String(p.id)))?.RecruitYear);
+    return ry > 1990 ? eligLeft({ rc: ry }, season) : eligLeft(p, season);
+  };
 
   const teamList = [];
   const teamIdx = new Map();
@@ -101,7 +109,7 @@ async function buildPortalSimPool(db, { dry = false } = {}) {
       const wdId = wdOf.get(String(p.id));
       return !!decodeGrade(locks[String(p.id)] || (wdId && locks[`wd:${wdId}`])).s;
     };
-    if (fcs && !(t.players || []).some((p) => graded(p) && eligLeft(p, t.season) > 0)) return;
+    if (fcs && !(t.players || []).some((p) => graded(p) && eligOf(p, t.season) > 0)) return;
     const slug = fcs ? fcsSlug(t.school) : slugBySchool.get(t.school);
     if (t.season && (!season || t.season > season)) season = t.season;
     if (!teamIdx.has(slug)) {
@@ -135,9 +143,9 @@ async function buildPortalSimPool(db, { dry = false } = {}) {
     });
 
     players.forEach(({ p, pos, role, sub }) => {
-      if (fcs && !(graded(p) && eligLeft(p, t.season) > 0)) return;
+      if (fcs && !(graded(p) && eligOf(p, t.season) > 0)) return;
       const id = String(p.id);
-      const elig = eligLeft(p, t.season);
+      const elig = eligOf(p, t.season);
       const st = String(p.home || "").split(",").pop().trim().toUpperCase();
       const home = Array.isArray(p.hl) ? p.hl : STATE_CENTER[st] || [null, null];
       const wdId = wdOf.get(id) || "";
@@ -148,7 +156,7 @@ async function buildPortalSimPool(db, { dry = false } = {}) {
       // loads (utils/portalSim/data.js attachLocks), so a lock or unlock
       // counts right away without a rebuild.
       rows.push([id, `${p.first || ""} ${p.last || ""}`.trim(), pos, teamIdx.get(slug), stars.get(id) || 2, elig, role, home[0], home[1], wdId, flags, lock.l,
-        Number(p.ht) || null, Number(p.wt) || null, Number(p.stars) || null, st || p.hss || "", packStats(p.s), sub]);
+        Number(p.ht) || null, Number(p.wt) || null, Number(p.stars) || null, st || p.hss || "", packStats(p.s), sub, Number(p.rank) || null]);
     });
   });
 

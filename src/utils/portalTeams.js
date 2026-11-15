@@ -18,7 +18,7 @@ export const portalTeamSlug = (name) => String(name || "").toLowerCase().replace
 
 const pick = (s) => ({
   School: s.School || "", Short: s.Short || "", Mascot: s.Mascot || "", Conference: s.Conference || "", State: s.State || "",
-  Logo1: s.Logo1 || "", LogoDark: s.LogoDark || "", Color1: s.Color1 || "", Color2: s.Color2 || "", Wordmark: s.Wordmark || "", WordmarkDark: s.WordmarkDark || "",
+  Logo1: s.Logo1 || "", LogoDark: s.LogoDark || "", LogoBlack: s.LogoBlack || "", Color1: s.Color1 || "", Color2: s.Color2 || "", Wordmark: s.Wordmark || "", WordmarkDark: s.WordmarkDark || "",
   teamSlug: s.Slug || "",
 });
 

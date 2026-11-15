@@ -464,8 +464,12 @@ function Row({ r, g, wd, rec, comm, busy, view, onLock, onLikely }) {
         ) : <span style={{ color: "#c3cad4", fontWeight: 900 }}>—</span>}
       </span>
       <span style={{ fontSize: "11px", fontWeight: 700, color: r.stats ? "#444" : "#c3cad4", lineHeight: 1.35 }}>{r.stats || "—"}</span>
-      <span style={{ fontSize: "12px", fontWeight: 800, color: rec ? INK : "#c3cad4", whiteSpace: "nowrap" }} title={rec ? `${rec.pos} · ${rec.cat}` : "No PFF grade"}>
-        {rec ? <>{rec.g}<span style={{ color: "#8a97ab" }}> · {rec.sn} sn</span></> : "—"}
+      <span style={{ fontSize: "12px", fontWeight: 800, color: rec ? INK : "#c3cad4", whiteSpace: "nowrap", lineHeight: 1.3 }}
+        title={rec ? `${rec.pos} · ${rec.cat}${rec.rk != null ? ` · national rank #${rec.rk} of ${rec.of} qualified FBS ${rec.pos}s` : " · not ranked (too few snaps)"}` : "No PFF grade"}>
+        {rec ? <>{rec.g}<span style={{ color: "#8a97ab" }}> · {rec.sn} sn</span>
+          {/* National rank among qualified FBS players at his PFF position (pffData.js rk/of). */}
+          <div style={{ fontSize: "10px", fontWeight: 900, color: rec.rk != null ? BLUE : "#c3cad4" }}>{rec.rk != null ? `#${rec.rk}/${rec.of} ${rec.pos}` : "unranked"}</div>
+        </> : "—"}
       </span>
       <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
         <TransferStars stars={r.auto} size="sm" />
