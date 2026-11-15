@@ -18,8 +18,8 @@
 //   portalStars/_wedraft      { rows: { [wdId]: [stars, basis, cfbdId|""] } }
 //                             the public portal's one read
 //   portalStars/_meta         { season, builtAt, players, byStars, byBasis, review }
-// portalStars/_overrides (admin edits: { rows: { [cfbdId | "wd:"+wdId]:
-// { s, note, at } } }) is never touched here.
+// The admin's locks and likeliness (config/portalGrades — the Grades tab)
+// are never touched here.
 //
 // Runs: Admin → Players → Transfer Portal → Grades "Rebuild" (api/portal-sync
 // action "stars"), the end of scripts/syncCfbdRosters.js, or
@@ -28,7 +28,7 @@
 const { FieldValue } = require("firebase-admin/firestore");
 
 async function buildPortalStars(db, { dry = false } = {}) {
-  const { autoStars } = await import("../../src/utils/portalStars.mjs");
+  const { autoStars, eligLeft, statLine } = await import("../../src/utils/portalStars.mjs");
 
   const [rosterSnap, pffSnap, gradesDoc, linkSnap, playerSnap] = await Promise.all([
     db.collection("cfbRosters").get(),
@@ -76,9 +76,10 @@ async function buildPortalStars(db, { dry = false } = {}) {
       const id = String(p.id);
       const wdId = wdOf.get(id) || "";
       if (wdId && pastClass.has(wdId)) return;
-      const g = autoStars({ draftAvg: wdId ? draftAvg(wdId) : null, pff: pff.get(id) || null, stats: p.s || null });
+      const g = autoStars({ draftAvg: wdId ? draftAvg(wdId) : null, pff: pff.get(id) || null, stats: p.s || null, recruit: { stars: p.stars, rank: p.rank } });
       tally(g);
-      rows[id] = [g.stars, g.basis, g.review ? 1 : 0, `${p.first || ""} ${p.last || ""}`.trim(), p.pos || "", wdId];
+      rows[id] = [g.stars, g.basis, g.review ? 1 : 0, `${p.first || ""} ${p.last || ""}`.trim(), p.pos || "", wdId,
+        eligLeft(p, t.season), Number(p.stars) || 0, Number(p.rank) || 0, statLine(p.s)];
       if (wdId) wedraft[wdId] = [g.stars, g.basis, id];
     });
     teamDocs.push([d.id, { team: t.team || "", school: t.school || t.team || "", season: t.season || null, rows }]);

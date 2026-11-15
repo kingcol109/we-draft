@@ -118,6 +118,9 @@ const cfbd = {
   recruits: (params) => get("/recruiting/players", params),
   // NFL draft picks for a year — collegeAthleteId, collegeTeam, hometownInfo (all tiers).
   draftPicks: (params) => get("/draft/picks", params),
+  // Team win-loss records by season ({ year, team?, conference? }) — the
+  // Portal Sim's "recent success" (scripts/buildPortalSimRecords.mjs).
+  records: (params) => get("/records", params),
   // Live — Patreon Tier 1+ (scoreboard) / Tier 2+ (live plays).
   scoreboard: (params) => get("/scoreboard", params),
   livePlays: (gameId) => get("/live/plays", { gameId }),

@@ -7,10 +7,16 @@
 // those over these defaults.
 
 export const DEFAULT_CONFIG = {
-  // Signing windows. Window 1 opens with draft declarations and transfer
-  // entries; later windows can add a few late entries.
+  // Two opening windows (user, 2026-11-14), then the portal itself:
+  //   Opening 1  NFL decisions — who leaves for the draft; on-the-fence
+  //              players can be retained
+  //   Opening 2  retention — players who want to transfer; teams negotiate
+  //              to keep them, the rest enter the portal
+  // Then `windows` portal windows. Players enter the portal only in opening
+  // window 2 (user, 2026-11-14) — lateEntryWindows (portal windows that add
+  // late entries) stays empty.
   windows: 10,
-  lateEntryWindows: [2, 3, 4],
+  lateEntryWindows: [],
   lateEntryFactor: 0.15,
 
   // Team tiers: 1 = blue blood … 5 = bottom of FBS. A team's tier sets its
@@ -30,31 +36,120 @@ export const DEFAULT_CONFIG = {
   // school's tier, the likelier he leaves.
   idealTier: { 6: 1, 5: 1.5, 4: 2.5, 3: 3.5, 2: 4.5 },
 
-  // Entering the portal (window 1).
-  entryBase: { starter: 0.04, rotation: 0.12, reserve: 0.25, none: 0.15 },
-  tierGapWeight: 0.6, // × per tier he's above his school
-  overmatchedWeight: 0.25, // a reserve below his school's level looks for snaps
-  homeStayMiles: 250, // home this close to campus…
-  homeStayFactor: 0.6, // …makes leaving this much less likely
-  lastYearFactor: 1.2, // one season left: graduate transfers
-  maxEntry: 0.85,
+  // ── Opening window 1: the NFL ──
+  // Out of eligibility (0 seasons left) or Declared on We-Draft: gone.
+  // Draft-eligible = at least three seasons in college = this many seasons
+  // of eligibility left, at most.
+  draftEligibleMaxElig: 2,
+  // Chance he leaves, by community draft grade (1 = Early First … 10 = UDFA).
+  // High first-rounders always go; Day 2 often; Day 3 less often.
+  declareByGrade: { 1: 1, 2: 0.97, 3: 0.88, 4: 0.75, 5: 0.62, 6: 0.4, 7: 0.3, 8: 0.22, 9: 0.15, 10: 0.05 },
+  // On the fence (retainable) between these; at or above the top he's gone,
+  // below the bottom he's back.
+  nflFence: [0.1, 0.9],
+  // What it takes to keep a draft prospect: his ask × this.
+  nflAskFactor: 1.5,
+  // How much a full retention offer can cut his chance of leaving, by grade —
+  // first-rounders barely move, Day 3 guys can be talked into another year.
+  nflRetainPower: { 1: 0, 2: 0.1, 3: 0.25, 4: 0.45, 5: 0.55, 6: 0.7, 7: 0.75, 8: 0.8, 9: 0.85, 10: 0.9 },
 
-  // Declaring for the draft (window 1), by stars: [≤2 seasons left, more].
-  declare: { 6: [0.85, 0.6], 5: [0.6, 0.3], 4: [0.25, 0.08], 3: [0.02, 0], 2: [0, 0] },
+  // ── Grading schools (user, 2026-11-14) ──
+  // Every player grades every school — his own included — on six factors,
+  // each 0..1: program tier, NIL offered (vs his ask), proximity to home,
+  // playing time (the room: how many better players it has at his position
+  // vs the starters it plays — departures in front of him count), recent
+  // success (team records) and player development (recent draft picks at his
+  // position). His grade = his personality's weighted average of the six.
+  // Personalities reshuffle every run: each weight is the base × a random
+  // factor (spread), so different players value different things.
+  choiceWeights: { tier: 0.8, nil: 1.2, loc: 0.6, pt: 2.2, success: 0.7, dev: 0.8 },
+  personalitySpread: 0.7,
+  choiceNoise: 0.04, // ± grade noise on each offer
+  // Recent success: win % weights, newest season first.
+  successYearWeights: [0.4, 0.3, 0.2, 0.1],
+  // Player development: drafts counted, pick weight by round (1st, 2nd–3rd,
+  // 4th–7th), and the older half's weight.
+  devDrafts: 8,
+  devRoundWeight: [3, 2, 1],
+  devOlderWeight: 0.6,
+  // Development × (devPtFloor + (1 − devPtFloor) × playing time): a school's
+  // NFL pipeline matters less to a player buried on its depth chart.
+  devPtFloor: 0.35,
+  // Playing time from the room: better players ahead of him vs starters.
+  roomPt: { starter: 1, rotation: 0.6, depth: 0.3, buried: 0.1 },
+  // What he already makes at his school, × his ask (his home NIL before any
+  // retention offer).
+  homeNil: 0.6,
+
+  // ── Opening window 2: who wants to leave ──
+  // Each player grades his school against the market — a typical school at
+  // his level (his ideal tier, his ask, an average location / success /
+  // development, the playing time below). The further the market beats home,
+  // the likelier he enters: maxEntry × logistic((market − home − entryBias)
+  // / entryTemp). A retention offer raises his home grade; he stays when that
+  // pulls his chance of leaving below his draw.
+  marketPt: { 6: 0.9, 5: 0.85, 4: 0.8, 3: 0.75, 2: 0.65 },
+  // The market's tier: his stars' ideal tier, pulled this far toward his
+  // school's (0 = stars only, 1 = his school's level).
+  marketHomePull: 0.6,
+  // Ambition: grade points added to the market per tier his school sits
+  // below his stars' level, × how much he played and his stars.
+  // Bench frustration: grade points added to the market for a talented
+  // player who won't play — × (1 − the playing time his room leaves him) ×
+  // his years in school (1 = after his true freshman season: slight).
+  bench: { stars: { 2: 0.02, 3: 0.12, 4: 0.28, 5: 0.34, 6: 0.36 }, years: { 1: 0.25, 2: 0.7, 3: 1 } },
+  // Narrowing his list: the schools he's still listening to after each
+  // portal window (index = window; null = all). The rest are cut — and can't
+  // offer him again.
+  listSize: [null, null, 10, 8, 6, 5, 4, 3, 3, 3, 3],
+  ambition: { perTier: 0.15, role: { starter: 1, rotation: 0.6, reserve: 0.15, none: 0 }, stars: { 6: 1.3, 5: 1.2, 4: 1.1, 3: 1, 2: 0.4 } },
+  // Transfer likeliness (user, 2026-11-14), set per player on the admin's
+  // Grades tab: 3 is in the portal almost every time, 2 less, 1 even less,
+  // 0 never. It's its own reason to leave on top of the model's (chance =
+  // 1 − (1 − model)(1 − this)); no likeliness = the model alone.
+  likeliness: { 1: 0.1, 2: 0.4, 3: 0.92 },
+  entryBias: 0.24,
+  entryTemp: 0.06,
+  maxEntry: 0.85,
+  retainMix: { nil: 0.6, pt: 0.4 }, // NFL fence retention offers' pull
+
+  // ── CPU retention (both opening windows) ──
+  // Share of the NIL budget a CPU team will spend keeping its own players.
+  retentionShare: 0.35,
+  // Urgency at a position: 1 + this × (starters/rotation players lost there
+  // ÷ starters it needs) — lose a lot at a spot, fight harder to keep the rest.
+  urgencyWeight: 0.6,
+  urgencyCap: 1.6,
+  // A player's worth to keep: value × role × urgency, at least retainMinWorth.
+  roleWorth: { starter: 1, rotation: 0.7, reserve: 0.35, none: 0.2 },
+  retainMinWorth: 15,
+
+  // Home this close to campus counts as near (for "closer to home").
+  homeStayMiles: 250,
 
   // Roster targets by position (starters a team wants) — drives needs.
   starters: { QB: 1, RB: 1, WR: 3, TE: 1, OL: 5, DL: 2, EDGE: 2, LB: 2, DB: 4, K: 1, P: 1 },
 
-  // Choosing a school: weights on tier, playing time, NIL, location. Each
-  // player draws his own around these (personality), plus a little noise.
-  choiceWeights: { tier: 1.0, pt: 1.0, nil: 1.2, loc: 0.5 },
-  personalitySpread: 0.35,
-  choiceNoise: 0.15,
-  // Commit when the best offer clears this, falling window by window
-  // (start → end), so players get less picky as the portal winds down.
-  commitThreshold: [1.7, 0.9],
-  // Playing time a role offer is worth.
-  ptValue: { starter: 1, rotation: 0.6, depth: 0.25 },
+  // Recruitments: interest an offer builds each window it stands (grade
+  // points, capped) — offering early helps.
+  earlyInterest: { perWindow: 0.03, cap: 0.12 },
+  // A NIL offer this many × his ask commits him on the spot, any window.
+  instantCommitAsk: 3,
+  // Happiness (user, 2026-11-14): each player's 0–100 feeling about each
+  // school, 100 to start. A lowball (under lowballAsk × his ask), offering less
+  // than before and pulling an offer each knock it down; below 100 it costs
+  // that school up to `penalty` grade points (at 0). A brake on user offer
+  // spam — CPU schools never do these.
+  happiness: { lowballAsk: 0.6, lowball: 15, lower: 25, pulled: 35, penalty: 0.2 },
+  // A player sizing up a room: better players a team is still chasing at his
+  // position (outstanding offers) count this much each (signings count fully
+  // — they're on the roster).
+  offerRoomWeight: 0.5,
+  // Commit when the best offer's grade reaches this share of his market
+  // grade, falling window by window (start → end), so players get less
+  // picky as the portal winds down.
+  commitShare: [1.0, 0.75],
+
 
   // Team boards: how much each team's own taste moves its rankings (±).
   boardNoise: 0.25,

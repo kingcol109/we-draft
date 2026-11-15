@@ -13,13 +13,14 @@ export function expandPool(teamsDoc, chunks) {
   });
   const players = [];
   (chunks || []).forEach((c) => (c?.rows || []).forEach((s) => {
-    const [id, name, pos, ti, stars, elig, role, hlat, hlng, wdId, flags] = JSON.parse(s);
+    const [id, name, pos, ti, stars, elig, role, hlat, hlng, wdId, flags, likely] = JSON.parse(s);
     const team = teams[ti];
     if (!team) return;
     players.push({
       id, name, pos, team: team.slug, stars, elig, role: ROLE[role] || "none",
       home: hlat != null && hlng != null ? [hlat, hlng] : null, wdId: wdId || "",
       declared: String(flags || "").includes("d"), live: String(flags || "").includes("l"),
+      likely: likely ?? null,
     });
   }));
   return { season: teamsDoc?.season || null, teams, players };

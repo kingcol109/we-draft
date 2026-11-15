@@ -7,6 +7,8 @@
 //   cfbRosters                players, recruiting class, class year, home,
 //                             hometown coordinates (hl), season stats
 //   portalStars               transfer stars (server/portal/stars.js)
+//   config/portalGrades       the admin's locked grades (they win) and
+//                             transfer likeliness (Grades tab)
 //   pffGrades                 snaps → a number-free ROLE (starter /
 //                             rotation / reserve / none) and PFF's finer
 //                             positions (EDGE vs DL…). No PFF number is
@@ -19,7 +21,8 @@
 //   portalSimPool/teams  { season, chunks, builtAt,
 //                          teams: [[slug, school, conference, lat, lng]] }
 //   portalSimPool/p{n}   { rows: [[id, name, pos, team index, stars, elig,
-//                          role, homeLat, homeLng, wdId, flags]] }
+//                          role, homeLat, homeLng, wdId, flags,
+//                          likeliness (0–3, null = model only)]] }
 //     role: s starter, r rotation, v reserve, n none
 //     flags: "d" declared for the draft, "l" in the real portal
 //
@@ -49,8 +52,8 @@ const STARTERS = { QB: 1, RB: 1, WR: 3, TE: 1, OL: 5, DL: 2, EDGE: 2, LB: 2, DB:
 const MIN_SNAPS = { passing: 100, rushing: 60, receiving: 100, blocking: 200, defense: 150, kicking: 8, punting: 15 };
 
 async function buildPortalSimPool(db, { dry = false } = {}) {
-  const { solidStats } = await import("../../src/utils/portalStars.mjs");
-  const [teamsSnap, schoolsSnap, rosterSnap, starsSnap, pffSnap, linkSnap, wdSnap] = await Promise.all([
+  const { solidStats, eligLeft, decodeGrade } = await import("../../src/utils/portalStars.mjs");
+  const [teamsSnap, schoolsSnap, rosterSnap, starsSnap, pffSnap, linkSnap, wdSnap, gradesSnap] = await Promise.all([
     db.collection("compSnapshots").doc("_cfbTeams").get(),
     db.collection("schools").select("School", "Latitude", "Longitude").get(),
     db.collection("cfbRosters").get(),
@@ -58,7 +61,9 @@ async function buildPortalSimPool(db, { dry = false } = {}) {
     db.collection("pffGrades").get(),
     db.collection("cfbdPlayers").where("mappingStatus", "in", ["suggested", "verified"]).select("wedraftPlayerId").get(),
     db.collection("players").select("Declared", "InPortal", "Eligible").get(),
+    db.collection("config").doc("portalGrades").get(),
   ]);
+  const locks = gradesSnap.data()?.rows || {};
   const fbs = teamsSnap.data()?.teams || {};
   const slugBySchool = new Map(Object.entries(fbs).map(([slug, t]) => [t.School, slug]));
   const locBySchool = new Map(schoolsSnap.docs.map((d) => d.data()).filter((s) => s.School).map((s) => [s.School, [Number(s.Latitude) || null, Number(s.Longitude) || null]]));
@@ -83,7 +88,6 @@ async function buildPortalSimPool(db, { dry = false } = {}) {
       teamIdx.set(slug, teamList.length);
       teamList.push([slug, t.school, fbs[slug].Conference || "", loc[0], loc[1]]);
     }
-    const next = (t.season || 2026) + 1; // the season the portal feeds
 
     // Each player's sim position and snaps, then roles by position.
     const players = (t.players || []).map((p) => {
@@ -109,13 +113,14 @@ async function buildPortalSimPool(db, { dry = false } = {}) {
 
     players.forEach(({ p, pos, role }) => {
       const id = String(p.id);
-      const elig = p.rc ? Math.max(0, Math.min(4, p.rc + 5 - next)) : p.yr ? Math.max(0, 5 - p.yr) : 1;
+      const elig = eligLeft(p, t.season);
       const st = String(p.home || "").split(",").pop().trim().toUpperCase();
       const home = Array.isArray(p.hl) ? p.hl : STATE_CENTER[st] || [null, null];
       const wdId = wdOf.get(id) || "";
       const w = wdId ? wd.get(wdId) : null;
       const flags = `${w?.Declared ? "d" : ""}${w?.InPortal ? "l" : ""}`;
-      rows.push([id, `${p.first || ""} ${p.last || ""}`.trim(), pos, teamIdx.get(slug), stars.get(id) || 2, elig, role, home[0], home[1], wdId, flags]);
+      const lock = decodeGrade(locks[id] || (wdId && locks[`wd:${wdId}`]));
+      rows.push([id, `${p.first || ""} ${p.last || ""}`.trim(), pos, teamIdx.get(slug), lock.s || stars.get(id) || 2, elig, role, home[0], home[1], wdId, flags, lock.l]);
     });
   });
 

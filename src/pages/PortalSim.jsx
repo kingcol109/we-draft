@@ -1,11 +1,18 @@
 // src/pages/PortalSim.jsx
 //
 // /portalsim (/portalsim/:team) — the Portal Sim: the transfer portal's
-// version of the Draft Sim (pages/DraftSim.jsx). Pick a team; window 1
-// opens with draft declarations and transfer entries; each window the user
-// makes NIL offers (with a role promised), then every other FBS school makes
-// its own and players decide. Ten windows (config). Beta-gated
-// (components/SimRoute.js) until launch.
+// version of the Draft Sim (pages/DraftSim.jsx). Pick a team; two opening
+// windows focus on that team alone (user, 2026-11-14):
+//   Opening 1  NFL decisions — who's out of eligibility or gone to the draft;
+//              the user can try to keep players on the fence
+//   Opening 2  retention — who wants to transfer; keep them or lose them to
+//              the portal
+// Every window advances from the sticky header; each one's work and results
+// live in tabs (NFL Decisions, Leaving, then the portal's). Players enter the
+// portal only in opening window 2. Then the portal opens: each window the
+// user makes NIL offers (with a role
+// promised), every other FBS school makes its own and players decide. Ten
+// portal windows (config). Admin-only (App.js AdminRoute) for now.
 //
 // INFRASTRUCTURE FIRST (user, 2026-11-14) — the models are placeholders
 // (utils/portalSim/models.js, config.js). Layout follows the Draft Sim: a
@@ -18,9 +25,13 @@ import { Helmet } from "react-helmet-async";
 import LoadingSpinner from "../components/LoadingSpinner";
 import TransferStars from "../components/TransferStars";
 import usePortalSim from "../components/portalSim/usePortalSim";
+import PlayerCard from "../components/portalSim/PlayerCard";
 import { loadPortalSim, money } from "../utils/portalSim/data";
 import { defaultTier, mergeConfig } from "../utils/portalSim/config";
 import { FBS_CONFERENCES } from "../utils/portalTeams";
+import { retainOdds, urgencyOf, fitAt } from "../utils/portalSim/engine";
+import { topValues } from "../utils/portalSim/models";
+import { gradeLabel } from "../utils/gradeScale";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -29,9 +40,22 @@ const PANEL = { background: "#0e1626", border: "1px solid #1f2b42", borderRadius
 const INK = "#eef2f8";
 const SUB = "#8b9bb4";
 const LINE = "#1f2b42";
-const POSITIONS = ["QB", "RB", "WR", "TE", "OL", "DL", "EDGE", "LB", "DB", "K", "P"];
+// Position tabs — K and P share one so they fit a row.
+const POS_TABS = ["QB", "RB", "WR", "TE", "OL", "DL", "EDGE", "LB", "DB", "K/P"];
 const ROLE_LABEL = { starter: "Starter", rotation: "Rotation", reserve: "Reserve", none: "Didn't play" };
-const PT_LABEL = { starter: "Starter", rotation: "Rotation", depth: "Depth" };
+const FIT_LABEL = { starter: "a starter", rotation: "rotation", depth: "depth" };
+const GONE_LABEL = { exhausted: "Out of eligibility", declared: "Declared", grade: "First-round grade", chose: "Chose the draft" };
+const WANTS_LABEL = { level: "Wants a bigger stage", snaps: "Wants snaps", money: "Wants a bigger NIL deal", home: "Wants to be closer to home", winning: "Wants to win", development: "Wants to develop" };
+// The six things players grade schools on (utils/portalSim/models.js FACTORS).
+const VALUE_LABEL = { tier: "Program", nil: "NIL", loc: "Close to home", pt: "Playing time", success: "Winning", dev: "Development" };
+// What he cares about most: "Playing time › NIL › Winning".
+const Values = ({ p }) => (
+  <div style={{ fontSize: 12, fontWeight: 800, color: SUB }}>Cares most about <b style={{ color: INK }}>{topValues(p).map((k) => VALUE_LABEL[k]).join(" › ")}</b></div>
+);
+const STAGE_TITLE = { nfl: "NFL Decisions", retain: "Retention" };
+const pct = (x) => `${Math.round((x || 0) * 100)}%`;
+// How a draft prospect is leaning (chance he leaves).
+const leanLabel = (c) => (c >= 0.7 ? ["Leaning NFL", "#ff8a7a"] : c >= 0.4 ? ["Toss-up", GOLD] : ["Leaning back", "#7ee2a8"]);
 // The few Draft Sim styles this page uses (components/draftSim/SimBroadcast
 // SIM_CSS) — copied rather than importing that whole module.
 const CSS = `
@@ -119,7 +143,7 @@ function Setup({ data, isMobile, onStart }) {
         <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: "0.2em", color: GOLD }}>BETA · {data.pool.season ? data.pool.season + 1 : ""} TRANSFER PORTAL</div>
         <h1 style={{ margin: "6px 0 6px", fontSize: isMobile ? 30 : 46, fontWeight: 900, textTransform: "uppercase", lineHeight: 1 }}>Portal Sim</h1>
         <div style={{ color: SUB, fontWeight: 700, fontSize: isMobile ? 13 : 15, maxWidth: 680 }}>
-          Run a program through {cfg.windows} portal windows. Players declare and enter, every FBS school chases its needs with its NIL budget, and you make your offers before they do.
+          Run a program through the offseason: decide who you can keep from the NFL, fight to hold the players who want to transfer, then work {cfg.windows} portal windows while every FBS school chases its needs with its NIL budget.
         </div>
         <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
           <button type="button" style={pillBtn(!live)} onClick={() => setLive(false)}>Projected portal</button>
@@ -159,7 +183,7 @@ function Setup({ data, isMobile, onStart }) {
         <button type="button" disabled={!team} onClick={() => onStart({ team, seed: Math.floor(Math.random() * 1e9), live })} style={{
           border: "none", borderRadius: 999, padding: "11px 22px", fontWeight: 900, fontSize: 14, letterSpacing: "0.06em", textTransform: "uppercase", fontFamily: "inherit",
           background: team ? (b?.Color2 || GOLD) : "#1a2438", color: "#fff", cursor: team ? "pointer" : "default",
-        }}>Open the Portal →</button>
+        }}>Continue →</button>
       </div>
     </>
   );
@@ -168,104 +192,118 @@ function Setup({ data, isMobile, onStart }) {
 // ── The sim ──
 function LiveSim({ data, run, isMobile, onSettings, onRerun }) {
   const sim = usePortalSim({ data, team: run.team, seed: run.seed, live: run.live });
-  const { state, phase, view } = sim;
-  const [tab, setTab] = useState("portal");
+  const { state, phase, view, stage } = sim;
+  const portalOpen = stage === "window" || stage === "done";
   const b = data.branding[run.team] || {};
   const c1 = b.Color1 || BLUE;
   const c2 = b.Color2 || GOLD;
   const brand = (slug) => data.branding[slug];
 
-  const entered = state.log.filter((e) => e.kind === "entered" && e.w === 1).length;
-  const declared = state.log.filter((e) => e.kind === "declared").length;
+  // Tabs by window: NFL Decisions (opening window 1), Leaving (opening
+  // window 2), then — once the portal opens — Results first, the portal's
+  // tabs, and Leaving. NFL decisions live in Roster & Needs from then on.
+  // Each window lands on its first tab.
+  const tabs = [
+    ...(portalOpen ? [["results", "Results"], ["portal", `Portal (${sim.portal.length})`], ["board", `My Board (${view.offers.length + sim.starred.size})`]] : []),
+    ...(!portalOpen ? [["nfl", stage === "nfl" ? `NFL Decisions (${view.considering.length})` : "NFL Decisions"]] : []),
+    ...(stage !== "nfl" && stage !== "ready" ? [["leaving", stage === "retain" ? `Leaving (${view.considering.length})` : "Leaving"]] : []),
+    ["needs", "Roster & Needs"],
+  ];
+  const [tabPick, setTab] = useState(null);
+  useEffect(() => { setTab(null); }, [stage, state.window]);
+  const tab = tabs.some(([k]) => k === tabPick) ? tabPick : stage === "retain" ? "leaving" : portalOpen ? "results" : "nfl";
+
+  const label = phase === "done" ? "PORTAL CLOSED" : phase === "simming" ? "SIMMING…" : stage === "ready" ? "READY TO START"
+    : stage === "nfl" ? (isMobile ? "WINDOW 1 · NFL" : "OPENING WINDOW 1 · NFL DECISIONS") : stage === "retain" ? (isMobile ? "WINDOW 2 · LEAVING" : "OPENING WINDOW 2 · LEAVING")
+      : isMobile ? `PORTAL ${state.window}/${state.windows}` : `PORTAL WINDOW ${state.window} OF ${state.windows}`;
+  // Phones get the short labels so the school name fits.
+  const advance = stage === "ready" ? ["Start", sim.start]
+    : phase === "simming" ? ["Simming…", null]
+      : phase === "window" ? [stage === "nfl" ? (isMobile ? "Lock In →" : "Lock NFL Decisions →") : stage === "retain" ? (isMobile ? "Open Portal →" : "Open the Portal →")
+        : state.window >= state.windows ? (isMobile ? "Close →" : "Close the Portal →") : isMobile ? "End Window →" : `End Window ${state.window} →`, sim.end]
+        : null;
+  const pctOf = (n) => `${Math.min(100, (n / Math.max(1, view.budget)) * 100)}%`;
 
   return (
     <>
-      {/* Stage — the header, in the team's colors. */}
-      <div style={{ ...PANEL, marginBottom: 12, background: `linear-gradient(115deg, ${c1} 0%, ${c1} 55%, color-mix(in srgb, ${c2} 60%, ${c1}) 100%)`, position: "relative" }}>
+      {/* The header — anchored under the navbar; every window advances from
+          its button. */}
+      <div style={{ ...PANEL, position: "sticky", top: 66 /* the navbar, in CSS px (page zoom scales both) */, zIndex: 50, marginBottom: 12, background: `linear-gradient(115deg, ${c1} 0%, ${c1} 55%, color-mix(in srgb, ${c2} 60%, ${c1}) 100%)`, boxShadow: "0 8px 24px rgba(0,0,0,0.45)" }}>
         <div style={{ position: "absolute", inset: 0, background: "linear-gradient(rgba(0,0,0,0.25), rgba(0,0,0,0.45))" }} />
-        <div style={{ position: "relative", display: "flex", alignItems: "center", gap: isMobile ? 12 : 22, padding: isMobile ? "16px 14px" : "22px 28px", flexWrap: isMobile ? "wrap" : "nowrap" }}>
-          <Logo b={b} size={isMobile ? 64 : 110} />
+        <div style={{ position: "relative", display: "flex", alignItems: "center", gap: isMobile ? 10 : 18, padding: isMobile ? "10px 12px 8px" : "12px 20px 10px" }}>
+          <Logo b={b} size={isMobile ? 40 : 58} />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: "inline-block", background: "rgba(0,0,0,0.3)", borderRadius: 6, padding: "3px 10px", fontWeight: 900, fontSize: isMobile ? 11 : 13, letterSpacing: "0.2em" }}>
-              {phase === "done" ? "PORTAL CLOSED" : phase === "simming" ? "SIMMING…" : `WINDOW ${state.window} OF ${state.windows}`}
-            </div>
-            <div style={{ fontSize: isMobile ? 26 : 46, fontWeight: 900, textTransform: "uppercase", lineHeight: 1, margin: "8px 0 6px" }}>{b.School}</div>
-            <div style={{ fontSize: isMobile ? 12 : 14, fontWeight: 800, opacity: 0.85 }}>
-              Tier {view.team.tier} · {view.signings.length} signed · {view.departures.length} gone
+            <div style={{ display: "inline-block", background: "rgba(0,0,0,0.3)", borderRadius: 6, padding: "2px 8px", fontWeight: 900, fontSize: isMobile ? 9 : 11, letterSpacing: "0.16em" }}>{label}</div>
+            <div style={{ fontSize: isMobile ? 18 : 28, fontWeight: 900, textTransform: "uppercase", lineHeight: 1.05, marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.School}</div>
+            <div style={{ fontSize: isMobile ? 11 : 13, fontWeight: 800, opacity: 0.85 }}>
+              {isMobile ? `${money(view.available)} left` : `Tier ${view.team.tier} · ${view.signings.length} signed · ${view.departures.length} gone`}
+
             </div>
           </div>
-          <BudgetBox view={view} isMobile={isMobile} />
+          {!isMobile && (
+            <div style={{ width: 220, background: "rgba(0,0,0,0.3)", borderRadius: 10, padding: "8px 10px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontWeight: 900 }}>
+                <span style={{ fontSize: 20 }}>{money(view.available)} <span style={{ fontSize: 11, opacity: 0.75 }}>left</span></span>
+                <span style={{ fontSize: 11, opacity: 0.75 }}>of {money(view.budget)}</span>
+              </div>
+              <div style={{ display: "flex", height: 6, borderRadius: 3, overflow: "hidden", background: "rgba(255,255,255,0.15)", marginTop: 4 }}>
+                <div style={{ width: pctOf(view.spent), background: GOLD }} />
+                <div style={{ width: pctOf(view.reserved), background: "rgba(255,255,255,0.55)" }} />
+              </div>
+              <div style={{ display: "flex", gap: 10, marginTop: 4, fontSize: 10, fontWeight: 800, opacity: 0.85 }}>
+                <span><span style={{ color: GOLD }}>■</span> Spent {money(view.spent)}</span>
+                <span><span style={{ color: "rgba(255,255,255,0.7)" }}>■</span> Offered {money(view.reserved)}</span>
+              </div>
+            </div>
+          )}
+          {advance && (
+            <button type="button" disabled={!advance[1]} onClick={advance[1] || undefined} style={{
+              border: "none", borderRadius: 999, padding: isMobile ? "10px 14px" : "12px 22px", fontWeight: 900, fontSize: isMobile ? 12 : 14, letterSpacing: "0.05em", textTransform: "uppercase",
+              background: advance[1] ? GOLD : "rgba(0,0,0,0.35)", color: "#fff", cursor: advance[1] ? "pointer" : "default", fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0,
+            }}>{advance[0]}</button>
+          )}
         </div>
-        {/* Window track. */}
-        <div style={{ position: "relative", display: "flex", gap: 4, padding: isMobile ? "0 14px 12px" : "0 28px 14px" }}>
+        {/* Window track: the two opening windows, then the portal's. */}
+        <div style={{ position: "relative", display: "flex", gap: 4, padding: isMobile ? "0 12px 10px" : "0 20px 12px" }}>
+          {["nfl", "retain"].map((k, i) => {
+            const done = portalOpen || (k === "nfl" && stage === "retain");
+            return <div key={k} title={`Opening window ${i + 1}: ${STAGE_TITLE[k]}`} style={{ flex: 1.4, height: 5, borderRadius: 3, background: done ? c2 : stage === k ? "#fff" : "rgba(255,255,255,0.2)", marginRight: k === "retain" ? 8 : 0 }} />;
+          })}
           {Array.from({ length: state.windows }, (_, i) => i + 1).map((w) => (
-            <div key={w} title={`Window ${w}`} style={{ flex: 1, height: 6, borderRadius: 3, background: w < state.window || phase === "done" ? c2 : w === state.window ? "#fff" : "rgba(255,255,255,0.2)" }} />
+            <div key={w} title={`Portal window ${w}`} style={{ flex: 1, height: 5, borderRadius: 3, background: (portalOpen && w < state.window) || phase === "done" ? c2 : portalOpen && w === state.window ? "#fff" : "rgba(255,255,255,0.2)" }} />
           ))}
         </div>
       </div>
 
-      {/* Intro / recap / final — between windows. */}
-      {phase === "intro" && (
-        <Moment title="The portal is open" isMobile={isMobile} action="Start Window 1" onAction={sim.start}>
-          {declared} players declared for the draft and {entered.toLocaleString()} entered the portal.
-          {view.departures.length > 0 && <> {b.School} lost <b>{view.departures.length}</b>: {view.departures.slice(0, 6).map((p) => p.name).join(", ")}{view.departures.length > 6 ? "…" : ""}.</>}
+      {phase === "ready" && (
+        <Moment title="Ready when you are" isMobile={isMobile}>
+          First, the NFL: see who's leaving for the draft and try to keep the ones on the fence. Then the players trying to leave for the portal — keep them or lose them. Then the portal opens. Press <b style={{ color: INK }}>Start</b> up top.
         </Moment>
       )}
-      {phase === "recap" && sim.recap && <Recap recap={sim.recap} state={state} team={run.team} brand={brand} isMobile={isMobile} onNext={sim.next} />}
       {phase === "done" && <Final state={state} team={run.team} brand={brand} isMobile={isMobile} onRerun={onRerun} onSettings={onSettings} />}
 
-      {/* Phones: End Window gets its own button (the tab row scrolls). */}
-      {isMobile && phase === "window" && (
-        <button type="button" onClick={sim.end} style={{ display: "block", width: "100%", marginBottom: 10, border: "none", borderRadius: 999, padding: "13px 18px", fontWeight: 900, fontSize: 14, letterSpacing: "0.05em", textTransform: "uppercase", background: GOLD, color: "#fff", cursor: "pointer", fontFamily: "inherit" }}>
-          {state.window >= state.windows ? "Close the Portal →" : `End Window ${state.window} →`}
-        </button>
-      )}
       {/* The Console. */}
-      <div style={{ ...PANEL }}>
+      {phase !== "ready" && <div style={{ ...PANEL }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "10px 12px", borderBottom: `1px solid ${LINE}`, overflowX: "auto" }}>
-          {[["portal", `Portal (${sim.portal.length})`], ["board", `My Board (${view.offers.length})`], ["roster", "Roster & Needs"], ["activity", "Activity"]].map(([k, label]) => (
-            <button key={k} type="button" onClick={() => setTab(k)} style={pillBtn(tab === k, c1)}>{label}</button>
-          ))}
+          {tabs.map(([k, text]) => <button key={k} type="button" onClick={() => setTab(k)} style={pillBtn(tab === k, c1)}>{text}</button>)}
           <span style={{ flex: 1 }} />
-          {phase === "window" && !isMobile && (
-            <button type="button" onClick={sim.end} style={{ border: "none", borderRadius: 999, padding: "8px 18px", fontWeight: 900, fontSize: 13, letterSpacing: "0.05em", textTransform: "uppercase", background: GOLD, color: "#fff", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
-              {state.window >= state.windows ? "Close the Portal →" : "End Window →"}
-            </button>
-          )}
           <button type="button" onClick={onSettings} style={pillBtn(false)}>Settings</button>
         </div>
         {sim.error && <div style={{ padding: "8px 14px", background: "#3a1219", color: "#ffb3a8", fontWeight: 800, fontSize: 13 }}>{sim.error}</div>}
         <div className="wd-sim-scroll" style={{ maxHeight: isMobile ? "70vh" : 720, overflowY: "auto" }}>
-          {tab === "portal" ? <PortalTab sim={sim} team={run.team} brand={brand} isMobile={isMobile} />
-            : tab === "board" ? <BoardTab sim={sim} team={run.team} brand={brand} isMobile={isMobile} />
-              : tab === "roster" ? <RosterTab sim={sim} state={state} isMobile={isMobile} />
-                : <ActivityTab state={state} team={run.team} brand={brand} isMobile={isMobile} />}
+          {tab === "nfl" ? <NflTab sim={sim} team={run.team} isMobile={isMobile} />
+            : tab === "leaving" ? <LeavingTab sim={sim} team={run.team} brand={brand} isMobile={isMobile} />
+              : tab === "portal" ? <PortalTab sim={sim} team={run.team} brand={brand} isMobile={isMobile} />
+                : tab === "board" ? <BoardTab sim={sim} team={run.team} brand={brand} isMobile={isMobile} />
+                  : tab === "results" ? <ResultsTab sim={sim} team={run.team} brand={brand} isMobile={isMobile} />
+                    : <NeedsTab sim={sim} team={run.team} brand={brand} isMobile={isMobile} />}
         </div>
-      </div>
+      </div>}
+      {sim.card && <PlayerCard pid={sim.card} sim={sim} team={run.team} brand={brand} isMobile={isMobile} onClose={sim.closeCard} />}
       <div style={{ marginTop: 10, fontSize: 11, color: SUB, fontWeight: 700 }}>
         Beta — the models are first passes. Seed {run.seed}. <Link to="/portal" style={{ color: SUB }}>Real portal →</Link>
       </div>
     </>
-  );
-}
-
-function BudgetBox({ view, isMobile }) {
-  const pct = (n) => `${Math.min(100, (n / Math.max(1, view.budget)) * 100)}%`;
-  return (
-    <div style={{ width: isMobile ? "100%" : 260, background: "rgba(0,0,0,0.3)", borderRadius: 12, padding: "10px 12px" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, fontWeight: 900, letterSpacing: "0.12em", opacity: 0.8 }}>
-        <span>NIL BUDGET</span><span>{money(view.budget)}</span>
-      </div>
-      <div style={{ fontSize: 26, fontWeight: 900, margin: "4px 0" }}>{money(view.available)} <span style={{ fontSize: 12, opacity: 0.75 }}>left</span></div>
-      <div style={{ display: "flex", height: 8, borderRadius: 4, overflow: "hidden", background: "rgba(255,255,255,0.15)" }}>
-        <div style={{ width: pct(view.spent), background: GOLD }} />
-        <div style={{ width: pct(view.reserved), background: "rgba(255,255,255,0.55)" }} />
-      </div>
-      <div style={{ display: "flex", gap: 10, marginTop: 5, fontSize: 11, fontWeight: 800, opacity: 0.85 }}>
-        <span><span style={{ color: GOLD }}>■</span> Signed {money(view.spent)}</span>
-        <span><span style={{ color: "rgba(255,255,255,0.7)" }}>■</span> Offered {money(view.reserved)}</span>
-      </div>
-    </div>
   );
 }
 
@@ -282,16 +320,18 @@ function Moment({ title, children, action, onAction, isMobile }) {
 }
 
 // A player line: stars, position, name, where from (→ where to).
-function PlayerLine({ p, brand, to, isMobile, right }) {
+function PlayerLine({ p, brand, to, isMobile, right, extra, onOpen }) {
   return (
     <div className="wd-sim-row" style={{ display: "flex", alignItems: "center", gap: isMobile ? 8 : 12, padding: isMobile ? "9px 10px" : "10px 16px", borderBottom: `1px solid ${LINE}` }}>
       <TransferStars stars={p.stars} size="sm" />
       <span style={{ width: isMobile ? 38 : 46, flexShrink: 0, textAlign: "center", fontSize: 12, fontWeight: 900, color: "#9fc3ff", background: "#13233f", borderRadius: 6, padding: "4px 0" }}>{p.pos}</span>
-      <Logo b={brand(p.team)} size={isMobile ? 22 : 26} />
+      {brand(p.team, p) ? <Logo b={brand(p.team, p)} size={isMobile ? 22 : 26} /> : null}
       {to && <><span style={{ color: SUB, fontWeight: 900 }}>→</span><Logo b={brand(to)} size={isMobile ? 22 : 26} /></>}
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 900, fontSize: isMobile ? 14 : 16, overflowWrap: "anywhere" }}>{p.name}</div>
-        <div style={{ fontSize: 12, fontWeight: 700, color: SUB }}>{p.elig} yr{p.elig === 1 ? "" : "s"} left · {ROLE_LABEL[p.role] || "—"} last season</div>
+        {onOpen
+          ? <button type="button" onClick={() => onOpen(p.id)} style={{ all: "unset", cursor: "pointer", fontWeight: 900, fontSize: isMobile ? 14 : 16, overflowWrap: "break-word", textDecoration: "underline", textDecorationColor: "rgba(255,255,255,0.25)", textUnderlineOffset: 3 }}>{p.name}</button>
+          : <div style={{ fontWeight: 900, fontSize: isMobile ? 14 : 16, overflowWrap: "break-word" }}>{p.name}</div>}
+        <div style={{ fontSize: 12, fontWeight: 700, color: SUB }}>{extra ? <span style={{ color: "#9fc3ff" }}>{extra} · </span> : null}{p.elig} yr{p.elig === 1 ? "" : "s"} left · {ROLE_LABEL[p.role] || "—"} last season</div>
       </div>
       {right}
     </div>
@@ -301,69 +341,89 @@ function PlayerLine({ p, brand, to, isMobile, right }) {
 // ── Portal: who's available, and making offers ──
 function PortalTab({ sim, team, brand, isMobile }) {
   const { portal, view } = sim;
-  const [pos, setPos] = useState("");
-  const [minStars, setMinStars] = useState(3);
-  const [q, setQ] = useState("");
-  const [needsOnly, setNeedsOnly] = useState(false);
-  const [open, setOpen] = useState("");
+  const f = useFilters(view);
   const [shown, setShown] = useState(60);
-  const list = useMemo(() => portal
-    .filter((p) => p.team !== team && (!pos || p.pos === pos) && p.stars >= minStars && (!needsOnly || view.needs[p.pos] > 0) && (!q || p.name.toLowerCase().includes(q.toLowerCase())))
-    .sort((a, b) => b.stars - a.stars || b.elig - a.elig || a.name.localeCompare(b.name)), [portal, team, pos, minStars, q, needsOnly, view.needs]);
+  // Everyone in the portal, your own departures included (tagged).
+  const list = useMemo(() => portal.filter((p) => f.match(p))
+    .sort((a, b) => b.stars - a.stars || b.elig - a.elig || a.name.localeCompare(b.name)), [portal, f]);
   const canOffer = sim.phase === "window";
   return (
     <>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, padding: "10px 12px", borderBottom: `1px solid ${LINE}` }}>
-        <button type="button" style={pillBtn(!pos)} onClick={() => setPos("")}>All</button>
-        {POSITIONS.map((x) => <button key={x} type="button" style={pillBtn(pos === x)} onClick={() => setPos(pos === x ? "" : x)}>{x}{view.needs[x] > 0 ? " •" : ""}</button>)}
-        <select value={minStars} onChange={(e) => setMinStars(Number(e.target.value))} style={{ background: "#111a2b", color: INK, border: `1px solid ${LINE}`, borderRadius: 999, padding: "5px 10px", fontWeight: 800, fontSize: 12 }}>
-          {[6, 5, 4, 3, 2].map((s) => <option key={s} value={s}>{s}★{s < 6 ? " and up" : ""}</option>)}
-        </select>
-        <button type="button" style={pillBtn(needsOnly, GOLD)} onClick={() => setNeedsOnly((v) => !v)}>My needs</button>
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search…" style={{ flex: "1 1 140px", minWidth: 0, background: "#111a2b", color: INK, border: `1px solid ${LINE}`, borderRadius: 999, padding: "6px 12px", fontWeight: 700, fontSize: 13, outline: "none" }} />
-      </div>
+      <FilterBar f={f} view={view} />
       {list.length === 0 ? <div style={{ padding: 40, textAlign: "center", color: SUB }}>No one available matches.</div> : list.slice(0, shown).map((p) => {
         const mine = p.offers[team];
         const others = Object.keys(p.offers).filter((k) => k !== team).length;
         return (
           <div key={p.id}>
-            <PlayerLine p={p} brand={brand} isMobile={isMobile} right={(
+            <PlayerLine p={p} brand={brand} isMobile={isMobile} onOpen={sim.openCard} right={(
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
                 {!isMobile && <span style={{ fontSize: 12, fontWeight: 800, color: others ? GOLD : SUB }}>{others} offer{others === 1 ? "" : "s"}</span>}
                 {mine && <span style={{ fontSize: 12, fontWeight: 900, color: "#7ee2a8" }}>{money(mine.nil)}</span>}
-                {canOffer && <button type="button" onClick={() => setOpen(open === p.id ? "" : p.id)} style={pillBtn(open === p.id || !!mine, mine ? "#2e7d32" : BLUE)}>{mine ? "Edit" : "Offer"}</button>}
+                <StarBtn sim={sim} pid={p.id} />
+                {p.team === team && <span style={{ fontSize: 11, fontWeight: 900, color: "#ff8a7a", border: "1px solid #5c1f28", borderRadius: 999, padding: "5px 10px", whiteSpace: "nowrap" }}>Your player</span>}
+                {canOffer && (p.cut?.[team]
+                  ? <button type="button" onClick={() => sim.openCard(p.id)} style={{ ...pillBtn(false), color: "#ff8a7a", borderColor: "#5c1f28" }}>Cut you</button>
+                  : <button type="button" onClick={() => sim.openCard(p.id)} style={pillBtn(!!mine, mine ? "#2e7d32" : BLUE)}>{p.touched?.[team] === sim.state.window ? "Offered" : mine ? "Re-offer" : "Offer"}</button>)}
               </div>
             )} />
-            {open === p.id && <OfferEditor p={p} sim={sim} team={team} view={view} onDone={() => setOpen("")} />}
           </div>
         );
       })}
-      {list.length > shown && <button type="button" onClick={() => setShown((n) => n + 60)} style={{ display: "block", width: "100%", padding: 12, background: "#0b1322", color: GOLD, border: "none", fontWeight: 900, cursor: "pointer", fontFamily: "inherit" }}>Show more ({list.length - shown})</button>}
+      {list.length > shown && <ShowMore n={list.length - shown} onClick={() => setShown((n) => n + 60)} />}
     </>
   );
 }
 
-function OfferEditor({ p, sim, team, view, onDone }) {
-  const mine = p.offers[team];
-  const [nil, setNil] = useState(mine?.nil ?? p.ask);
-  const [pt, setPt] = useState(mine?.pt || "rotation");
-  const max = view.available + (mine?.nil || 0);
+// The Portal tab's filters — position (K/P together), stars, my needs,
+// search — shared with Results → Around the Country.
+function useFilters(view) {
+  const [pos, setPos] = useState("");
+  const [minStars, setMinStars] = useState(2); // every star level
+  const [q, setQ] = useState("");
+  const [needsOnly, setNeedsOnly] = useState(false);
+  return useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return {
+      pos, setPos, minStars, setMinStars, q, setQ, needsOnly, setNeedsOnly,
+      match: (p) => (!pos || posGroup(pos).includes(p.pos)) && p.stars >= minStars && (!needsOnly || view.needs[p.pos] > 0) && (!needle || p.name.toLowerCase().includes(needle)),
+    };
+  }, [pos, minStars, q, needsOnly, view.needs]);
+}
+function FilterBar({ f, view }) {
   return (
-    <div style={{ padding: "12px 16px", background: "#0b1322", borderBottom: `1px solid ${LINE}`, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10 }}>
-      <div style={{ fontSize: 12, fontWeight: 800, color: SUB }}>Asking about <b style={{ color: INK }}>{money(p.ask)}</b></div>
-      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 900, color: SUB }}>
-        NIL $
-        <input type="number" min={0} step={10000} value={nil} onChange={(e) => setNil(Number(e.target.value) || 0)} style={{ width: 120, background: "#111a2b", color: INK, border: `1px solid ${LINE}`, borderRadius: 8, padding: "6px 8px", fontWeight: 800 }} />
-      </label>
-      {[0.8, 1, 1.25].map((m) => <button key={m} type="button" style={pillBtn(false)} onClick={() => setNil(Math.min(max, Math.round((p.ask * m) / 1000) * 1000))}>{m === 1 ? "Ask" : `${Math.round(m * 100)}%`}</button>)}
-      <span style={{ fontSize: 12, fontWeight: 900, color: SUB }}>Role</span>
-      {Object.entries(PT_LABEL).map(([k, label]) => <button key={k} type="button" style={pillBtn(pt === k, GOLD)} onClick={() => setPt(k)}>{label}</button>)}
-      <span style={{ flex: 1 }} />
-      <span style={{ fontSize: 11, fontWeight: 800, color: SUB }}>{money(max)} available</span>
-      {mine && <button type="button" style={pillBtn(false)} onClick={() => { sim.retract(p.id); onDone(); }}>Pull Offer</button>}
-      <button type="button" style={pillBtn(true, "#2e7d32")} onClick={() => { if (sim.offer(p.id, { nil, pt })) onDone(); }}>{mine ? "Update" : "Make Offer"}</button>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, padding: "10px 12px", borderBottom: `1px solid ${LINE}` }}>
+      <button type="button" style={pillBtn(!f.pos)} onClick={() => f.setPos("")}>All</button>
+      {POS_TABS.map((x) => <button key={x} type="button" style={pillBtn(f.pos === x)} onClick={() => f.setPos(f.pos === x ? "" : x)}>{x}{posGroup(x).some((k) => view.needs[k] > 0) ? " •" : ""}</button>)}
+      <select value={f.minStars} onChange={(e) => f.setMinStars(Number(e.target.value))} style={{ background: "#111a2b", color: INK, border: `1px solid ${LINE}`, borderRadius: 999, padding: "5px 10px", fontWeight: 800, fontSize: 12 }}>
+        {[2, 3, 4, 5, 6].map((n) => <option key={n} value={n}>{n === 2 ? "All stars" : `${n}★${n < 6 ? " and up" : ""}`}</option>)}
+      </select>
+      <button type="button" style={pillBtn(f.needsOnly, GOLD)} onClick={() => f.setNeedsOnly((v) => !v)}>My needs</button>
+      <input value={f.q} onChange={(e) => f.setQ(e.target.value)} placeholder="Search…" style={{ flex: "1 1 140px", minWidth: 0, background: "#111a2b", color: INK, border: `1px solid ${LINE}`, borderRadius: 999, padding: "6px 12px", fontWeight: 700, fontSize: 13, outline: "none" }} />
     </div>
   );
+}
+const ShowMore = ({ n, onClick }) => (
+  <button type="button" onClick={onClick} style={{ display: "block", width: "100%", padding: 12, background: "#0b1322", color: GOLD, border: "none", fontWeight: 900, cursor: "pointer", fontFamily: "inherit" }}>Show more ({n})</button>
+);
+// Star a player onto My Board.
+function StarBtn({ sim, pid }) {
+  const on = sim.starred.has(pid);
+  return (
+    <button type="button" onClick={() => sim.toggleStar(pid)} aria-label={on ? "Unstar" : "Star"} title={on ? "On your board — unstar" : "Star to your board"} style={{
+      border: `1px solid ${on ? GOLD : LINE}`, background: on ? "rgba(246,162,29,0.15)" : "transparent", color: on ? GOLD : SUB,
+      borderRadius: 999, width: 32, height: 30, fontSize: 15, lineHeight: 1, cursor: "pointer", flexShrink: 0, fontFamily: "inherit",
+    }}>{on ? "★" : "☆"}</button>
+  );
+}
+// Where a player stands now, for results lines: signed / still in the portal / unsigned.
+function standing(state, p, team) {
+  if (p.status === "committed") return p.to === team ? ["Signed with you", "#7ee2a8"] : [`Signed with ${state.teams[p.to]?.school || "?"}`, SUB];
+  if (p.status === "unsigned") return ["Went unsigned", SUB];
+  if (p.status === "portal") {
+    const n = Object.keys(p.offers).length;
+    return [`Still in the portal · ${n} offer${n === 1 ? "" : "s"}`, GOLD];
+  }
+  return [p.status === "roster" ? "Stayed" : "", SUB];
 }
 
 // ── My Board: my offers and how they're going ──
@@ -371,14 +431,26 @@ function BoardTab({ sim, team, brand, isMobile }) {
   const { state, view } = sim;
   // Players the user offered who signed somewhere else.
   const missed = state.log.filter((e) => e.kind === "committed" && e.to !== team && e.offeredBy?.includes(team));
+  const starred = [...sim.starred].map((id) => state.players[id]).filter(Boolean).sort((a, b) => b.stars - a.stars);
   return (
     <>
+      <Section title={`Starred (${starred.length})`}>
+        {starred.length === 0 ? <Empty>Star players (☆) in the Portal or Results to track them here.</Empty> : starred.map((p) => {
+          const [text, color] = standing(state, p, team);
+          return <PlayerLine key={p.id} p={p} brand={brand} to={p.status === "committed" ? p.to : null} isMobile={isMobile} onOpen={sim.openCard} right={(
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+              <span style={{ fontSize: 12, fontWeight: 800, color, textAlign: "right" }}>{text}</span>
+              <StarBtn sim={sim} pid={p.id} />
+            </div>
+          )} />;
+        })}
+      </Section>
       <Section title={`Signed (${view.signings.length})`}>
-        {view.signings.length === 0 ? <Empty>No one yet.</Empty> : view.signings.map((p) => <PlayerLine key={p.id} p={p} brand={brand} to={team} isMobile={isMobile} right={<span style={{ fontSize: 12, fontWeight: 900, color: "#7ee2a8" }}>{money(p.deal.nil)} · {PT_LABEL[p.deal.pt]}</span>} />)}
+        {view.signings.length === 0 ? <Empty>No one yet.</Empty> : view.signings.map((p) => <PlayerLine key={p.id} p={p} brand={brand} to={team} isMobile={isMobile} right={<span style={{ fontSize: 12, fontWeight: 900, color: "#7ee2a8" }}>{money(p.deal.nil)}</span>} />)}
       </Section>
       <Section title={`Open offers (${view.offers.length})`}>
         {view.offers.length === 0 ? <Empty>Make offers from the Portal tab.</Empty> : view.offers.map((p) => (
-          <PlayerLine key={p.id} p={p} brand={brand} isMobile={isMobile} right={<span style={{ fontSize: 12, fontWeight: 800, color: SUB, textAlign: "right" }}>{money(p.offers[team].nil)} · {PT_LABEL[p.offers[team].pt]}<br /><span style={{ color: GOLD }}>{Object.keys(p.offers).length - 1} other offer{Object.keys(p.offers).length === 2 ? "" : "s"}</span></span>} />
+          <PlayerLine key={p.id} p={p} brand={brand} isMobile={isMobile} onOpen={sim.openCard} right={<span style={{ fontSize: 12, fontWeight: 800, color: SUB, textAlign: "right" }}>{money(p.offers[team].nil)}<br /><span style={{ color: GOLD }}>{Object.keys(p.offers).length - 1} other offer{Object.keys(p.offers).length === 2 ? "" : "s"}</span></span>} />
         ))}
       </Section>
       {missed.length > 0 && (
@@ -390,90 +462,351 @@ function BoardTab({ sim, team, brand, isMobile }) {
   );
 }
 
-// ── Roster & Needs ──
-function RosterTab({ sim, isMobile }) {
-  const { view } = sim;
+const M_value = (p) => p.stars * 10 + Math.min(p.elig || 0, 4);
+const ROLE_RANK = { starter: 0, rotation: 1, reserve: 2, none: 3 };
+
+function RetainEditor({ p, sim, onDone }) {
+  const { state, view } = sim;
+  const base = retainOdds(state, p, null);
+  const [nil, setNil] = useState(p.retain?.nil ?? base.ask);
+  // No promised roles: he weighs where he'd fit in your room.
+  const fit = fitAt(state, p.team, p);
+  const max = view.available + (p.retain?.nil || 0);
+  const odds = retainOdds(state, p, { nil });
+  const nfl = p.considering === "nfl";
+  return (
+    <div style={{ padding: "12px 16px", background: "#0b1322", borderBottom: `1px solid ${LINE}`, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10 }}>
+      {!nfl && <div style={{ flexBasis: "100%" }}><Values p={p} /></div>}
+      <div style={{ fontSize: 12, fontWeight: 800, color: SUB }}>Wants about <b style={{ color: INK }}>{money(base.ask)}</b></div>
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 900, color: SUB }}>
+        NIL $
+        <input type="number" min={0} step={10000} value={nil} onChange={(e) => setNil(Number(e.target.value) || 0)} style={{ width: 120, background: "#111a2b", color: INK, border: `1px solid ${LINE}`, borderRadius: 8, padding: "6px 8px", fontWeight: 800 }} />
+      </label>
+      {[0.5, 0.8, 1].map((m) => <button key={m} type="button" style={pillBtn(false)} onClick={() => setNil(Math.min(max, Math.round((base.ask * m) / 1000) * 1000))}>{m === 1 ? "Ask" : `${Math.round(m * 100)}%`}</button>)}
+      <span style={{ fontSize: 12, fontWeight: 800, color: SUB }}>Fits as <b style={{ color: INK }}>{FIT_LABEL[fit.fit]}</b> in your {p.pos} room{fit.better.length ? ` (${fit.better.length} better)` : ""}</span>
+      <span style={{ flex: 1 }} />
+      <span style={{ fontSize: 12, fontWeight: 900, color: INK }}>
+        {nfl ? <>Leaves {pct(base.chance)} → <span style={{ color: "#7ee2a8" }}>{pct(odds.chance)}</span></> : <>Stays <span style={{ color: "#7ee2a8" }}>{pct(odds.chance)}</span></>}
+      </span>
+      <span style={{ fontSize: 11, fontWeight: 800, color: SUB }}>{money(max)} available</span>
+      {p.retain && <button type="button" style={pillBtn(false)} onClick={() => { sim.unretain(p.id); onDone(); }}>Pull Offer</button>}
+      <button type="button" style={pillBtn(true, "#2e7d32")} onClick={() => { if (sim.retain(p.id, { nil })) onDone(); }}>{p.retain ? "Update" : "Make Offer"}</button>
+    </div>
+  );
+}
+
+// ── Needs: each position's need, and who's there, in the portal, or gone ──
+function NeedsTab({ sim, team, brand, isMobile }) {
+  const { state, view } = sim;
+  const [pos, setPos] = useState("QB");
+  const all = useMemo(() => Object.values(state.players), [state.players]);
+  const needOf = (x) => Math.max(...posGroup(x).map((k) => view.needs[k] || 0));
+  const level = (n) => (n >= 2 ? ["Big need", "#ff6b5b"] : n >= 1 ? ["Need", GOLD] : n > 0 ? ["Depth", "#9fc3ff"] : ["Set", "#7ee2a8"]);
+  const at = (p) => posGroup(pos).includes(p.pos);
+  const rank = (a, b) => ROLE_RANK[a.role] - ROLE_RANK[b.role] || b.stars - a.stars || M_value(b) - M_value(a);
+  // On the roster: stayed (or still deciding), plus signings coming in.
+  const roster = all.filter((p) => at(p) && ((p.team === team && (p.status === "roster" || p.status === "considering")) || (p.status === "committed" && p.to === team))).sort(rank);
+  const inPortal = all.filter((p) => at(p) && p.team === team && p.status === "portal").sort(rank);
+  // Gone: portal departures first, then the NFL.
+  const left = all.filter((p) => at(p) && p.team === team && (p.status === "unsigned" || (p.status === "committed" && p.to !== team))).sort(rank)
+    .concat(sortNfl(all.filter((p) => at(p) && p.team === team && p.status === "declared")));
+  const [lv, lc] = level(needOf(pos));
+  // The opening windows' outcomes, for the NFL decisions baked in here.
+  const opening = useMemo(() => Object.fromEntries(state.log.filter((e) => e.stage && e.team === team).map((e) => [e.pid, e])), [state.log, team]);
   return (
     <>
-      <Section title="Needs">
-        <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill, minmax(${isMobile ? 90 : 110}px, 1fr))`, gap: 8, padding: 12 }}>
-          {POSITIONS.map((pos) => {
-            const n = view.needs[pos] || 0;
-            const level = n >= 2 ? ["Big need", "#c0392b"] : n >= 1 ? ["Need", GOLD] : n > 0 ? ["Depth", "#9fc3ff"] : ["Set", "#2e7d32"];
-            return (
-              <div key={pos} style={{ background: "#111a2b", border: `1px solid ${LINE}`, borderRadius: 10, padding: "10px 12px" }}>
-                <div style={{ fontWeight: 900, fontSize: 16 }}>{pos}</div>
-                <div style={{ fontSize: 12, fontWeight: 900, color: level[1] }}>{level[0]}</div>
-              </div>
-            );
-          })}
-        </div>
+      <div style={{ display: "flex", gap: 6, padding: "10px 12px", borderBottom: `1px solid ${LINE}`, overflowX: "auto" }}>
+        {POS_TABS.map((x) => {
+          const c = level(needOf(x))[1];
+          return (
+            <button key={x} type="button" onClick={() => setPos(x)} style={{ ...pillBtn(pos === x), display: "inline-flex", alignItems: "center", gap: 6 }}>
+              {x}<span style={{ width: 7, height: 7, borderRadius: 4, background: c }} />
+            </button>
+          );
+        })}
+      </div>
+      <div style={{ padding: "10px 16px", borderBottom: `1px solid ${LINE}`, fontWeight: 900, fontSize: 14 }}>
+        {pos} · <span style={{ color: lc }}>{lv}</span>
+        <span style={{ color: SUB, fontWeight: 700, fontSize: 12 }}> · plays {posGroup(pos).map((k) => state.cfg.starters[k] || 0).reduce((a, n) => a + n, 0)} starter{posGroup(pos).length > 1 || (state.cfg.starters[pos] || 0) !== 1 ? "s" : ""}</span>
+      </div>
+      <Section title={`On the roster (${roster.length})`}>
+        {roster.length === 0 ? <Empty>No one.</Empty> : roster.map((p) => (
+          <PlayerLine key={p.id} p={p} brand={brand} to={p.status === "committed" ? team : null} isMobile={isMobile} onOpen={sim.openCard} right={(
+            <span style={{ fontSize: 12, fontWeight: 900, textAlign: "right", color: p.status === "committed" ? "#7ee2a8" : p.status === "considering" ? GOLD : SUB }}>
+              {p.status === "committed" ? `New · ${money(p.deal.nil)}` : p.status === "considering" ? (p.considering === "nfl" ? "Deciding on the NFL" : "Wants to leave")
+                : p.retained ? `Kept from the ${p.retained.stage === "nfl" ? "NFL" : "portal"} · ${money(p.retained.nil)}` : opening[p.id]?.kind === "stayed" ? "Passed on the NFL" : ROLE_LABEL[p.role]}
+            </span>
+          )} />
+        ))}
       </Section>
-      <Section title={`Gone (${view.departures.length})`}>
-        {view.departures.length === 0 ? <Empty>No departures.</Empty> : view.departures.map((p) => (
-          <div key={p.id} className="wd-sim-row" style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 16px", borderBottom: `1px solid ${LINE}` }}>
-            <TransferStars stars={p.stars} size="sm" />
-            <span style={{ width: 40, fontSize: 12, fontWeight: 900, color: "#9fc3ff" }}>{p.pos}</span>
-            <span style={{ flex: 1, fontWeight: 900 }}>{p.name}</span>
-            <span style={{ fontSize: 12, fontWeight: 800, color: SUB }}>{p.status === "declared" ? "NFL Draft" : p.status === "committed" ? `→ ${sim.state.teams[p.to]?.school}` : p.status === "unsigned" ? "Unsigned" : "In the portal"}</span>
-          </div>
+      {inPortal.length > 0 && (
+        <Section title={`In the portal (${inPortal.length})`}>
+          {inPortal.map((p) => <PlayerLine key={p.id} p={p} brand={brand} isMobile={isMobile} onOpen={sim.openCard} right={<span style={{ fontSize: 12, fontWeight: 800, color: GOLD }}>{Object.keys(p.offers).length} offer{Object.keys(p.offers).length === 1 ? "" : "s"}</span>} />)}
+        </Section>
+      )}
+      <Section tone="gone" title={`Gone — no longer on the team (${left.length})`}>
+        {left.length === 0 ? <Empty>No one.</Empty> : left.map((p) => (
+          <PlayerLine key={p.id} p={p} brand={brand} to={p.status === "committed" ? p.to : null} isMobile={isMobile} onOpen={sim.openCard} extra={p.status === "declared" && p.dg != null ? gradeLabel(p.dg) : null} right={(
+            <span style={{ fontSize: 12, fontWeight: 800, color: SUB, textAlign: "right" }}>
+              {p.status === "committed" ? `Transferred to ${state.teams[p.to]?.school}` : p.status === "unsigned" ? "Unsigned" : `NFL · ${GONE_LABEL[p.reason] || "Draft"}`}
+              {opening[p.id]?.offered ? <><br /><span style={{ color: "#ff8a7a" }}>Turned down {money(opening[p.id].nil)}</span></> : null}
+            </span>
+          )} />
         ))}
       </Section>
     </>
   );
 }
 
-// ── Activity: commitments and notable entries ──
-function ActivityTab({ state, team, brand, isMobile }) {
-  const [mineOnly, setMineOnly] = useState(false);
-  const events = state.log.filter((e) => {
-    const p = state.players[e.pid];
-    if (!p) return false;
-    const mine = e.team === team || e.to === team;
-    if (mineOnly) return mine;
-    return mine || p.stars >= 4 || e.kind === "committed";
-  }).slice(-400).reverse();
-  const word = { declared: "Declared for the draft", entered: "Entered the portal", committed: "Committed", unsigned: "Went unsigned" };
+// Positions on a tab (K and P share one).
+const posGroup = (x) => (x === "K/P" ? ["K", "P"] : [x]);
+// NFL departures: drafted (a grade, Declared, chose it) first — best grade
+// first — then out of eligibility.
+const sortNfl = (list) => [...list].sort((a, b) => (a.reason === "exhausted") - (b.reason === "exhausted") || (a.dg ?? 99) - (b.dg ?? 99) || b.stars - a.stars);
+
+// Starters/rotation lost at each position so far.
+function LosingChips({ state, team }) {
+  const losing = Object.entries(urgencyOf(state, team)).filter(([, u]) => u.lost > 0).sort((a, b) => b[1].lost - a[1].lost);
+  if (!losing.length) return null;
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, padding: "10px 14px", borderBottom: `1px solid ${LINE}` }}>
+      <span style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.12em", color: SUB }}>LOSING</span>
+      {losing.map(([pos, u]) => <span key={pos} style={{ fontSize: 12, fontWeight: 900, borderRadius: 999, padding: "3px 10px", background: u.urgency >= 1.4 ? "#3a1219" : "#13233f", color: u.urgency >= 1.4 ? "#ffb3a8" : "#9fc3ff" }}>{pos} {u.lost}</span>)}
+    </div>
+  );
+}
+
+// The fence / wants-out list with retention offers (an opening window's
+// negotiating).
+function Negotiate({ sim, isMobile }) {
+  const { state, view, stage } = sim;
+  const [open, setOpen] = useState("");
+  const nfl = stage === "nfl";
+  // Draft prospects best grade first; would-be transfers by stars, then role.
+  const list = [...view.considering].sort((a, b) => (nfl ? (a.dg ?? 99) - (b.dg ?? 99) : b.stars - a.stars || ROLE_RANK[a.role] - ROLE_RANK[b.role]) || b.stars - a.stars || M_value(b) - M_value(a));
+  const canAct = sim.phase === "window";
+  return (
+    <Section title={nfl ? `On the fence (${list.length})` : `Trying to leave (${list.length})`}>
+      {list.length === 0 ? <Empty>{nfl ? "No one on the fence." : "No one wants out."}</Empty> : list.map((p) => {
+        const odds = retainOdds(state, p);
+        const [lean, leanColor] = nfl ? leanLabel(odds.chance) : odds.chance ? [`${pct(odds.chance)} to stay`, odds.chance >= 0.5 ? "#7ee2a8" : GOLD] : ["Gone without an offer", "#ff8a7a"];
+        return (
+          <div key={p.id}>
+            <PlayerLine p={p} brand={() => null} isMobile={isMobile} extra={nfl ? gradeLabel(p.dg) : WANTS_LABEL[p.reason]} right={(
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0, textAlign: "right" }}>
+                <span style={{ fontSize: 12, fontWeight: 900, color: leanColor }}>{lean}{nfl && !isMobile ? ` · ${pct(odds.chance)}` : ""}{p.retain ? <><br /><span style={{ color: "#7ee2a8" }}>{money(p.retain.nil)}</span></> : null}</span>
+                {canAct && <button type="button" onClick={() => setOpen(open === p.id ? "" : p.id)} style={pillBtn(open === p.id || !!p.retain, p.retain ? "#2e7d32" : BLUE)}>{p.retain ? "Edit" : "Retain"}</button>}
+              </div>
+            )} />
+            {open === p.id && <RetainEditor p={p} sim={sim} onDone={() => setOpen("")} />}
+          </div>
+        );
+      })}
+    </Section>
+  );
+}
+
+// What an opening window's log says about one of ours: kept, came back,
+// turned down an offer.
+const outcome = (e) => (!e ? null : e.kind === "retained" ? [`Kept · ${money(e.nil)}`, "#7ee2a8"] : e.kind === "stayed" ? ["Came back", SUB] : e.offered ? [`Turned down ${money(e.nil)}`, "#ff8a7a"] : null);
+
+// ── NFL Decisions: opening window 1 — negotiating, then what happened ──
+function NflTab({ sim, team, isMobile }) {
+  const { state, stage } = sim;
+  const events = state.log.filter((e) => e.stage === "nfl" && e.team === team);
+  const byPid = Object.fromEntries(events.map((e) => [e.pid, e]));
+  const back = events.filter((e) => e.kind === "retained" || e.kind === "stayed").map((e) => state.players[e.pid]);
+  // Everyone who left for the draft — drafted first, then out of eligibility.
+  const gone = sortNfl(Object.values(state.players).filter((p) => p.team === team && p.status === "declared"));
   return (
     <>
-      <div style={{ padding: "10px 12px", borderBottom: `1px solid ${LINE}`, display: "flex", gap: 6 }}>
-        <button type="button" style={pillBtn(!mineOnly)} onClick={() => setMineOnly(false)}>Everything</button>
-        <button type="button" style={pillBtn(mineOnly)} onClick={() => setMineOnly(true)}>My team</button>
-      </div>
-      {events.length === 0 ? <Empty>Nothing yet.</Empty> : events.map((e, i) => {
-        const p = state.players[e.pid];
-        return <PlayerLine key={`${e.pid}-${e.kind}-${i}`} p={p} brand={brand} to={e.kind === "committed" ? e.to : null} isMobile={isMobile}
-          right={<span style={{ fontSize: 12, fontWeight: 800, color: e.kind === "committed" ? "#7ee2a8" : SUB, textAlign: "right", flexShrink: 0 }}>W{e.w} · {word[e.kind]}{e.nil ? <><br />{money(e.nil)}</> : null}</span>} />;
-      })}
+      <LosingChips state={state} team={team} />
+      {stage === "nfl" ? <Negotiate sim={sim} isMobile={isMobile} /> : (
+        <Section title={`Coming back (${back.length})`}>
+          {back.length === 0 ? <Empty>No one on the fence came back.</Empty> : back.map((p) => {
+            const [text, color] = outcome(byPid[p.id]) || ["", SUB];
+            return <PlayerLine key={p.id} p={p} brand={() => null} isMobile={isMobile} extra={gradeLabel(p.dg)} right={<span style={{ fontSize: 12, fontWeight: 900, color }}>{text}</span>} />;
+          })}
+        </Section>
+      )}
+      <Section title={`Leaving for the NFL (${gone.length})`}>
+        {gone.length === 0 ? <Empty>No one.</Empty> : gone.map((p) => {
+          const o = outcome(byPid[p.id]);
+          return <PlayerLine key={p.id} p={p} brand={() => null} isMobile={isMobile} extra={p.dg != null ? gradeLabel(p.dg) : null}
+            right={<span style={{ fontSize: 12, fontWeight: 800, color: o ? o[1] : SUB, textAlign: "right" }}>{GONE_LABEL[p.reason] || "NFL Draft"}{o ? <><br />{o[0]}</> : null}</span>} />;
+        })}
+      </Section>
     </>
   );
 }
 
-// ── Between windows ──
-function Recap({ recap, state, team, brand, isMobile, onNext }) {
-  const mineIn = recap.commits.filter((e) => e.to === team);
-  const mineOut = recap.commits.filter((e) => e.team === team && e.to !== team);
-  const notable = recap.commits.filter((e) => state.players[e.pid].stars >= 5).slice(0, 6);
-  const last = state.phase === "done";
+// ── Leaving: opening window 2 — players trying to enter the portal ──
+function LeavingTab({ sim, team, brand, isMobile }) {
+  const { state, stage } = sim;
+  const events = state.log.filter((e) => e.stage === "retain" && e.team === team);
+  const kept = events.filter((e) => e.kind === "retained");
+  const left = events.filter((e) => e.kind === "entered").map((e) => ({ e, p: state.players[e.pid] }));
+  const offers = (p) => Object.keys(p.offers).length;
+  const where = (p) => (p.status === "committed" ? [state.teams[p.to]?.school, "#7ee2a8"] : p.status === "unsigned" ? ["Unsigned", SUB]
+    : [isMobile ? `In portal · ${offers(p)}` : `In the portal · ${offers(p)} offer${offers(p) === 1 ? "" : "s"}`, GOLD]);
+  // Our own logo adds nothing on our own players — only where they went.
+  const brandOut = (slug, p) => (slug === team && (p?.status === "roster" || p?.status === "considering") ? null : brand(slug));
   return (
-    <div className="wd-sim-pop" style={{ ...PANEL, marginBottom: 12 }}>
-      <div style={{ padding: isMobile ? "14px" : "16px 22px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-        <div style={{ flex: 1, minWidth: 200 }}>
-          <div style={{ fontSize: isMobile ? 18 : 22, fontWeight: 900, textTransform: "uppercase" }}>Window {recap.window} closed</div>
-          <div style={{ color: SUB, fontWeight: 700, fontSize: 14 }}>
-            {recap.commits.length} commitments{recap.entered.length ? ` · ${recap.entered.length} new entries` : ""}{recap.unsigned.length ? ` · ${recap.unsigned.length} went unsigned` : ""}
-          </div>
-        </div>
-        <button type="button" onClick={onNext} style={{ border: "none", borderRadius: 999, padding: "12px 22px", fontWeight: 900, fontSize: 14, textTransform: "uppercase", background: GOLD, color: "#fff", cursor: "pointer", fontFamily: "inherit" }}>
-          {last ? "See Results" : `Window ${recap.window + 1} →`}
-        </button>
+    <>
+      <LosingChips state={state} team={team} />
+      {stage === "retain" ? <Negotiate sim={sim} isMobile={isMobile} /> : (
+        <>
+          <Section title={`Kept (${kept.length})`}>
+            {kept.length === 0 ? <Empty>You didn't keep anyone who wanted out.</Empty> : kept.map((e) => (
+              <PlayerLine key={e.pid} p={state.players[e.pid]} brand={() => null} isMobile={isMobile} extra={WANTS_LABEL[state.players[e.pid].reason]} right={<span style={{ fontSize: 12, fontWeight: 900, color: "#7ee2a8" }}>Kept · {money(e.nil)}</span>} />
+            ))}
+          </Section>
+          <Section title={`Entered the portal (${left.length})`}>
+            {left.length === 0 ? <Empty>No one.</Empty> : left.map(({ e, p }) => {
+              const [text, color] = where(p);
+              return <PlayerLine key={p.id} p={p} brand={brandOut} to={p.status === "committed" ? p.to : null} isMobile={isMobile} extra={WANTS_LABEL[p.reason]}
+                right={<span style={{ fontSize: 12, fontWeight: 800, color, textAlign: "right" }}>{text}{e.offered ? <><br /><span style={{ color: "#ff8a7a" }}>Turned down {money(e.nil)}</span></> : null}</span>} />;
+            })}
+          </Section>
+        </>
+      )}
+    </>
+  );
+}
+
+// ── Results: the last window, for my team and around the country ──
+function ResultsTab({ sim, team, brand, isMobile }) {
+  const [sub, setSub] = useState("mine");
+  const { recap } = sim;
+  const title = !recap ? "" : recap.stage ? "Opening window 2 · Leaving" : `Portal window ${recap.window}`;
+  return (
+    <>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "10px 12px", borderBottom: `1px solid ${LINE}`, flexWrap: "wrap" }}>
+        <button type="button" style={pillBtn(sub === "mine", GOLD)} onClick={() => setSub("mine")}>My Team</button>
+        <button type="button" style={pillBtn(sub === "country", GOLD)} onClick={() => setSub("country")}>Around the Country</button>
+        <span style={{ flex: 1 }} />
+        {title && <span style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.12em", color: SUB, textTransform: "uppercase" }}>{title}</span>}
       </div>
-      {[["You signed", mineIn], ["You lost", mineOut], ["Biggest moves", notable]].map(([title, list]) => list.length > 0 && (
-        <Section key={title} title={title}>
-          {list.map((e) => <PlayerLine key={`${title}-${e.pid}`} p={state.players[e.pid]} brand={brand} to={e.to} isMobile={isMobile} right={<span style={{ fontSize: 12, fontWeight: 900, color: "#7ee2a8" }}>{money(e.nil)}</span>} />)}
-        </Section>
-      ))}
+      {!recap ? <Empty>Nothing yet.</Empty> : sub === "mine" ? <MyResults sim={sim} team={team} brand={brand} isMobile={isMobile} /> : <CountryResults sim={sim} team={team} brand={brand} isMobile={isMobile} />}
+    </>
+  );
+}
+
+const ResultLine = ({ p, brand, to, isMobile, extra, text, color, sim }) => (
+  <PlayerLine p={p} brand={brand} to={to} isMobile={isMobile} extra={extra} onOpen={sim?.openCard} right={(
+    <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+      <span style={{ fontSize: 12, fontWeight: 800, color, textAlign: "right" }}>{text}</span>
+      {sim && <StarBtn sim={sim} pid={p.id} />}
     </div>
+  )} />
+);
+
+// My Team. After the opening: who took your offer to stay, who turned it
+// down and entered the portal, who you let go. After a portal window: who
+// accepted your offers, who didn't (signed elsewhere, or still in the
+// portal), and starred players who signed.
+function MyResults({ sim, team, brand, isMobile }) {
+  const { state, recap } = sim;
+  const brandOut = (slug, p) => (slug === team && (p?.status === "roster" || p?.status === "considering") ? null : brand(slug));
+  if (recap.stage) {
+    const mine = recap.events.filter((e) => e.team === team);
+    const kept = mine.filter((e) => e.kind === "retained");
+    const declined = mine.filter((e) => e.kind === "entered" && e.offered);
+    const letGo = mine.filter((e) => e.kind === "entered" && !e.offered);
+    const now = (p) => standing(state, p, team);
+    return (
+      <>
+        <Section title={`Accepted your offer to stay (${kept.length})`}>
+          {kept.length === 0 ? <Empty>No one.</Empty> : kept.map((e) => <ResultLine key={e.pid} p={state.players[e.pid]} brand={brandOut} isMobile={isMobile} extra={WANTS_LABEL[state.players[e.pid].reason]} text={`Kept · ${money(e.nil)}`} color="#7ee2a8" />)}
+        </Section>
+        <Section tone="gone" title={`Declined — entered the portal (${declined.length})`}>
+          {declined.length === 0 ? <Empty>No one.</Empty> : declined.map((e) => {
+            const p = state.players[e.pid];
+            return <ResultLine key={e.pid} p={p} brand={brandOut} to={p.status === "committed" ? p.to : null} isMobile={isMobile} extra={`Turned down ${money(e.nil)}`} text={now(p)[0]} color={now(p)[1]} sim={sim} />;
+          })}
+        </Section>
+        <Section tone="gone" title={`You let them go — entered the portal (${letGo.length})`}>
+          {letGo.length === 0 ? <Empty>No one.</Empty> : letGo.map((e) => {
+            const p = state.players[e.pid];
+            return <ResultLine key={e.pid} p={p} brand={brandOut} to={p.status === "committed" ? p.to : null} isMobile={isMobile} extra={WANTS_LABEL[p.reason]} text={now(p)[0]} color={now(p)[1]} sim={sim} />;
+          })}
+        </Section>
+      </>
+    );
+  }
+  const accepted = recap.commits.filter((e) => e.to === team);
+  const signedAway = recap.commits.filter((e) => e.to !== team && e.offeredBy?.includes(team));
+  // Offered before this window and still undecided.
+  const stillOut = sim.portal.filter((p) => p.offers[team] && p.offers[team].window < state.window);
+  const shownIds = new Set([...accepted, ...signedAway].map((e) => e.pid));
+  const starredSigned = recap.commits.filter((e) => sim.starred.has(e.pid) && !shownIds.has(e.pid));
+  const lostOwn = recap.commits.filter((e) => e.team === team && e.to !== team && !shownIds.has(e.pid));
+  // Players who narrowed their lists and left you off.
+  const cutYou = (recap.cuts || []).filter((e) => e.to === team);
+  return (
+    <>
+      <Section title={`Accepted your offer (${accepted.length})`}>
+        {accepted.length === 0 ? <Empty>No one this window.</Empty> : accepted.map((e) => <ResultLine key={e.pid} p={state.players[e.pid]} brand={brand} to={team} isMobile={isMobile} text={`Signed · ${money(e.nil)}${e.blowout ? " · on the spot" : ""}`} color="#7ee2a8" />)}
+      </Section>
+      <Section tone="gone" title={`Didn't accept (${signedAway.length + stillOut.length})`}>
+        {signedAway.length + stillOut.length === 0 ? <Empty>No one.</Empty> : (
+          <>
+            {signedAway.map((e) => <ResultLine key={e.pid} p={state.players[e.pid]} brand={brand} to={e.to} isMobile={isMobile} text={`Signed with ${state.teams[e.to]?.school} · ${money(e.nil)}`} color="#ff8a7a" sim={sim} />)}
+            {stillOut.map((p) => <ResultLine key={p.id} p={p} brand={brand} isMobile={isMobile} extra={`Your offer: ${money(p.offers[team].nil)}`} text={standing(state, p, team)[0]} color={GOLD} sim={sim} />)}
+          </>
+        )}
+      </Section>
+      {starredSigned.length > 0 && (
+        <Section title={`Starred players who signed (${starredSigned.length})`}>
+          {starredSigned.map((e) => <ResultLine key={e.pid} p={state.players[e.pid]} brand={brand} to={e.to} isMobile={isMobile} text={`Signed with ${state.teams[e.to]?.school} · ${money(e.nil)}`} color={SUB} sim={sim} />)}
+        </Section>
+      )}
+      {cutYou.length > 0 && (
+        <Section tone="gone" title={`Cut you from his list (${cutYou.length})`}>
+          {cutYou.map((e) => <ResultLine key={e.pid} p={state.players[e.pid]} brand={brand} isMobile={isMobile} text={`Down to his top ${e.list}`} color="#ff8a7a" sim={sim} />)}
+        </Section>
+      )}
+      {lostOwn.length > 0 && (
+        <Section tone="gone" title={`Your former players who signed (${lostOwn.length})`}>
+          {lostOwn.map((e) => <ResultLine key={e.pid} p={state.players[e.pid]} brand={brandOut} to={e.to} isMobile={isMobile} text={`Transferred to ${state.teams[e.to]?.school}`} color={SUB} />)}
+        </Section>
+      )}
+    </>
+  );
+}
+
+// Around the Country: every move from the last window, with the Portal
+// tab's filters.
+function CountryResults({ sim, team, brand, isMobile }) {
+  const { state, recap, view } = sim;
+  const f = useFilters(view);
+  const [kind, setKind] = useState("");
+  const [shown, setShown] = useState(60);
+  const moves = useMemo(() => (recap.stage
+    ? recap.events.filter((e) => e.kind === "entered" || e.kind === "retained")
+    : [...recap.commits, ...recap.unsigned]
+  ).map((e) => ({ e, p: state.players[e.pid] })), [recap, state.players]);
+  const kinds = [...new Set(moves.map((m) => m.e.kind))];
+  const word = { committed: "Signed", unsigned: "Unsigned", entered: "Entered the portal", retained: "Kept" };
+  const list = useMemo(() => moves.filter(({ e, p }) => (!kind || e.kind === kind) && f.match(p))
+    .sort((a, b) => b.p.stars - a.p.stars || a.p.name.localeCompare(b.p.name)), [moves, kind, f]);
+  useEffect(() => { setShown(60); }, [kind, f]);
+  return (
+    <>
+      <FilterBar f={f} view={view} />
+      {kinds.length > 1 && (
+        <div style={{ display: "flex", gap: 6, padding: "8px 12px", borderBottom: `1px solid ${LINE}`, flexWrap: "wrap" }}>
+          <button type="button" style={pillBtn(!kind)} onClick={() => setKind("")}>All moves ({moves.length})</button>
+          {kinds.map((k) => <button key={k} type="button" style={pillBtn(kind === k)} onClick={() => setKind(k)}>{word[k]} ({moves.filter((m) => m.e.kind === k).length})</button>)}
+        </div>
+      )}
+      {list.length === 0 ? <Empty>No moves match.</Empty> : list.slice(0, shown).map(({ e, p }) => (
+        <ResultLine key={`${e.kind}-${p.id}`} p={p} brand={brand} to={e.kind === "committed" ? e.to : null} isMobile={isMobile}
+          text={e.kind === "committed" ? `${e.to === team ? "Signed with you" : "Signed"} · ${money(e.nil)}` : e.kind === "retained" ? `Kept · ${money(e.nil)}` : word[e.kind]}
+          color={e.kind === "committed" ? "#7ee2a8" : e.kind === "unsigned" ? SUB : e.kind === "retained" ? "#9fc3ff" : GOLD} sim={sim} />
+      ))}
+      {list.length > shown && <ShowMore n={list.length - shown} onClick={() => setShown((n) => n + 60)} />}
+    </>
   );
 }
 
@@ -510,9 +843,10 @@ function Final({ state, team, brand, isMobile, onRerun, onSettings }) {
   );
 }
 
-const Section = ({ title, children }) => (
+// tone "gone": a red header for players who've left.
+const Section = ({ title, children, tone }) => (
   <div>
-    <div style={{ padding: "8px 16px", background: "#0b1322", borderBottom: `1px solid ${LINE}`, borderTop: `1px solid ${LINE}`, fontSize: 11, fontWeight: 900, letterSpacing: "0.14em", color: SUB, textTransform: "uppercase" }}>{title}</div>
+    <div style={{ padding: "8px 16px", background: tone === "gone" ? "#2a1016" : "#0b1322", borderBottom: `1px solid ${LINE}`, borderTop: `1px solid ${tone === "gone" ? "#5c1f28" : LINE}`, fontSize: 11, fontWeight: 900, letterSpacing: "0.14em", color: tone === "gone" ? "#ff8a7a" : SUB, textTransform: "uppercase" }}>{title}</div>
     {children}
   </div>
 );
