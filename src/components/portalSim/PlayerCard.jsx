@@ -17,8 +17,16 @@
 //             helps), the leader marked, the bar he needs to commit
 //   offer     NIL only — players judge the room, not promised roles (user,
 //             2026-11-14): where he'd fit in yours and how he sees your offer
-//             on each factor. A big enough offer commits him on the spot
-//             (engine instantAmount) — never shown to the user.
+//             — each factor with his interest letter (A's first, F last) and
+//             the recruiting process (happiness + interest built). What an
+//             offer does to his happiness is never previewed — it just
+//             happens. A big enough offer commits him on the spot (engine
+//             instantAmount) — never shown to the user either.
+//   keep      an opening window's Retain (pages/PortalSim.jsx) opens here
+//             for one of yours deciding (status considering): a retention
+//             NIL offer, his odds (NFL: chance he leaves; transfer: chance he
+//             stays) and how he sees staying, factor by factor (user,
+//             2026-11-14).
 // Branding: a player who's committed / transferred wears his NEW school in
 // the header; an on-the-spot commit plays a celebration (the new colors
 // wipe in, the logo pops with a COMMITTED stamp, confetti).
@@ -26,8 +34,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { collection, getDocs, limit, query, where } from "firebase/firestore";
 import { db } from "../../firebase";
 import TransferStars from "../TransferStars";
-import { gradeOffer, fitAt, offeredThisWindow, happinessOf, offerHit } from "../../utils/portalSim/engine";
-import { FACTORS, commitBar } from "../../utils/portalSim/models";
+import { gradeOffer, fitAt, offeredThisWindow, happinessOf, retainOdds, homeScores } from "../../utils/portalSim/engine";
+import { byLetter, commitBar, letterOf } from "../../utils/portalSim/models";
 import { money } from "../../utils/portalSim/data";
 import { gradeLabel, gradeLook } from "../../utils/gradeScale";
 
@@ -51,6 +59,13 @@ const CELEBRATE_CSS = `
   @media (prefers-reduced-motion: reduce) { .wdc-anim { animation-duration: 1ms !important; animation-delay: 0s !important; } }
 `;
 const VALUE_LABEL = { tier: "Program", nil: "NIL", loc: "Close to home", pt: "Playing time", success: "Winning", dev: "Development" };
+const WANTS_LABEL = { level: "Wants a bigger stage", snaps: "Wants snaps", money: "Wants a bigger NIL deal", home: "Wants to be closer to home", winning: "Wants to win", development: "Wants to develop" };
+const pctOf = (x) => `${Math.round((x || 0) * 100)}%`;
+// His interest letters (how much a factor matters to him).
+export const LETTER_COLOR = { A: "#7ee2a8", B: "#9fc3ff", C: "#f6a21d", F: "#ff8a7a" };
+export const Letter = ({ l, size = 22 }) => (
+  <span title={`${l} interest`} style={{ width: size, height: size, borderRadius: 6, flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 900, fontSize: size * 0.58, color: "#0e1626", background: LETTER_COLOR[l] || "#8b9bb4" }}>{l}</span>
+);
 
 // One cfbRosters doc per school, fetched once a session.
 const rosterCache = new Map();
@@ -111,7 +126,10 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
   const p = state.players[pid];
   const [row, setRow] = useState(undefined); // undefined loading, null none
   const mine = p?.offers?.[team];
-  const [nil, setNil] = useState(mine?.nil ?? p?.ask ?? 0);
+  // One of yours deciding (opening windows): his retention offer starts at
+  // what's out there, or what it takes to keep him.
+  const keeping = p?.status === "considering";
+  const [nil, setNil] = useState(() => (keeping ? p.retain?.nil ?? Math.round(retainOdds(state, p, null).ask / 1000) * 1000 : mine?.nil ?? p?.ask ?? 0));
   const [shot, setShot] = useState(true);
   // Commit celebration: plays when he goes portal → committed while open.
   const [celebrate, setCelebrate] = useState(0);
@@ -144,6 +162,7 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
   // A school he's cut from his list can't offer again.
   const cutYou = p?.cut?.[team] || null;
   const canOffer = sim.phase === "window" && p?.status === "portal" && !cutYou;
+  const canRetain = sim.phase === "window" && keeping && p?.team === team;
   // His interest in every offer — yours as you're building it (it keeps the
   // interest it's built if you're raising an offer that's out there).
   const interest = useMemo(() => {
@@ -172,14 +191,11 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
   const room = fitAt(state, team, p);
   // One move per player per window; going lower than before upsets him.
   const moved = offeredThisWindow(state, team, p);
-  // His happiness with you, and what this offer would cost it.
+  // His happiness with you (it moves when you act — never previewed).
   const happy = happinessOf(p, team);
-  const hit = offerHit(state, team, p, nil);
-  const happyAfter = Math.max(0, happy - hit.drop);
   const happyColor = (h) => (h >= 80 ? GREEN : h >= 50 ? GOLD : RED);
   const pts = (v) => `${v > 0 ? "+" : ""}${Math.round(v * 100)}`;
-  const weights = p.personality;
-  const wsum = FACTORS.reduce((a, k) => a + (weights[k] || 0), 0) || 1;
+  const order = byLetter(p);
   const tiles = statTiles(p.pos, row?.s);
   const label = p.dg != null ? gradeLabel(p.dg) : null;
   const look = label ? gradeLook(label) : null;
@@ -189,7 +205,8 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
   // Moving: in the portal, signed somewhere, or unsigned — the → ? and the
   // recruitment only show then (a player still on a roster has neither).
   const moving = ["portal", "committed", "unsigned"].includes(p.status);
-  const status = p.status === "portal" ? ["In the portal", GOLD] : p.status === "committed" ? [`Committed to ${state.teams[p.to]?.school}`, GREEN] : p.status === "unsigned" ? ["Unsigned", SUB] : ["", SUB];
+  const status = keeping ? (p.considering === "nfl" ? ["Deciding on the NFL", GOLD] : [WANTS_LABEL[p.reason] || "Wants to leave", RED])
+    : p.status === "portal" ? ["In the portal", GOLD] : p.status === "committed" ? [`Committed to ${state.teams[p.to]?.school}`, GREEN] : p.status === "unsigned" ? ["Unsigned", SUB] : ["", SUB];
   const bio = [
     row?.ht || row?.wt ? ["Height / Weight", [ft(row?.ht), row?.wt ? `${row.wt} lbs` : null].filter(Boolean).join(" · ")] : null,
     row?.home ? ["Hometown", row.home] : null,
@@ -203,7 +220,7 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 20000, background: "rgba(3,7,14,0.72)", display: "flex", alignItems: isMobile ? "stretch" : "flex-start", justifyContent: "center", padding: isMobile ? 0 : "70px 16px 24px", overflowY: "auto" }}>
       <div role="dialog" aria-label={p.name} onClick={(e) => e.stopPropagation()} className="wd-sim-pop wd-sim-scroll" style={{
         position: "relative", width: "100%", maxWidth: 860, background: "#0e1626", border: isMobile ? "none" : `1px solid ${LINE}`, borderRadius: isMobile ? 0 : 18, overflow: "hidden", color: INK,
-        maxHeight: isMobile ? "100%" : "none", overflowY: isMobile ? "auto" : "visible", boxShadow: "0 20px 60px rgba(0,0,0,0.6)",
+        maxHeight: isMobile ? "100%" : "none", overflowY: isMobile ? "auto" : "hidden", boxShadow: "0 20px 60px rgba(0,0,0,0.6)",
       }}>
         <style>{CELEBRATE_CSS}</style>
         {/* Header, in his school's colors (his new one once he's committed):
@@ -257,7 +274,7 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
         </div>
 
         {celebrate ? (
-          <div key={`f${celebrate}`} aria-hidden="true" style={{ position: "absolute", left: 0, right: 0, top: 0, height: 0, pointerEvents: "none", zIndex: 5 }}>
+          <div key={`f${celebrate}`} aria-hidden="true" style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none", zIndex: 5 }}>
             {confetti.map((c) => (
               <span key={c.i} className="wdc-anim" style={{
                 position: "absolute", left: `${c.left}%`, top: 0, width: c.w, height: c.w * 0.45, borderRadius: 2,
@@ -368,18 +385,13 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
               He cut you from his list after portal window {cutYou}. You can't offer him again.
             </div>
           )}
+          {/* Keep him: a retention offer (opening windows). */}
+          {canRetain && <Retain p={p} sim={sim} team={team} nil={nil} setNil={setNil} isMobile={isMobile} onClose={onClose} />}
+
           {/* The offer: NIL. He judges your room himself. */}
           {canOffer && (
             <>
               <H right={<span style={{ fontSize: 11, fontWeight: 800, color: SUB }}>{money(max)} available</span>}>{mine ? "Your offer" : "Make an offer"}</H>
-              <div style={{ display: "flex", alignItems: "center", gap: 12, background: "#111a2b", border: `1px solid ${LINE}`, borderRadius: 12, padding: "10px 14px", marginBottom: 12 }}>
-                <span style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.12em", color: SUB, whiteSpace: "nowrap" }}>HAPPINESS WITH YOU</span>
-                <div title="Lowballs, offering less than before and pulling offers wear it down" style={{ position: "relative", flex: 1, height: 10, borderRadius: 5, background: "#1a2438", overflow: "hidden" }}>
-                  <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${happy}%`, background: hit.drop ? "rgba(255,138,122,0.45)" : happyColor(happy), transition: "width .3s" }} />
-                  {hit.drop ? <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${happyAfter}%`, background: happyColor(happyAfter), transition: "width .3s" }} /> : null}
-                </div>
-                <span style={{ fontSize: 18, fontWeight: 900, color: happyColor(hit.drop ? happyAfter : happy), minWidth: 54, textAlign: "right" }}>{hit.drop ? `${happy}→${happyAfter}` : happy}</span>
-              </div>
               <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0,1.1fr) minmax(0,1fr)", gap: 14 }}>
                 <div style={{ background: "#111a2b", border: `1px solid ${LINE}`, borderRadius: 12, padding: 14 }}>
                   <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
@@ -407,33 +419,40 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
                     <span style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.12em", color: SUB }}>HOW HE SEES YOUR OFFER</span>
                     <span style={{ fontSize: 22, fontWeight: 900, color: yours && top && yours.slug === top.slug ? GREEN : GOLD }}>{yours ? Math.round(yours.grade * 100) : "—"}</span>
                   </div>
-                  {yours && [...FACTORS].sort((a, b2) => (weights[b2] || 0) - (weights[a] || 0)).map((k) => {
-                    const w = (weights[k] || 0) / wsum;
+                  {yours && order.map((k) => {
                     const v = yours.scores[k] || 0;
                     return (
-                      <div key={k} style={{ display: "grid", gridTemplateColumns: "96px minmax(0,1fr) 34px", alignItems: "center", gap: 8, marginTop: 7 }}>
+                      <div key={k} style={{ display: "grid", gridTemplateColumns: "22px 96px minmax(0,1fr)", alignItems: "center", gap: 8, marginTop: 7 }}>
+                        <Letter l={letterOf(p, k, state.cfg)} />
                         <span style={{ fontSize: 12, fontWeight: 800 }}>{VALUE_LABEL[k]}</span>
                         <div style={{ height: 8, borderRadius: 4, background: "#1a2438", overflow: "hidden" }}><div style={{ width: `${Math.round(v * 100)}%`, height: "100%", background: v >= 0.66 ? GREEN : v >= 0.33 ? GOLD : RED }} /></div>
-                        <span title="How much he cares" style={{ fontSize: 11, fontWeight: 900, color: SUB, textAlign: "right" }}>{Math.round(w * 100)}%</span>
                       </div>
                     );
                   })}
-                  {yours?.held > 0 && <div style={{ fontSize: 12, fontWeight: 800, color: GREEN, marginTop: 8 }}>+{Math.round(yours.held * 100)} from your offer standing</div>}
-                  <div style={{ fontSize: 11, fontWeight: 700, color: SUB, marginTop: 8 }}>Bars: how your school scores. %: how much he cares.</div>
+                  {/* The recruiting process — happiness with you and interest built. */}
+                  {yours && (
+                    <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${LINE}` }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "118px minmax(0,1fr) 34px", alignItems: "center", gap: 8 }}>
+                        <span style={{ fontSize: 12, fontWeight: 800 }}>Process</span>
+                        <div style={{ height: 8, borderRadius: 4, background: "#1a2438", overflow: "hidden" }}><div style={{ width: `${Math.round((yours.process || 0) * 100)}%`, height: "100%", background: happyColor(happy) }} /></div>
+                        <span style={{ fontSize: 12, fontWeight: 900, textAlign: "right", color: happyColor(happy) }}>{Math.round((yours.process || 0) * 100)}</span>
+                      </div>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: SUB, marginTop: 5 }}>
+                        Happiness with you <b style={{ color: happyColor(happy) }}>{happy}</b>{yours.held > 0 ? <> · <span style={{ color: GREEN }}>{pts(yours.held)} interest built</span></> : null}
+                      </div>
+                    </div>
+                  )}
+                  <div style={{ fontSize: 11, fontWeight: 700, color: SUB, marginTop: 8 }}>Bars: how your school scores. Letters: how much he cares (A's first). The factors count 3× the process.</div>
                 </div>
               </div>
               {moved ? (
                 <div style={{ marginTop: 10, padding: "8px 12px", background: "#13233f", color: "#9fc3ff", fontWeight: 800, fontSize: 13, borderRadius: 8 }}>
                   You've made your move on him this window. You can offer again next window.
                 </div>
-              ) : hit.drop ? (
-                <div style={{ marginTop: 10, padding: "8px 12px", background: "#3a1219", color: "#ffb3a8", fontWeight: 800, fontSize: 13, borderRadius: 8 }}>
-                  {hit.lower ? `That's less than your last offer (${money(hit.prior)}).` : "That's well under what he's asking."} He'll take it personally — happiness {happy} → {happyAfter}.
-                </div>
               ) : null}
               {sim.error && <div style={{ marginTop: 10, padding: "8px 12px", background: "#3a1219", color: "#ffb3a8", fontWeight: 800, fontSize: 13, borderRadius: 8 }}>{sim.error}</div>}
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12, flexWrap: "wrap" }}>
-                {mine && !moved && <button type="button" style={pill(false)} title="Pulling an offer costs his happiness with you" onClick={() => { sim.retract(p.id); onClose(); }}>Pull Offer</button>}
+                {mine && !moved && <button type="button" style={pill(false)} onClick={() => { sim.retract(p.id); onClose(); }}>Pull Offer</button>}
                 <button type="button" disabled={nil > max || moved} style={{ ...pill(true, "#2e7d32"), padding: "11px 22px", fontSize: 14, opacity: nil > max || moved ? 0.5 : 1 }} onClick={() => { if (sim.offer(p.id, { nil }) === true) onClose(); }}>{mine ? "New Offer" : "Make Offer"}</button>
               </div>
             </>
@@ -441,5 +460,82 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
         </div>
       </div>
     </div>
+  );
+}
+
+// ── Keep him: one of yours deciding in an opening window ──
+// NFL: his chance of leaving, before → with your offer. Transfer: his chance
+// of staying with it, and how he sees staying, factor by factor (A's first).
+function Retain({ p, sim, team, nil, setNil, isMobile, onClose }) {
+  const { state, view } = sim;
+  const nfl = p.considering === "nfl";
+  const base = retainOdds(state, p, null);
+  const odds = retainOdds(state, p, { nil });
+  const max = view.available + (p.retain?.nil || 0);
+  const room = fitAt(state, team, p);
+  const scores = nfl ? null : homeScores(state, p, { nil });
+  const slideMax = Math.max(Math.round((base.ask * 2.5) / 1000) * 1000, 10000);
+  const good = (c) => (c >= 0.6 ? GREEN : c >= 0.35 ? GOLD : RED);
+  return (
+    <>
+      <H right={<span style={{ fontSize: 11, fontWeight: 800, color: SUB }}>{money(max)} available</span>}>{p.retain ? "Your offer to keep him" : "Keep him"}</H>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0,1.1fr) minmax(0,1fr)", gap: 14 }}>
+        <div style={{ background: "#111a2b", border: `1px solid ${LINE}`, borderRadius: 12, padding: 14 }}>
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+            <span style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.12em", color: SUB }}>NIL</span>
+            <span style={{ fontSize: 11, fontWeight: 800, color: SUB }}>{nfl ? "To stay out of the draft" : "To stay"}: about <b style={{ color: INK }}>{money(base.ask)}</b></span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6 }}>
+            <span style={{ fontSize: 28, fontWeight: 900, color: nil > max ? RED : INK, minWidth: 96 }}>{money(nil)}</span>
+            <input type="range" min={0} max={slideMax} step={Math.max(1000, Math.round(base.ask / 100 / 1000) * 1000)} value={Math.min(nil, slideMax)} onChange={(e) => setNil(Number(e.target.value))} aria-label="Retention NIL" style={{ flex: 1, accentColor: GOLD }} />
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+            {[0.5, 0.8, 1, 1.25, 1.5].map((m) => <button key={m} type="button" style={pill(Math.round(base.ask * m / 1000) * 1000 === nil, BLUE)} onClick={() => setNil(Math.round((base.ask * m) / 1000) * 1000)}>{m === 1 ? "Ask" : `${Math.round(m * 100)}%`}</button>)}
+            <input type="number" min={0} step={10000} value={nil} onChange={(e) => setNil(Math.max(0, Number(e.target.value) || 0))} aria-label="Retention NIL amount" style={{ width: 110, background: "#0b1322", color: INK, border: `1px solid ${LINE}`, borderRadius: 999, padding: "6px 10px", fontWeight: 800, fontSize: 12 }} />
+          </div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: SUB, marginTop: 12, lineHeight: 1.45 }}>
+            Coming back, he'd fit as <b style={{ color: FIT_COLOR[room.fit] }}>{FIT_LABEL[room.fit]}</b> in your {p.pos} room
+            {room.better.length ? <> — {room.better.length} better player{room.better.length === 1 ? "" : "s"} ({room.better.slice(0, 3).map((x) => x.name.split(" ").slice(-1)[0]).join(", ")}{room.better.length > 3 ? "…" : ""})</> : <> — no one better there</>}.
+          </div>
+        </div>
+        <div style={{ background: "#111a2b", border: `1px solid ${LINE}`, borderRadius: 12, padding: 14 }}>
+          {nfl ? (
+            <>
+              <span style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.12em", color: SUB }}>CHANCE HE LEAVES FOR THE NFL</span>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginTop: 8 }}>
+                <span style={{ fontSize: 22, fontWeight: 900, color: SUB }}>{pctOf(base.chance)}</span>
+                <span style={{ fontSize: 18, fontWeight: 900, color: SUB }}>→</span>
+                <span style={{ fontSize: 34, fontWeight: 900, color: good(1 - odds.chance) }}>{pctOf(odds.chance)}</span>
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: SUB, marginTop: 8, lineHeight: 1.45 }}>The better his draft grade, the less money moves him.</div>
+            </>
+          ) : (
+            <>
+              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+                <span style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.12em", color: SUB }}>CHANCE HE STAYS</span>
+                <span style={{ fontSize: 26, fontWeight: 900, color: good(odds.chance) }}>{pctOf(odds.chance)}</span>
+              </div>
+              <div style={{ fontSize: 11, fontWeight: 800, color: SUB, marginTop: 6 }}>How he sees staying</div>
+              {byLetter(p).map((k) => {
+                const v = scores[k] || 0;
+                return (
+                  <div key={k} style={{ display: "grid", gridTemplateColumns: "22px 96px minmax(0,1fr)", alignItems: "center", gap: 8, marginTop: 7 }}>
+                    <Letter l={letterOf(p, k, state.cfg)} />
+                    <span style={{ fontSize: 12, fontWeight: 800 }}>{VALUE_LABEL[k]}</span>
+                    <div style={{ height: 8, borderRadius: 4, background: "#1a2438", overflow: "hidden" }}><div style={{ width: `${Math.round(v * 100)}%`, height: "100%", background: v >= 0.66 ? GREEN : v >= 0.33 ? GOLD : RED }} /></div>
+                  </div>
+                );
+              })}
+              <div style={{ fontSize: 11, fontWeight: 700, color: SUB, marginTop: 8 }}>Bars: how your school scores with this offer. Letters: how much he cares.</div>
+            </>
+          )}
+        </div>
+      </div>
+      {sim.error && <div style={{ marginTop: 10, padding: "8px 12px", background: "#3a1219", color: "#ffb3a8", fontWeight: 800, fontSize: 13, borderRadius: 8 }}>{sim.error}</div>}
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12, flexWrap: "wrap" }}>
+        {p.retain && <button type="button" style={pill(false)} onClick={() => { sim.unretain(p.id); onClose(); }}>Pull Offer</button>}
+        <button type="button" disabled={nil > max} style={{ ...pill(true, "#2e7d32"), padding: "11px 22px", fontSize: 14, opacity: nil > max ? 0.5 : 1 }} onClick={() => { if (sim.retain(p.id, { nil })) onClose(); }}>{p.retain ? "Update Offer" : "Make Offer"}</button>
+      </div>
+    </>
   );
 }

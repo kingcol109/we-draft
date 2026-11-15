@@ -85,8 +85,10 @@ export function initPortalSim(pool, opts = {}) {
   const userTeams = opts.userTeams || [];
   const state = { seed, cfg, season: pool.season, window: 0, windows: cfg.windows, phase: "ready", userTeams, live: !!opts.live, teams: {}, players: {}, log: [] };
   pool.teams.forEach((t) => {
-    const tier = Number(opts.tiers?.[t.slug]) || defaultTier(t.school, t.conference);
-    state.teams[t.slug] = { slug: t.slug, school: t.school, conference: t.conference, tier, budget: cfg.budgets[tier] || 0, spent: 0, retainSpent: 0, loc: t.loc || null, user: userTeams.includes(t.slug),
+    // An FCS school (graded FCS players' home) sits below tier 5 and never
+    // recruits or retains.
+    const tier = t.fcs ? 6 : Number(opts.tiers?.[t.slug]) || defaultTier(t.school, t.conference);
+    state.teams[t.slug] = { slug: t.slug, school: t.school, conference: t.conference, tier, fcs: !!t.fcs, budget: cfg.budgets[tier] || 0, spent: 0, retainSpent: 0, loc: t.loc || null, user: userTeams.includes(t.slug),
       success: opts.factors?.[t.school]?.success ?? 0.5, dev: opts.factors?.[t.school]?.dev || {} };
   });
   pool.players.forEach((p) => {
@@ -226,7 +228,10 @@ export const homeGrade = (state, p, offer = null) => M.gradeFrom(p, homeScores(s
 export const transferLeave = (state, p, offer = null) => {
   const tier = state.teams[p.team].tier;
   const pull = M.ambition(p, state.cfg, tier) + M.benchFrustration(p, ptAt(state, p.team, p), state.cfg);
-  return M.withLikeliness(M.leaveChance(homeGrade(state, p, offer), M.marketGrade(p, state.cfg, tier) + pull, state.cfg), p.likely, state.cfg);
+  const market = M.marketGrade(p, state.cfg, tier) + pull;
+  const chance = M.leaveChance(homeGrade(state, p, offer), market, state.cfg);
+  if (p.likely == null) return chance;
+  return M.withLikeliness(chance, p.likely, state.cfg, offer ? M.leaveChance(homeGrade(state, p), market, state.cfg) : chance);
 };
 // Interest an offer has built by standing: offering early helps
 // (earlyInterest per window it's been out, capped).
@@ -240,15 +245,16 @@ export function heldBonus(state, offer) {
 // (user, 2026-11-14 — a brake on offer spam; CPU schools never do these).
 // Below 100 it costs that school grade points.
 export const happinessOf = (p, slug) => p.happy?.[slug] ?? 100;
-const happyPenalty = (state, p, slug) => ((100 - happinessOf(p, slug)) / 100) * state.cfg.happiness.penalty;
-export const bonusFor = (state, slug, p, offer) => heldBonus(state, offer) - happyPenalty(state, p, slug);
-// His grade of any school's offer: { grade (with every bonus), base, held,
-// happy (0–100), scores }.
+// The recruiting process with a school, 0..1 (models.processGrade).
+export const processFor = (state, slug, p, offer) => M.processGrade(happinessOf(p, slug), heldBonus(state, offer), state.cfg);
+// His grade of any school's offer: { grade (overall: A–F × 3 + process),
+// base (the A–F grade), held, happy (0–100), process, scores }.
 export function gradeOffer(state, slug, p, offer) {
   const scores = M.schoolScores(p, state.teams[slug], { nil: offer?.nil || 0, pt: ptAt(state, slug, p) }, state.cfg);
   const base = M.gradeFrom(p, scores);
   const held = heldBonus(state, offer);
-  return { grade: base + held - happyPenalty(state, p, slug), base, held, happy: happinessOf(p, slug), scores };
+  const process = processFor(state, slug, p, offer);
+  return { grade: M.overallGrade(base, process, state.cfg), base, held, happy: happinessOf(p, slug), process, scores };
 }
 // What an offer would cost his happiness with you: { lower, lowball, drop }.
 export function offerHit(state, slug, p, nil) {
@@ -262,7 +268,7 @@ const sour = (p, slug, by) => ({ ...(p.happy || {}), [slug]: Math.max(0, happine
 // Has this school already made its move on him this window?
 export const offeredThisWindow = (state, slug, p) => p.touched?.[slug] === state.window;
 // A NIL offer this big (× his ask) commits him on the spot.
-export const instantAmount = (state, p) => Math.round((p.ask * state.cfg.instantCommitAsk) / 1000) * 1000;
+export const instantAmount = (state, p) => M.instantAsk(p, state.cfg);
 
 // Where a player deciding stands, with an offer (default: his current one):
 // { ask, chance, leaving } — chance of leaving (NFL) or of staying (transfer).
@@ -379,7 +385,7 @@ function cpuRetention(state) {
   const players = { ...state.players };
   const idx = indexOf(state);
   Object.values(state.teams).forEach((team) => {
-    if (team.user) return;
+    if (team.user || team.fcs) return;
     const t = idx.of(team.slug);
     if (!t.considering.length) return;
     let room = Math.min(budgetOf(state, team.slug).available, team.budget * cfg.retentionShare - (team.retainSpent || 0));
@@ -464,26 +470,53 @@ function cpuOffers(state) {
   const players = { ...state.players };
   const portal = Object.values(players).filter((p) => p.status === "portal");
   let made = 0;
+  const cfg = state.cfg;
+  const bars = new Map(); // his commit bar this window (the same for every school)
+  const barOf = (p) => {
+    if (!bars.has(p.id)) bars.set(p.id, M.commitBar(p, state.windows, state.windows, cfg, state.teams[p.team].tier));
+    return bars.get(p.id);
+  };
   Object.values(state.teams).forEach((team) => {
-    if (team.user) return;
+    if (team.user || team.fcs) return;
     const needs = teamNeeds(state, team.slug);
+    const idx = indexOf(state).of(team.slug);
+    // Open spots, every offer still out counted as a signing.
+    const slots = M.openSlots(idx.have, cfg);
+    idx.offered.forEach((x) => { slots[x.pos] = (slots[x.pos] || 0) - 1; });
+    let open = Object.values(slots).reduce((a, n) => a + Math.max(0, n), 0);
+    if (!open) return;
     let { available } = budgetOf(state, team.slug);
-    const left = { ...needs };
+    const reserve = M.slotReserve(team, cfg);
     const ranked = portal
-      .filter((p) => !players[p.id].offers[team.slug] && !p.cut?.[team.slug]) // its own departures too
-      .map((p) => ({ p, score: M.teamInterest(team, p, left[p.pos] || 0, boardTaste(state, team.slug, p.id), state.cfg) }))
+      .filter((p) => slots[p.pos] > 0 && !players[p.id].offers[team.slug] && !p.cut?.[team.slug]) // its own departures too
+      .map((p) => {
+        const taste = boardTaste(state, team.slug, p.id);
+        return { p, taste, need: needs[p.pos] || cfg.cpu.depthNeed, score: M.teamInterest(team, p, needs[p.pos] || cfg.cpu.depthNeed, taste, cfg) };
+      })
       .filter((x) => x.score > 0)
       .sort((a, b) => b.score - a.score);
-    let n = state.cfg.offersPerWindow[team.tier] || 4;
-    for (const { p } of ranked) {
-      if (n <= 0 || available <= 0) break;
-      if (!(left[p.pos] > 0)) continue;
-      const offer = M.offerFor(team, p, wouldStart(state, team.slug, p), state.cfg, draw(state, `offer|${team.slug}|${p.id}|${state.window}`));
-      if (offer.nil > available) continue;
+    let n = cfg.offersPerWindow[team.tier] || 4;
+    for (const { p, taste, need } of ranked) {
+      if (n <= 0 || open <= 0 || available <= 0) break;
+      if (!(slots[p.pos] > 0)) continue;
+      const offer = M.offerFor(team, p, wouldStart(state, team.slug, p), cfg, draw(state, `offer|${team.slug}|${p.id}|${state.window}`), { boardTaste: taste, need });
+      // Spend with a plan: keep money back for the other open spots.
+      const cap = available - reserve * (open - 1);
+      if (offer.nil > cap) {
+        if (cap < offer.nil * cfg.cpu.stretch || cap < p.ask * cfg.cpu.stretch) continue;
+        offer.nil = Math.floor(cap / 1000) * 1000;
+      }
+      // Realistic: would he seriously consider it — and not cut it on the
+      // spot for missing on his A's?
+      const scores = M.schoolScores(p, team, { nil: offer.nil, pt: ptAt(state, team.slug, p) }, cfg);
+      if (M.badAs(p, scores, cfg) >= cfg.cutBadA.count) continue;
+      const grade = M.overallGrade(M.gradeFrom(p, scores), processFor(state, team.slug, p, null), cfg);
+      if (grade < barOf(p) * cfg.cpu.realism) continue;
       const cur = players[p.id];
       players[p.id] = { ...cur, offers: { ...cur.offers, [team.slug]: { nil: offer.nil, window: state.window, since: state.window } }, high: { ...(cur.high || {}), [team.slug]: offer.nil } };
       available -= offer.nil;
-      left[p.pos] -= 1;
+      slots[p.pos] -= 1;
+      open -= 1;
       n -= 1;
       made += 1;
     }
@@ -506,13 +539,17 @@ function decisions(state, last) {
     .filter((p) => p.status === "portal")
     .sort((a, b) => M.playerValue(b) - M.playerValue(a))
     .forEach((p) => {
-      const scored = Object.entries(p.offers).map(([slug, offer]) => ({
-        slug, offer,
-        u: M.offerUtility(p, teams[slug], offer, { pt: ptAt(state, slug, p) }, state.cfg, signedDraw(state, `choose|${p.id}|${slug}|${state.window}`)) + bonusFor(state, slug, p, offer),
-        blowout: offer.nil >= instantAmount(state, p),
-      })).sort((a, b) => b.u - a.u);
+      const scored = Object.entries(p.offers).map(([slug, offer]) => {
+        const pt = ptAt(state, slug, p);
+        return {
+          slug, offer,
+          u: M.overallGrade(M.offerUtility(p, teams[slug], offer, { pt }, state.cfg, signedDraw(state, `choose|${p.id}|${slug}|${state.window}`)), processFor(state, slug, p, offer), state.cfg),
+          bad: M.badAs(p, M.schoolScores(p, teams[slug], { nil: offer.nil, pt }, state.cfg), state.cfg) >= state.cfg.cutBadA.count,
+          blowout: offer.nil >= instantAmount(state, p),
+        };
+      }).sort((a, b) => b.u - a.u);
       const blowout = scored.filter((x) => x.blowout).sort((a, b) => b.offer.nil - a.offer.nil)[0];
-      const ripe = scored.filter((x) => x.offer.since < state.window);
+      const ripe = scored.filter((x) => x.offer.since < state.window && !x.bad);
       const bar = M.commitBar(p, state.window, state.windows, state.cfg, state.teams[p.team].tier);
       const best = blowout || (last ? scored[0] : ripe[0] && ripe[0].u >= bar ? ripe[0] : null);
       if (best) {
@@ -523,18 +560,20 @@ function decisions(state, last) {
         players[p.id] = { ...p, status: "unsigned", offers: {} };
         log.push({ w: state.window, kind: "unsigned", pid: p.id, team: p.team });
       } else {
-        // Narrowing his list: keep the schools he likes most, cut the rest.
+        // Schools that miss on two of his A's are cut right away; then he
+        // narrows his list: keeps the schools he likes most, cuts the rest.
         const keep = M.listSize(state.window, state.cfg);
-        if (keep == null || scored.length <= keep) return;
-        const cut = scored.slice(keep);
+        const fits = scored.filter((x) => !x.bad);
+        const cut = [...scored.filter((x) => x.bad).map((x) => ({ ...x, why: "fit" })), ...(keep != null && fits.length > keep ? fits.slice(keep) : [])];
+        if (!cut.length) return;
         const offers = { ...p.offers };
         const cutMap = { ...(p.cut || {}) };
-        cut.forEach(({ slug }) => {
+        cut.forEach(({ slug, why }) => {
           delete offers[slug];
           cutMap[slug] = state.window;
-          log.push({ w: state.window, kind: "cut", pid: p.id, team: p.team, to: slug, list: keep });
+          log.push({ w: state.window, kind: "cut", pid: p.id, team: p.team, to: slug, list: keep, why });
         });
-        players[p.id] = { ...p, offers, cut: cutMap, list: keep };
+        players[p.id] = { ...p, offers, cut: cutMap, list: keep ?? p.list };
       }
     });
   return { ...state, players, teams, log };

@@ -164,7 +164,9 @@ function ProfileShot({ card, brand = {} }) {
 }
 
 // branding: the teams' (data.branding) — each pick card is in its team's colors.
-export default function SimFeed({ feed, height, isMobile, branding = {} }) {
+// filters: [key, label] tabs (default All / My Picks / Trades — the Portal
+// Sim passes its own; "mine" = posts flagged userInvolved).
+export default function SimFeed({ feed, height, isMobile, branding = {}, filters = FILTERS }) {
   const [filter, setFilter] = useState("all");
   const shown = feed.filter((p) => filter === "all" || (filter === "mine" ? p.userInvolved : p.kind === "trade"));
 
@@ -185,7 +187,7 @@ export default function SimFeed({ feed, height, isMobile, branding = {} }) {
           </span>
         </div>
         <div style={{ display: "flex", gap: 6 }}>
-          {FILTERS.map(([k, label]) => (
+          {filters.map(([k, label]) => (
             <button key={k} onClick={() => setFilter(k)} aria-pressed={filter === k} style={{
               border: "none", borderRadius: 999, padding: "4px 10px", cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 900, letterSpacing: "0.04em",
               background: filter === k ? "#f6a21d" : "#1a2438", color: filter === k ? "#111" : "#9fb0c8",

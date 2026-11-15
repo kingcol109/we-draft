@@ -11,8 +11,14 @@
 // one (6–2). A graded player leaves the "To Grade" list and lives under
 // "Locked In", where he can be changed or unlocked. Separately, a transfer
 // likeliness (0–3) feeds the Portal Sim's entry model (portalSim/config.js
-// likeliness): 3 almost always enters, 2 less, 1 even less, 0 never; none =
+// likeliness): 3 always enters, 2 about 2 runs in 3, 1 about 1 in 4, 0 never; none =
 // the model alone. Setting likeliness doesn't lock a grade.
+//
+// FBS and FCS are separate lists (user, 2026-11-14): FCS players are assumed
+// to stay out of the transfer portal — the Portal Sim leaves them out — unless
+// the admin grades one; a graded FCS player joins the Sim's pool at its next
+// rebuild ("Update Sim pool" — api/portal-sync action "pool"). FBS = the
+// schools in compSnapshots/_cfbTeams; everyone else is listed as FCS.
 //
 // Storage: config/portalGrades { rows: { [cfbdId | "wd:"+wdId]: code } }
 // (portalStars.mjs encodeGrade — one short string each, so every player fits
@@ -68,6 +74,9 @@ export default function AdminPortalGrades({ allPlayers = [] }) {
   const [saving, setSaving] = useState(() => new Set());
 
   const [view, setView] = useState("todo"); // todo | locked
+  const [division, setDivision] = useState("fbs"); // fbs | fcs
+  const [fbsSchools, setFbsSchools] = useState(null); // Set of FBS school names
+  const [poolBusy, setPoolBusy] = useState(false);
   const [q, setQ] = useState("");
   const [starF, setStarF] = useState(0);
   const [basisF, setBasisF] = useState("");
@@ -110,6 +119,7 @@ export default function AdminPortalGrades({ allPlayers = [] }) {
       Object.entries(s?.rows || {}).forEach(([id, r]) => { if (r?.[0] != null) out[id] = Number(r[0]); });
       setComm(out);
     }).catch(() => {});
+    getSiteSnapshot("_cfbTeams").then((s) => setFbsSchools(new Set(Object.values(s?.teams || {}).map((t) => t.School)))).catch(() => setFbsSchools(new Set()));
   }, []);
 
   const wdById = useMemo(() => new Map(allPlayers.map((p) => [p.id, p])), [allPlayers]);
@@ -120,25 +130,32 @@ export default function AdminPortalGrades({ allPlayers = [] }) {
 
   // Every player with eligibility left: roster rows, plus We-Draft players
   // no roster carries (seasons left unknown).
-  const rows = useMemo(() => {
-    if (!teams) return [];
+  const allRows = useMemo(() => {
+    if (!teams || !fbsSchools) return [];
     const out = [];
     teams.forEach((t) => Object.entries(t.rows).forEach(([cfbdId, r]) => {
       const [auto, basis, review, name, pos, wdId, elig, rStars, rRank, stats] = r;
       if (wdId && pastClass(wdId)) return;
       if (elig === 0) return; // out of eligibility
       out.push({ key: cfbdId, cfbdId, wdId: wdId || "", name, pos, group: POS_OF[String(pos || "").toUpperCase()] || "", team: t.school, auto, basis, review: !!review,
-        elig: elig ?? null, rStars: rStars || 0, rRank: rRank || 0, stats: stats || "" });
+        elig: elig ?? null, rStars: rStars || 0, rRank: rRank || 0, stats: stats || "", fcs: !fbsSchools.has(t.school) });
     }));
     Object.entries(wedraft).forEach(([wdId, [auto, basis, cfbdId]]) => {
       if (cfbdId) return;
       const p = wdById.get(wdId);
       if (!p || pastClass(wdId)) return;
       out.push({ key: `wd:${wdId}`, cfbdId: "", wdId, name: `${p.First || ""} ${p.Last || ""}`.trim(), pos: p.Position || "", group: POS_OF[String(p.Position || "").toUpperCase()] || "",
-        team: p.School || "", auto, basis, review: false, elig: null, rStars: 0, rRank: 0, stats: "" });
+        team: p.School || "", auto, basis, review: false, elig: null, rStars: 0, rRank: 0, stats: "", fcs: !!p.School && !fbsSchools.has(p.School) });
     });
     return out;
-  }, [teams, wedraft, wdById]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [teams, wedraft, wdById, fbsSchools]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The list being graded: FBS or FCS.
+  const rows = useMemo(() => allRows.filter((r) => r.fcs === (division === "fcs")), [allRows, division]);
+  const divCounts = useMemo(() => {
+    const c = { fbs: 0, fcs: 0, fcsGraded: 0 };
+    allRows.forEach((r) => { c[r.fcs ? "fcs" : "fbs"] += 1; if (r.fcs && decodeGrade(locks[r.key]).s) c.fcsGraded += 1; });
+    return c;
+  }, [allRows, locks]);
 
   const gradeOf = (r) => decodeGrade(locks[r.key]);
   const counts = useMemo(() => {
@@ -181,7 +198,8 @@ export default function AdminPortalGrades({ allPlayers = [] }) {
       return true;
     }).sort((a, b) => cmp(a, b) || a.name.localeCompare(b.name));
   }, [rows, locks, view, q, starF, basisF, teamF, posF, eligF, likelyF, only, sort, pff, comm, wdById]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { setShown(PAGE); }, [view, q, starF, basisF, teamF, posF, eligF, likelyF, only, sort]);
+  useEffect(() => { setShown(PAGE); }, [view, division, q, starF, basisF, teamF, posF, eligF, likelyF, only, sort]);
+  useEffect(() => { setTeamF(""); }, [division]);
 
   // Write codes for some players at once: { key: code | null }.
   const save = async (changes, note) => {
@@ -239,6 +257,23 @@ export default function AdminPortalGrades({ allPlayers = [] }) {
     }
   };
 
+  // Rebuild the Portal Sim's pool — graded FCS players join it.
+  const rebuildPool = async () => {
+    setPoolBusy(true); setMessage(null);
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const r = await fetch("/api/portal-sync", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ action: "pool" }) });
+      if (r.status === 404) throw new Error("the endpoint runs on the live site. Locally: node --env-file=.env scripts/buildPortalSimPool.js");
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.detail || j.error || `HTTP ${r.status}`);
+      setMessage({ text: `Portal Sim pool updated: ${j.players?.toLocaleString?.() ?? j.players} players on ${j.teams} teams.` });
+    } catch (e) {
+      setMessage({ text: `Sim pool update failed: ${e.message}`, bad: true });
+    } finally {
+      setPoolBusy(false);
+    }
+  };
+
   const teamNames = useMemo(() => [...new Set(rows.map((r) => r.team).filter(Boolean))].sort(), [rows]);
   const builtAt = meta?.builtAt?.toDate?.();
   const needsRebuild = teams && rows.length && rows.every((r) => r.elig == null);
@@ -271,13 +306,30 @@ export default function AdminPortalGrades({ allPlayers = [] }) {
         </div>
         <div style={{ padding: "8px 16px", background: "#f7f9fc", borderTop: "1px solid #eef1f5", fontSize: "11px", fontWeight: 700, color: "#7a8594", lineHeight: 1.6 }}>
           ✓ locks in the auto grade; 6–2 sets it by hand. Either way the player moves to Locked In. PFF counts on {Object.entries(PFF_MIN_SNAPS).map(([k, v]) => `${v} ${k}`).join(", ")} snaps; no draft grade but PFF ≥ {PFF_REVIEW} on double → Needs Review.
-          <br />Likeliness (Portal Sim): <b style={{ color: LIKELY_COLOR[3] }}>3</b> almost always enters · <b style={{ color: LIKELY_COLOR[2] }}>2</b> less · <b style={{ color: LIKELY_COLOR[1] }}>1</b> even less · <b style={{ color: LIKELY_COLOR[0] }}>0</b> never · blank = the sim's model alone. It doesn't lock the grade.
+          <br />Likeliness (Portal Sim): <b style={{ color: LIKELY_COLOR[3] }}>3</b> always enters · <b style={{ color: LIKELY_COLOR[2] }}>2</b> about 2 runs in 3 · <b style={{ color: LIKELY_COLOR[1] }}>1</b> about 1 in 4 · <b style={{ color: LIKELY_COLOR[0] }}>0</b> never · blank = the sim's model alone. It doesn't lock the grade.
         </div>
       </div>
 
       {needsRebuild && (
         <div style={{ marginBottom: "12px", padding: "10px 14px", borderRadius: "8px", background: "#fff7e6", border: "2px solid #f6a21d", color: "#8a5a00", fontSize: "12px", fontWeight: 800 }}>
           Seasons left, HS rank and stats come with the next auto rebuild (Rebuild auto, or node --env-file=.env scripts/buildPortalStars.js). Until then every player shows, including ones out of eligibility.
+        </div>
+      )}
+
+      {/* FBS / FCS — separate lists. */}
+      <div style={{ display: "flex", gap: "8px", marginBottom: "10px", flexWrap: "wrap", alignItems: "center" }}>
+        {[["fbs", "FBS", divCounts.fbs], ["fcs", "FCS", divCounts.fcs]].map(([k, label, n]) => (
+          <button key={k} type="button" onClick={() => { setDivision(k); setStarF(0); }} style={{ ...btn(division === k, INK), padding: "10px 22px", fontSize: "14px" }}>
+            {label} <span style={{ opacity: 0.75 }}>· {teams && fbsSchools ? n.toLocaleString() : "…"}</span>
+          </button>
+        ))}
+      </div>
+      {division === "fcs" && (
+        <div style={{ marginBottom: "12px", padding: "10px 14px", borderRadius: "8px", background: "#eef4fb", border: `2px solid ${BLUE}`, color: INK, fontSize: "12px", fontWeight: 800, display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+          <span style={{ flex: "1 1 320px", lineHeight: 1.5 }}>
+            FCS players stay out of the transfer portal unless you grade them. A graded FCS player joins the Portal Sim (his school never recruits) the next time its pool is updated. <b>{divCounts.fcsGraded}</b> graded so far.
+          </span>
+          <button type="button" onClick={rebuildPool} disabled={poolBusy} style={{ ...btn(true, BLUE), opacity: poolBusy ? 0.6 : 1 }}>{poolBusy ? "Updating…" : "Update Sim pool"}</button>
         </div>
       )}
 
@@ -365,7 +417,7 @@ export default function AdminPortalGrades({ allPlayers = [] }) {
               </span>
               <span>Likeliness</span>
             </div>
-            {!teams ? <div style={{ padding: "40px", textAlign: "center", color: "#999", fontWeight: 700 }}>Loading every player…</div>
+            {!teams || !fbsSchools ? <div style={{ padding: "40px", textAlign: "center", color: "#999", fontWeight: 700 }}>Loading every player…</div>
               : filtered.length === 0 ? <div style={{ padding: "40px", textAlign: "center", color: "#999", fontStyle: "italic" }}>{view === "todo" && !anyFilter ? "Everyone's graded." : "No players match."}</div>
                 : filtered.slice(0, shown).map((r) => (
                   <Row key={r.key} r={r} g={gradeOf(r)} wd={r.wdId ? wdById.get(r.wdId) : null} rec={pff?.get(r.cfbdId)} comm={r.wdId ? comm[r.wdId] : null}

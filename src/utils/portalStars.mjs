@@ -122,10 +122,10 @@ export function statLine(s) {
   return parts.slice(0, 2).map(([, t]) => t).join(" · ");
 }
 
-// Transfer likeliness (user, 2026-11-14), set by the admin: 3 almost always
-// enters the portal, 2 less, 1 even less, 0 never. No value = the Portal
+// Transfer likeliness (user, 2026-11-14), set by the admin: 3 always enters
+// the portal, 2 about two runs in three, 1 about one in four, 0 never. No value = the Portal
 // Sim's own model alone decides. Chances: utils/portalSim/config.js.
-export const LIKELY_LABELS = { 0: "Never", 1: "Unlikely", 2: "Likely", 3: "Very likely" };
+export const LIKELY_LABELS = { 0: "Never", 1: "1 in 4", 2: "2 in 3", 3: "Always" };
 
 // config/portalGrades { rows: { [cfbdId | "wd:"+wdId]: code } } — the
 // admin's locks and likeliness, one compact string per player so ~25k fit

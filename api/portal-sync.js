@@ -7,6 +7,9 @@
 //   POST { action: "cfbdIndex" }  Eligibility Manager "Refresh CFBD data"
 //                                 (components/AdminEligibility.jsx) —
 //                                 server/offseason/cfbdIndex.js, no CFBD calls.
+//   POST { action: "pool" }       Transfer Portal → Grades "Update Sim pool"
+//                                 (server/portalSim/pool.js — graded FCS
+//                                 players join the Portal Sim)
 //   POST { action: "stars" }      Transfer Portal → Grades "Rebuild"
 //                                 (components/AdminPortalGrades.jsx) —
 //                                 server/portal/stars.js, no outside calls.
@@ -46,6 +49,10 @@ module.exports = async function handler(req, res) {
     if (req.body?.action === "stars") {
       const { buildPortalStars } = require("../server/portal/stars");
       return res.status(200).json(await buildPortalStars(db));
+    }
+    if (req.body?.action === "pool") {
+      const { buildPortalSimPool } = require("../server/portalSim/pool");
+      return res.status(200).json(await buildPortalSimPool(db));
     }
     if (req.body?.action === "cfbdIndex") {
       const { buildCfbdIndex } = require("../server/offseason/cfbdIndex");

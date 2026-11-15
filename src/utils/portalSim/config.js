@@ -60,10 +60,20 @@ export const DEFAULT_CONFIG = {
   // vs the starters it plays — departures in front of him count), recent
   // success (team records) and player development (recent draft picks at his
   // position). His grade = his personality's weighted average of the six.
-  // Personalities reshuffle every run: each weight is the base × a random
-  // factor (spread), so different players value different things.
+  // Interests (user, 2026-11-14): every player gets three A's, a B, a C and
+  // an F across the six, drawn fresh every run — choiceWeights make a factor
+  // likelier to be an A (and less likely to be the F). letterWeights: what
+  // each letter counts in his grade (A's 80% together).
   choiceWeights: { tier: 0.8, nil: 1.2, loc: 0.6, pt: 2.2, success: 0.7, dev: 0.8 },
-  personalitySpread: 0.7,
+  letterWeights: { A: 0.8 / 3, B: 0.1, C: 0.07, F: 0.03 },
+  // A school scoring under `below` on `count` or more of his A's: cut from
+  // his list right away.
+  cutBadA: { below: 0.35, count: 2 },
+  // His overall grade of an offer: A–F grade × factors + the recruiting
+  // process × process (3 : 1). The process: happiness × happy + interest
+  // built (of earlyInterest.cap) × interest.
+  gradeMix: { factors: 0.75, process: 0.25 },
+  process: { happy: 0.7, interest: 0.3 },
   choiceNoise: 0.04, // ± grade noise on each offer
   // Recent success: win % weights, newest season first.
   successYearWeights: [0.4, 0.3, 0.2, 0.1],
@@ -104,11 +114,13 @@ export const DEFAULT_CONFIG = {
   listSize: [null, null, 10, 8, 6, 5, 4, 3, 3, 3, 3],
   ambition: { perTier: 0.15, role: { starter: 1, rotation: 0.6, reserve: 0.15, none: 0 }, stars: { 6: 1.3, 5: 1.2, 4: 1.1, 3: 1, 2: 0.4 } },
   // Transfer likeliness (user, 2026-11-14), set per player on the admin's
-  // Grades tab: 3 is in the portal almost every time, 2 less, 1 even less,
-  // 0 never. It's its own reason to leave on top of the model's (chance =
-  // 1 − (1 − model)(1 − this)); no likeliness = the model alone.
-  likeliness: { 1: 0.1, 2: 0.4, 3: 0.92 },
-  entryBias: 0.24,
+  // Grades tab: his chance of entering, replacing the model's — 3 every time
+  // (no retention offer moves him), 2 about two runs in three, 1 about once
+  // every 4 runs, 0 never (a retention offer scales 1s and 2s down, less the
+  // likelier he is to go; set a bit over the targets for that). No
+  // likeliness = the model alone.
+  likeliness: { 1: 0.28, 2: 0.73, 3: 1 },
+  entryBias: 0.21,
   entryTemp: 0.06,
   maxEntry: 0.85,
   retainMix: { nil: 0.6, pt: 0.4 }, // NFL fence retention offers' pull
@@ -133,8 +145,9 @@ export const DEFAULT_CONFIG = {
   // Recruitments: interest an offer builds each window it stands (grade
   // points, capped) — offering early helps.
   earlyInterest: { perWindow: 0.03, cap: 0.12 },
-  // A NIL offer this many × his ask commits him on the spot, any window.
-  instantCommitAsk: 3,
+  // A NIL offer this many × his ask commits him on the spot, any window —
+  // by his NIL letter: the less NIL matters, the more it takes (F: never).
+  instantCommitAsk: { A: 3, B: 4, C: 6, F: null },
   // Happiness (user, 2026-11-14): each player's 0–100 feeling about each
   // school, 100 to start. A lowball (under lowballAsk × his ask), offering less
   // than before and pulling an offer each knock it down; below 100 it costs
@@ -153,6 +166,39 @@ export const DEFAULT_CONFIG = {
 
   // Team boards: how much each team's own taste moves its rankings (±).
   boardNoise: 0.25,
+
+  // CPU schools' offers (user, 2026-11-14). An open offer counts as a
+  // signing (one QB spot → one QB chased at a time).
+  cpu: {
+    // Rotation players a team wants behind its starters (open spots fill
+    // these too); a depth-only spot ranks at depthNeed.
+    depth: { QB: 0, RB: 1, WR: 2, TE: 1, OL: 2, DL: 2, EDGE: 1, LB: 1, DB: 2, K: 0, P: 0 },
+    depthNeed: 0.4,
+    // How hard a team chases a transfer by stars (× its interest) — the
+    // top of the portal draws the most.
+    starPull: { 6: 3, 5: 2.3, 4: 1.6, 3: 1, 2: 0.6 },
+    // Its board's taste moves its price: ask × e^(taste × this), taste −1..1
+    // (× valueCenter — ≈ 0.55×–1.8× before the best bid wins) — the market's randomness.
+    valueSpread: 0.6,
+    // Where teams' prices center, × his ask. Several bidders → the best bid
+    // wins, so a bit under 1 keeps the deals themselves averaging near his
+    // ask (the market price): some well over, some at a discount.
+    valueCenter: 0.7,
+    // Extra for a top transfer at a position it really needs.
+    topPremium: { 6: 1.25, 5: 1.2, 4: 1.1 },
+    // ± half of this on its price each window.
+    windowNoise: 0.1,
+    // Kept back for each other open spot: the ask of a typical target at
+    // its tier (stars) × reserveShare.
+    reserveStars: { 1: 4, 2: 4, 3: 3, 4: 3, 5: 2 },
+    reserveShare: 0.75,
+    // Short on money, it offers what's left if that's at least this share
+    // of its price and of his ask — else it moves on.
+    stretch: 0.85,
+    // Realistic targets only: his grade of the school with its offer must
+    // reach this share of his commit bar this window.
+    realism: 0.9,
+  },
 };
 
 // Admin overrides (config/portalSim) over the defaults, one level deep.

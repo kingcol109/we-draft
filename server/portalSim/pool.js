@@ -1,7 +1,10 @@
 // server/portalSim/pool.js
 //
 // The Portal Sim's player pool (src/utils/portalSim/) — every FBS player,
-// compact, so a sim loads in a handful of reads. Built from Firestore only:
+// compact, so a sim loads in a handful of reads. FCS players stay out (user,
+// 2026-11-14) unless the admin has graded them (a locked grade in
+// config/portalGrades) — those come in with their FCS school as a team that
+// never recruits (flag fcs, its branding carried along). Built from Firestore only:
 //   compSnapshots/_cfbTeams   FBS teams (slugs from utils/portalTeams.js)
 //   schools                   campus coordinates
 //   cfbRosters                players, recruiting class, class year, home,
@@ -19,10 +22,13 @@
 //
 // Writes portalSimPool (public read):
 //   portalSimPool/teams  { season, chunks, builtAt,
-//                          teams: [[slug, school, conference, lat, lng]] }
+//                          teams: [[slug, school, conference, lat, lng,
+//                                   fcs 0|1, branding (FCS only)]] }
 //   portalSimPool/p{n}   { rows: [[id, name, pos, team index, stars, elig,
 //                          role, homeLat, homeLng, wdId, flags,
-//                          likeliness (0–3, null = model only)]] }
+//                          likeliness (0–3, null = model only),
+//                          height (in), weight, recruit stars, home state,
+//                          packed stats (src/utils/portalSim/stats.mjs)]] }
 //     role: s starter, r rotation, v reserve, n none
 //     flags: "d" declared for the draft, "l" in the real portal
 //
@@ -53,9 +59,10 @@ const MIN_SNAPS = { passing: 100, rushing: 60, receiving: 100, blocking: 200, de
 
 async function buildPortalSimPool(db, { dry = false } = {}) {
   const { solidStats, eligLeft, decodeGrade } = await import("../../src/utils/portalStars.mjs");
+  const { packStats } = await import("../../src/utils/portalSim/stats.mjs");
   const [teamsSnap, schoolsSnap, rosterSnap, starsSnap, pffSnap, linkSnap, wdSnap, gradesSnap] = await Promise.all([
     db.collection("compSnapshots").doc("_cfbTeams").get(),
-    db.collection("schools").select("School", "Latitude", "Longitude").get(),
+    db.collection("schools").select("School", "Latitude", "Longitude", "Logo1", "LogoDark", "Color1", "Color2").get(),
     db.collection("cfbRosters").get(),
     db.collection("portalStars").get(),
     db.collection("pffGrades").get(),
@@ -66,6 +73,8 @@ async function buildPortalSimPool(db, { dry = false } = {}) {
   const locks = gradesSnap.data()?.rows || {};
   const fbs = teamsSnap.data()?.teams || {};
   const slugBySchool = new Map(Object.entries(fbs).map(([slug, t]) => [t.School, slug]));
+  const brandBySchool = new Map(schoolsSnap.docs.map((d) => d.data()).filter((s) => s.School).map((s) => [s.School, { School: s.School, Logo1: s.Logo1 || "", LogoDark: s.LogoDark || "", Color1: s.Color1 || "", Color2: s.Color2 || "" }]));
+  const fcsSlug = (school) => `fcs-${String(school).toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
   const locBySchool = new Map(schoolsSnap.docs.map((d) => d.data()).filter((s) => s.School).map((s) => [s.School, [Number(s.Latitude) || null, Number(s.Longitude) || null]]));
   const stars = new Map();
   starsSnap.docs.forEach((d) => { if (!d.id.startsWith("_")) Object.entries(d.data().rows || {}).forEach(([id, r]) => stars.set(id, r[0])); });
@@ -80,13 +89,19 @@ async function buildPortalSimPool(db, { dry = false } = {}) {
   let season = null;
   rosterSnap.docs.forEach((d) => {
     const t = d.data();
-    const slug = slugBySchool.get(t.school);
-    if (!slug) return; // FBS only
+    const fcs = !slugBySchool.has(t.school);
+    // FCS: only the players the admin has graded.
+    const graded = (p) => {
+      const wdId = wdOf.get(String(p.id));
+      return !!decodeGrade(locks[String(p.id)] || (wdId && locks[`wd:${wdId}`])).s;
+    };
+    if (fcs && !(t.players || []).some((p) => graded(p) && eligLeft(p, t.season) > 0)) return;
+    const slug = fcs ? fcsSlug(t.school) : slugBySchool.get(t.school);
     if (t.season && (!season || t.season > season)) season = t.season;
     if (!teamIdx.has(slug)) {
       const loc = locBySchool.get(t.school) || [null, null];
       teamIdx.set(slug, teamList.length);
-      teamList.push([slug, t.school, fbs[slug].Conference || "", loc[0], loc[1]]);
+      teamList.push(fcs ? [slug, t.school, "FCS", loc[0], loc[1], 1, brandBySchool.get(t.school) || null] : [slug, t.school, fbs[slug].Conference || "", loc[0], loc[1], 0, null]);
     }
 
     // Each player's sim position and snaps, then roles by position.
@@ -112,6 +127,7 @@ async function buildPortalSimPool(db, { dry = false } = {}) {
     });
 
     players.forEach(({ p, pos, role }) => {
+      if (fcs && !(graded(p) && eligLeft(p, t.season) > 0)) return;
       const id = String(p.id);
       const elig = eligLeft(p, t.season);
       const st = String(p.home || "").split(",").pop().trim().toUpperCase();
@@ -120,7 +136,8 @@ async function buildPortalSimPool(db, { dry = false } = {}) {
       const w = wdId ? wd.get(wdId) : null;
       const flags = `${w?.Declared ? "d" : ""}${w?.InPortal ? "l" : ""}`;
       const lock = decodeGrade(locks[id] || (wdId && locks[`wd:${wdId}`]));
-      rows.push([id, `${p.first || ""} ${p.last || ""}`.trim(), pos, teamIdx.get(slug), lock.s || stars.get(id) || 2, elig, role, home[0], home[1], wdId, flags, lock.l]);
+      rows.push([id, `${p.first || ""} ${p.last || ""}`.trim(), pos, teamIdx.get(slug), lock.s || stars.get(id) || 2, elig, role, home[0], home[1], wdId, flags, lock.l,
+        Number(p.ht) || null, Number(p.wt) || null, Number(p.stars) || null, st || p.hss || "", packStats(p.s)]);
     });
   });
 

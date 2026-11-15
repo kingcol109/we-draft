@@ -38,13 +38,17 @@ export function loadPortalSim() {
       const pool = expandPool(teamsDoc, chunks);
       attachDraftGrades(pool, grades?.rows);
       attachLocks(pool, locksSnap?.data()?.rows);
+      // FCS schools' branding rides in the pool.
+      const brands = { ...(branding?.teams || {}) };
+      pool.teams.forEach((t) => { if (t.fcs && t.brand) brands[t.slug] = t.brand; });
       const factors = buildFactors(records, draft, pool.teams.map((t) => t.school), mergeConfig(admin.config));
       return {
         pool,
         factors,
         tiers: admin.tiers || {},
         config: admin.config || {},
-        branding: branding?.teams || {},
+        branding: brands,
+        records, // team records (the desk's historian)
       };
     })().catch((e) => { loading = null; throw e; });
   }
@@ -71,6 +75,10 @@ export function attachDraftGrades(pool, rows) {
 // (0–3) rides along for the entry model. Pure — headless runs use it.
 export function attachLocks(pool, rows) {
   if (!rows) return pool;
+  // An FCS player is in only while graded — unlocked since the pool was
+  // built, he's out.
+  const fcs = new Set(pool.teams.filter((t) => t.fcs).map((t) => t.slug));
+  if (fcs.size) pool.players = pool.players.filter((p) => !fcs.has(p.team) || decodeGrade(rows[p.id] || (p.wdId && rows[`wd:${p.wdId}`])).s);
   pool.players.forEach((p) => {
     const code = rows[p.id] || (p.wdId && rows[`wd:${p.wdId}`]);
     if (!code) { p.likely = null; return; } // live doc wins over the pool's copy
