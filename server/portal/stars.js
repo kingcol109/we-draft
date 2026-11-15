@@ -35,8 +35,18 @@ async function buildPortalStars(db, { dry = false } = {}) {
     db.collection("pffGrades").get(),
     db.collection("compSnapshots").doc("_grades").get(),
     db.collection("cfbdPlayers").where("mappingStatus", "in", ["suggested", "verified"]).select("wedraftPlayerId", "mappingStatus").get(),
-    db.collection("players").select("First", "Last", "Position").get(),
+    db.collection("players").select("First", "Last", "Position", "Eligible").get(),
   ]);
+
+  // Past draft classes (2026 and before, once the 2026 draft is done) are
+  // gone from college — no stars for them, and a roster row linked to one
+  // is dropped. Same rule as utils/eligibility.js currentDraftClass.
+  const now0 = new Date();
+  const draftClass = now0.getUTCFullYear() + (now0.getUTCMonth() >= 4 ? 1 : 0);
+  const pastClass = new Set(playerSnap.docs.filter((d) => {
+    const e = parseInt(d.data().Eligible, 10);
+    return e && e < draftClass;
+  }).map((d) => d.id));
 
   const pff = new Map();
   pffSnap.docs.forEach((d) => Object.entries(d.data().players || {}).forEach(([id, r]) => pff.set(id, { g: r.g, sn: r.sn, cat: r.cat })));
@@ -65,6 +75,7 @@ async function buildPortalStars(db, { dry = false } = {}) {
     (t.players || []).forEach((p) => {
       const id = String(p.id);
       const wdId = wdOf.get(id) || "";
+      if (wdId && pastClass.has(wdId)) return;
       const g = autoStars({ draftAvg: wdId ? draftAvg(wdId) : null, pff: pff.get(id) || null, stats: p.s || null });
       tally(g);
       rows[id] = [g.stars, g.basis, g.review ? 1 : 0, `${p.first || ""} ${p.last || ""}`.trim(), p.pos || "", wdId];
@@ -76,7 +87,7 @@ async function buildPortalStars(db, { dry = false } = {}) {
   // We-Draft players no roster carries (no CFBD link): their draft grade, if any.
   let wdOnly = 0;
   playerSnap.docs.forEach((d) => {
-    if (wedraft[d.id]) return;
+    if (wedraft[d.id] || pastClass.has(d.id)) return;
     const g = autoStars({ draftAvg: draftAvg(d.id) });
     wedraft[d.id] = [g.stars, g.basis, ""];
     wdOnly += 1;

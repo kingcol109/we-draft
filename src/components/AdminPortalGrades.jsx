@@ -16,6 +16,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { collection, deleteField, doc, FieldPath, getDocs, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
 import { auth, db } from "../firebase";
+import { currentDraftClass } from "../utils/eligibility";
 import { BASIS, PFF_MIN_SNAPS, PFF_REVIEW, PFF_SOLID } from "../utils/portalStars.mjs";
 import { loadPffByCfbdId } from "./pffData";
 import TransferStars from "./TransferStars";
@@ -67,22 +68,30 @@ export default function AdminPortalGrades({ allPlayers = [] }) {
 
   const wdById = useMemo(() => new Map(allPlayers.map((p) => [p.id, p])), [allPlayers]);
 
+  // Past draft classes (2026 once the 2026 draft is done) are out of
+  // college — left out here even before a Rebuild drops them.
+  const pastClass = (wdId) => {
+    const e = parseInt(wdById.get(wdId)?.Eligible, 10);
+    return !!e && e < Number(currentDraftClass());
+  };
+
   // Every player: roster rows, plus We-Draft players no roster carries.
   const rows = useMemo(() => {
     if (!teams) return [];
     const out = [];
     teams.forEach((t) => Object.entries(t.rows).forEach(([cfbdId, r]) => {
       const [auto, basis, review, name, pos, wdId] = r;
+      if (wdId && pastClass(wdId)) return;
       out.push({ key: cfbdId, cfbdId, wdId: wdId || "", name, pos, team: t.school, auto, basis, review: !!review });
     }));
     Object.entries(wedraft).forEach(([wdId, [auto, basis, cfbdId]]) => {
       if (cfbdId) return;
       const p = wdById.get(wdId);
-      if (!p) return;
+      if (!p || pastClass(wdId)) return;
       out.push({ key: `wd:${wdId}`, cfbdId: "", wdId, name: `${p.First || ""} ${p.Last || ""}`.trim(), pos: p.Position || "", team: p.School || "", auto, basis, review: false });
     });
     return out;
-  }, [teams, wedraft, wdById]);
+  }, [teams, wedraft, wdById]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const eff = (r) => overrides[r.key]?.s || r.auto;
   const counts = useMemo(() => {
