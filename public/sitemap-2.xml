@@ -3947,6 +3947,11 @@
     <priority>0.7</priority>
   </url>
   <url>
+    <loc>https://we-draft.com/player/kamerin-mcdowell-moore-2029-rb</loc>
+    <lastmod>2026-11-15</lastmod>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://we-draft.com/player/kameryn-crawford-2027-edge</loc>
     <lastmod>2026-10-10</lastmod>
     <priority>0.7</priority>
@@ -4194,6 +4199,11 @@
   <url>
     <loc>https://we-draft.com/player/keyshawn-johnson-2027-edge</loc>
     <lastmod>2026-09-05</lastmod>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/player/khalid-bueno-2028-edge</loc>
+    <lastmod>2026-11-15</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4989,16 +4999,6 @@
   <url>
     <loc>https://we-draft.com/player/micahi-danzy-2027-wr</loc>
     <lastmod>2026-11-10</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/michael-carroll-2028-ol</loc>
-    <lastmod>2026-11-15</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/michael-dansby-2026-db</loc>
-    <lastmod>2026-11-15</lastmod>
     <priority>0.7</priority>
   </url>
 </urlset>
