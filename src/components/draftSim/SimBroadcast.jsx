@@ -27,6 +27,7 @@ import { textOn, readableOn } from "../../utils/teamColors";
 import SimFeed, { Avatar } from "./SimFeed";
 import { SPEEDS } from "./useDraftSim";
 import { PlayerName } from "./FitName";
+import { ProspectCardProvider, PlayerLink } from "./ProspectCard";
 import { fetchEspnRoster, fetchDepthOrder, groupRoster } from "../../utils/nflRoster";
 import { loadHeadshot, useHeadshot } from "./simHeadshots";
 
@@ -71,9 +72,11 @@ export const SIM_CSS = `
   .wd-sim-draft:hover { filter: brightness(1.1); }
   .wd-sim-pickteam:hover { opacity: 1 !important; }
   .wd-sim-nofooter footer { display: none; }
-  /* Phones: a player's name isn't a link (too easy to hit mid-draft) — the
-     Draft Board's ↗ box opens his page instead. */
-  @media (max-width: 767px) { .wd-sim-plink { pointer-events: none; cursor: default; } }
+  /* A prospect's name opens his card (ProspectCard.jsx) — on phones too,
+     since it stays in the sim. A name that would leave for his page (a past
+     class's pick) isn't a link on phones (too easy to hit mid-draft). */
+  .wd-sim-pname:hover, .wd-sim-pname:focus-visible { text-decoration: underline !important; text-decoration-color: rgba(255,255,255,0.4) !important; text-underline-offset: 3px; }
+  @media (max-width: 767px) { a.wd-sim-plink { pointer-events: none; cursor: default; } }
   html.wd-sim-lock, html.wd-sim-lock body { overflow: hidden; overscroll-behavior: none; }  html.wd-sim-navhide .wd-navbar-wrap { transform: translateY(-100%); transition: transform .25s ease !important; }
   html.wd-sim-navhide.wd-sim-navopen .wd-navbar-wrap { transform: none; }
   html.wd-sim-dark, html.wd-sim-dark body { background: #070d18; }
@@ -1056,7 +1059,7 @@ function DraftTab({ s, data, isMobile, onTradePick, fit = false }) {
               <TeamLogo brand={b} team={p.owner} size={fit ? FIT.logo : 22} />
               <span style={{ minWidth: 0, flex: 1, ...(fit ? { lineHeight: 1.15 } : {}) }}>
                 {pl
-                  ? <Link className="wd-sim-plink" to={`/player/${pl.Slug}`} target="_blank" rel="noopener noreferrer" style={{ display: "block", textDecoration: "none" }}><PlayerName p={pl} style={{ color: "#fff", fontSize: fit ? FIT.name : 12, fontWeight: 900 }} /></Link>
+                  ? <PlayerLink className="wd-sim-plink" p={pl} style={{ display: "block", textDecoration: "none" }}><PlayerName p={pl} style={{ color: "#fff", fontSize: fit ? FIT.name : 12, fontWeight: 900 }} /></PlayerLink>
                   : <span style={{ display: "block", color: live ? GOLD : "#55657e", fontSize: fit ? FIT.name : 12, fontWeight: 900, whiteSpace: "nowrap" }}>{live ? "On the clock" : "—"}</span>}
                 {/* Always two lines, so an open slot is already its full size and just fills in. */}
                 <span style={{ display: "block", color: "#8b9bb4", fontSize: fit ? FIT.sub : 10, fontWeight: 800, textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -1101,7 +1104,7 @@ function MobileDraftList({ s, data, rounds, shownRound, setRound, picks, current
             <span style={{ flex: 1, minWidth: 0 }}>
               {pl ? (
                 <>
-                  <Link className="wd-sim-plink" to={`/player/${pl.Slug}`} target="_blank" rel="noopener noreferrer" style={{ display: "block", textDecoration: "none" }}><PlayerName p={pl} style={{ color: "#fff", fontSize: 14, fontWeight: 900 }} /></Link>
+                  <PlayerLink className="wd-sim-plink" p={pl} style={{ display: "block", textDecoration: "none" }}><PlayerName p={pl} style={{ color: "#fff", fontSize: 14, fontWeight: 900 }} /></PlayerLink>
                   <span style={{ display: "block", color: "#8b9bb4", fontSize: 11, fontWeight: 800, textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                     {pl.Position} · {pl.School}{p.via ? ` · via ${p.via}` : ""}
                   </span>
@@ -1153,7 +1156,7 @@ function MyPicksTab({ s, data, isMobile }) {
                     <span style={{ color: "#6f7f99", fontWeight: 900, fontSize: 11, width: 30, flexShrink: 0, lineHeight: 1.25, textAlign: "center" }}>R{p.round}<br />{p.overall}</span>
                     {logoOf(pl) ? <img src={logoOf(pl)} alt="" style={{ width: 30, height: 30, objectFit: "contain", flexShrink: 0 }} /> : <span style={{ width: 30, flexShrink: 0 }} />}
                     <span style={{ flex: 1, minWidth: 0 }}>
-                      <Link className="wd-sim-plink" to={`/player/${pl.Slug}`} target="_blank" rel="noopener noreferrer" style={{ display: "block", textDecoration: "none" }}><PlayerName p={pl} style={{ color: "#fff", fontWeight: 900, fontSize: 14 }} /></Link>
+                      <PlayerLink className="wd-sim-plink" p={pl} style={{ display: "block", textDecoration: "none" }}><PlayerName p={pl} style={{ color: "#fff", fontWeight: 900, fontSize: 14 }} /></PlayerLink>
                       <span style={{ display: "block", color: "#8b9bb4", fontSize: 11, fontWeight: 800, textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pl.Position} · {pl.School}</span>
                     </span>
                   </div>
@@ -1164,7 +1167,7 @@ function MyPicksTab({ s, data, isMobile }) {
                   <span style={{ color: "#6f7f99", fontWeight: 900, fontSize: 11, width: 52, flexShrink: 0, lineHeight: 1.25, textAlign: "center", whiteSpace: "nowrap" }}>R{p.round}<br />No. {p.overall}</span>
                   {logoOf(pl) ? <img src={logoOf(pl)} alt="" style={{ width: 28, height: 28, objectFit: "contain", flexShrink: 0 }} /> : <span style={{ width: 28, flexShrink: 0 }} />}
                   <span style={{ flex: 1, minWidth: 0 }}>
-                    <Link className="wd-sim-plink" to={`/player/${pl.Slug}`} target="_blank" rel="noopener noreferrer" style={{ display: "block", textDecoration: "none" }}><PlayerName p={pl} style={{ color: "#fff", fontWeight: 900, fontSize: 14 }} /></Link>
+                    <PlayerLink className="wd-sim-plink" p={pl} style={{ display: "block", textDecoration: "none" }}><PlayerName p={pl} style={{ color: "#fff", fontWeight: 900, fontSize: 14 }} /></PlayerLink>
                     <span style={{ display: "block", color: "#8b9bb4", fontSize: 11, fontWeight: 800, textTransform: "uppercase" }}>{pl.Position} · {pl.School} · Board #{pl.rank}</span>
                   </span>
                   <span style={{ flexShrink: 0, fontSize: 11, fontWeight: 900, color: value > 0 ? "#4ade80" : value < 0 ? "#ff8a9a" : "#9fb0c8", width: 64, textAlign: "right" }}>
@@ -1215,7 +1218,7 @@ function PriorPicks({ data, team, isMobile }) {
             {logoOf(pl) ? <img src={logoOf(pl)} alt="" style={{ width: 26, height: 26, objectFit: "contain", flexShrink: 0 }} /> : <span style={{ width: 26, flexShrink: 0 }} />}
             <span style={{ flex: 1, minWidth: 0 }}>
               {pl.Slug
-                ? <Link className="wd-sim-plink" to={`/player/${pl.Slug}`} target="_blank" rel="noopener noreferrer" style={{ display: "block", textDecoration: "none" }}><PlayerName p={pl} style={{ color: "#fff", fontWeight: 900, fontSize: 13 }} /></Link>
+                ? <PlayerLink className="wd-sim-plink" p={pl} style={{ display: "block", textDecoration: "none" }}><PlayerName p={pl} style={{ color: "#fff", fontWeight: 900, fontSize: 13 }} /></PlayerLink>
                 : <PlayerName p={pl} style={{ color: "#fff", fontWeight: 900, fontSize: 13 }} />}
               <span style={{ display: "block", color: "#8b9bb4", fontSize: 11, fontWeight: 800, textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pl.Position} · {pl.School}</span>
             </span>
@@ -1274,7 +1277,7 @@ function DraftBoardTab({ s, data, isMobile }) {
             <span style={{ width: 30, textAlign: "right", color: "#6f7f99", fontWeight: 900, fontSize: 13, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{p.rank}</span>
             {logoOf(p) ? <img src={logoOf(p)} alt="" style={{ width: 26, height: 26, objectFit: "contain", flexShrink: 0 }} /> : <span style={{ width: 26, flexShrink: 0 }} />}
             <div style={{ flex: 1, minWidth: 0 }}>
-              <Link className="wd-sim-plink" to={`/player/${p.Slug}`} target="_blank" rel="noopener noreferrer" style={{ color: "#fff", fontWeight: 900, fontSize: 14, textDecoration: "none", textTransform: "uppercase" }}>{p.First} {p.Last}</Link>
+              <PlayerLink className="wd-sim-plink" p={p} style={{ color: "#fff", fontWeight: 900, fontSize: 14, textDecoration: "none", textTransform: "uppercase" }}>{p.First} {p.Last}</PlayerLink>
               <div style={{ color: "#8b9bb4", fontSize: 12, fontFamily: BODY }}>{p.Position} · {p.School}{label ? ` · ${label}${p.mine ? " (yours)" : ""}` : ""}</div>
             </div>
             {onClock && <button className="wd-sim-draft" onClick={() => s.draft(p.id)} style={DRAFT_BTN}>DRAFT</button>}
@@ -1583,7 +1586,7 @@ function SuggestionCard({ tag, accent, p, onClock, s, quote, extra = null }) {
       <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
         {logoOf(p) ? <img src={logoOf(p)} alt="" style={{ width: 34, height: 34, objectFit: "contain", flexShrink: 0 }} /> : null}
         <span style={{ minWidth: 0 }}>
-          <Link className="wd-sim-plink" to={`/player/${p.Slug}`} target="_blank" rel="noopener noreferrer" style={{ display: "block", color: "#fff", fontWeight: 900, fontSize: 15, textTransform: "uppercase", textDecoration: "none", lineHeight: 1.1 }}>{p.First} {p.Last}</Link>
+          <PlayerLink className="wd-sim-plink" p={p} style={{ display: "block", color: "#fff", fontWeight: 900, fontSize: 15, textTransform: "uppercase", textDecoration: "none", lineHeight: 1.1 }}>{p.First} {p.Last}</PlayerLink>
           <span style={{ display: "block", color: "#8b9bb4", fontSize: 11, fontWeight: 800, textTransform: "uppercase", marginTop: 2 }}>{p.Position} {p.School} · Board #{p.rank}</span>
         </span>
       </div>
@@ -2137,7 +2140,18 @@ function useStageZoom(on) {
 
 // fill (desktop): the anchored screen — sized by its parent (DraftSim.jsx),
 // the console the only part that scrolls.
-export default function SimBroadcast({ s, data, isMobile, onSettings, onPickTeam, fill = false }) {
+// A prospect's name anywhere in it opens his card (ProspectCard.jsx) — with
+// DRAFT on it when the user's on the clock.
+export default function SimBroadcast(props) {
+  const { s, data, isMobile } = props;
+  return (
+    <ProspectCardProvider sim={s.sim} data={data} isMobile={isMobile} onDraft={s.phase === "user" ? s.draft : null}>
+      <BroadcastBody {...props} />
+    </ProspectCardProvider>
+  );
+}
+
+function BroadcastBody({ s, data, isMobile, onSettings, onPickTeam, fill = false }) {
   const [colRef, stageZoom] = useStageZoom(fill && !isMobile);
   // Mobile: the anchored part — the stage, Up Next along its bottom — then
   // the controls and the console filling the rest of the screen (DraftSim.jsx

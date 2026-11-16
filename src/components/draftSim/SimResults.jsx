@@ -32,6 +32,7 @@ import { SimSnapshot } from "./SimProfile";
 import { EndBadges, SignUpPanel } from "./SimBadges";
 import MockExport from "./MockExport";
 import { PlayerName } from "./FitName";
+import { ProspectCardProvider, PlayerLink } from "./ProspectCard";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -52,7 +53,16 @@ const btn = { border: "none", borderRadius: 999, padding: "9px 16px", cursor: "p
 // badges: the badges this run unlocked (useSimBadges runEarned) — under the
 // profile snapshot, or signed out in the sign-up pitch in its place (a Mock
 // Draft's: across the top); badgeTotal: how many there are to earn.
-export default function SimResults({ sim, data, ctx, speed, isMobile, onRerun, onNew, mock = false, counted = false, onUndo, badges = [], badgeTotal = 0, onCarry, carryYear, carrying = false, head = true }) {
+// A prospect's name opens his card (ProspectCard.jsx).
+export default function SimResults(props) {
+  return (
+    <ProspectCardProvider sim={props.sim} data={props.data} isMobile={props.isMobile}>
+      <ResultsBody {...props} />
+    </ProspectCardProvider>
+  );
+}
+
+function ResultsBody({ sim, data, ctx, speed, isMobile, onRerun, onNew, mock = false, counted = false, onUndo, badges = [], badgeTotal = 0, onCarry, carryYear, carrying = false, head = true }) {
   const { user, login, signup } = useAuth();
   const brand = (t) => data.branding[t] || {};
   const userHauls = useMemo(() => sim.userTeams.map((t) => teamHaul(sim, t)), [sim]);
@@ -181,7 +191,7 @@ function ReportCard({ h, b, take, isMobile, action }) {
             <span style={{ color: "#6f7f99", fontWeight: 900, fontSize: 11, width: 52, flexShrink: 0, lineHeight: 1.2 }}>R{pick.round}<br />No. {pick.overall}</span>
             {schoolLogo(prospect) ? <img src={schoolLogo(prospect)} alt="" style={{ width: 24, height: 24, objectFit: "contain", flexShrink: 0 }} /> : <span style={{ width: 24, flexShrink: 0 }} />}
             <span style={{ flex: 1, minWidth: 0 }}>
-              <Link to={`/player/${prospect.Slug}`} style={{ display: "block", textDecoration: "none" }}><PlayerName p={prospect} style={{ color: "#fff", fontWeight: 900, fontSize: 13 }} /></Link>
+              <PlayerLink p={prospect} newTab={false} style={{ display: "block", textDecoration: "none" }}><PlayerName p={prospect} style={{ color: "#fff", fontWeight: 900, fontSize: 13 }} /></PlayerLink>
               <span style={{ display: "block", color: "#8b9bb4", fontSize: 11, fontFamily: BODY, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                 {prospect.Position} · {prospect.School} · Board #{prospect.rank}{pick.via ? ` · via ${pick.via}` : ""}
               </span>
@@ -257,7 +267,7 @@ function FullDraft({ sim, data, isMobile, cols, action }) {
               <span style={{ color: "#6f7f99", fontWeight: 900, fontSize: 11, width: 22, textAlign: "right", flexShrink: 0 }}>{p.overall}</span>
               {teamLogo(b) && <img src={teamLogo(b)} alt="" style={{ width: 22, height: 22, objectFit: "contain", flexShrink: 0 }} />}
               <span style={{ minWidth: 0, flex: 1 }}>
-                <Link to={`/player/${pl.Slug}`} style={{ display: "block", textDecoration: "none" }}><PlayerName p={pl} style={{ color: "#fff", fontSize: 12, fontWeight: 900 }} /></Link>
+                <PlayerLink p={pl} newTab={false} style={{ display: "block", textDecoration: "none" }}><PlayerName p={pl} style={{ color: "#fff", fontSize: 12, fontWeight: 900 }} /></PlayerLink>
                 <span style={{ display: "block", color: "#8b9bb4", fontSize: 10, fontWeight: 800, textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pl.Position} {pl.School}{p.via ? ` · VIA ${p.via}` : ""}</span>
               </span>
             </div>

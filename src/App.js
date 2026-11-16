@@ -15,6 +15,7 @@ import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
 import LoadingSpinner from "./components/LoadingSpinner";
 import PlayerHeaderShell from "./components/PlayerHeaderShell";
+import { NFL_PLAYER_PAGES } from "./utils/nflPlayerSlugs";
 import { prefetchPlayerFromUrl } from "./utils/playerPrefetch";
 import { isUnreleasedYear, isUnreleasedSlug, useIsAdmin } from "./utils/prospectYears";
 import { PreviewContext, usePreviewLink } from "./utils/previewLinks";
@@ -35,6 +36,9 @@ const News = lazy(() => import("./pages/News"));
 const NewsArticle = lazy(() => import("./pages/NewsArticle"));
 const CommunityBoard = lazy(() => import("./pages/CommunityBoard"));
 const PlayerProfile = lazy(() => import("./pages/PlayerProfile"));
+// NFL player pages (concept) — a drafted player at his prospect slug; which
+// slugs: utils/nflPlayerSlugs.js.
+const NflPlayerPage = lazy(() => import("./pages/NflPlayerPage"));
 // Public Find Comparison calculator — gated behind config/features
 // .comparisonEnabled itself (see Comparison.js), so it's routed like any
 // other public page rather than wrapped in AdminRoute.
@@ -211,7 +215,7 @@ function MainLayout() {
                 literal-vs-dynamic parts, not route order, so this coexists
                 cleanly with /community/:year. */}
             <Route path="/community/:year/:position" element={<UnreleasedGate><CommunityBoard /></UnreleasedGate>} />
-            <Route path="/player/:slug" element={<UnreleasedGate><Suspense fallback={<PlayerHeaderShell />}><PlayerProfile /></Suspense></UnreleasedGate>} />
+            <Route path="/player/:slug" element={<UnreleasedGate><PlayerRoute /></UnreleasedGate>} />
             <Route path="/comparison" element={<Comparison />} />
             {/* /comparison/:slug preloads that prospect — same Slug format
                 /player/:slug uses (e.g. "jeremiah-smith-2027-wr"). */}
@@ -311,6 +315,14 @@ function TeamMockYear() {
   if (WEEKLY_YEARS.includes(year) && !hasTeamPages(year)) return <Navigate to={weeklyYearHref(year)} replace />;
   if (year === MAIN_WEEKLY_YEAR || (mockId !== team && WEEKLY_YEARS.includes(year))) return <Navigate to={weeklyMockHref(team, year)} replace />;
   return <WeeklyTeamMock key={`${team}-${year}`} team={WEEKLY_YEARS.includes(year) && /^[a-z]{2,3}$/.test(team) ? team.toUpperCase() : ""} year={year} />;
+}
+
+// /player/:slug — the prospect page, or the NFL player page for a slug in
+// NFL_PLAYER_PAGES.
+function PlayerRoute() {
+  const { slug } = useParams();
+  if (NFL_PLAYER_PAGES[slug]) return <NflPlayerPage key={slug} slug={slug} />;
+  return <Suspense fallback={<PlayerHeaderShell />}><PlayerProfile /></Suspense>;
 }
 
 const RouteNotFound = () => <div style={{ textAlign: "center", color: "red", fontWeight: "bold" }}>404 – Route not found</div>;

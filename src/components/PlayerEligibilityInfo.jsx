@@ -314,6 +314,31 @@ export default function PlayerEligibilityInfo({ player, text, espnId, draft, col
   // Preview links (utils/previewLinks.js) leave out the birthday and ages.
   const preview = usePreviewMode();
   const answers = playerAnswers(player, isAdmin);
+  const { rows, hometown, born, age } = useCareerPath(player, espnId, draft);
+  // Hometown on its own line; birthday and ages on the line under it — on
+  // mobile the birthday gets its own line and the two ages share the next.
+  const bornFact = !preview && born?.text && ["Born", born.text];
+  const ageFacts = [!preview && age && ["Current Age", String(age)], !preview && born?.rookieAge && ["Rookie Age", born.rookieAge, `Age at Week 1 of the ${player.Eligible} NFL season (Sept. 1)`]];
+  const factRows = [
+    [hometown && ["Hometown", hometown]],
+    ...(isMobile ? [[bornFact], ageFacts] : [[bornFact, ...ageFacts]]),
+  ].map((r) => r.filter(Boolean)).filter((r) => r.length);
+  const facts = factRows.flat();
+  const heading = (label) => (
+    <div className="font-black uppercase" style={{ color: color1, fontSize: isMobile ? "12px" : "14px", letterSpacing: "0.08em" }}>{label}</div>
+  );
+  return (
+    <InfoBody {...{ answers, text, facts, factRows, rows, heading, player, color1, isMobile }} />
+  );
+}
+
+// The Info tab's data, shared with Draft Sim's player card
+// (draftSim/ProspectCard.jsx): the Career Path rows (NFL team / declared /
+// portal on top, the college stops with their accolades, the high school
+// with its recruiting line), hometown, birthday and ages.
+// → { rows: [{ key, name, sub, span, current, brand, label, to, accolades, fallback }],
+//     hometown, born: { text, age, rookieAge } | null, age }
+export function useCareerPath(player, espnId, draft) {
   const saved = player?.CareerStops || [];
   // Newest first. Without saved stops, just their current school — and a
   // transfer's new school leads until CFBD's stops catch up.
@@ -365,18 +390,6 @@ export default function PlayerEligibilityInfo({ player, text, espnId, draft, col
     || birthday(estimatedBirthday(player?.RecruitYear), player?.Eligible, true);
   const age = born?.age ?? (bio?.age || null);
   const hometown = player?.Hometown || bio?.hometown || "";
-  // Hometown on its own line; birthday and ages on the line under it — on
-  // mobile the birthday gets its own line and the two ages share the next.
-  const bornFact = !preview && born?.text && ["Born", born.text];
-  const ageFacts = [!preview && age && ["Current Age", String(age)], !preview && born?.rookieAge && ["Rookie Age", born.rookieAge, `Age at Week 1 of the ${player.Eligible} NFL season (Sept. 1)`]];
-  const factRows = [
-    [hometown && ["Hometown", hometown]],
-    ...(isMobile ? [[bornFact], ageFacts] : [[bornFact, ...ageFacts]]),
-  ].map((r) => r.filter(Boolean)).filter((r) => r.length);
-  const facts = factRows.flat();
-  const heading = (label) => (
-    <div className="font-black uppercase" style={{ color: color1, fontSize: isMobile ? "12px" : "14px", letterSpacing: "0.08em" }}>{label}</div>
-  );
   // Status stops on top (utils/draftLogos.js): declared — the draft he's
   // entered, under that year's draft logo ("NFL" when the year has none
   // yet); in the transfer portal — the portal arrows (once he picks a
@@ -417,7 +430,10 @@ export default function PlayerEligibilityInfo({ player, text, espnId, draft, col
       to: hs?.Ranking === 3 ? `/hs/${hsSlug(hs.Name, hs.State)}` : null,
     }] : []),
   ];
+  return { rows, hometown, born, age };
+}
 
+function InfoBody({ answers, text, facts, factRows, rows, heading, player, color1, isMobile }) {
   return (
     <div style={{ border: `2px solid ${color1}`, borderRadius: "8px", background: "#fff", padding: isMobile ? "12px" : "16px 20px" }}>
       {answers.length > 0 && (

@@ -1,0 +1,14 @@
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
+const { getFirestore } = require("./firebaseAdmin");
+const db = getFirestore();
+const p = await db.collection("players").where("Last", "==", "Johnson").where("First", "==", "Emmett").get();
+p.docs.forEach((d) => { const x = d.data(); const { Bio, ...rest } = x; console.log("player", d.id, JSON.stringify(rest).slice(0, 1500)); });
+const h = await db.collection("historical").where("Year", "==", "2026").limit(3).get();
+console.log("historical 2026 rows", h.size);
+const o = await db.collection("draftOrder").limit(2).get();
+o.docs.forEach((d) => console.log("draftOrder sample", d.id, JSON.stringify(d.data()).slice(0, 400)));
+const ev = p.docs[0] ? await db.collection("players").doc(p.docs[0].id).collection("evaluations").count().get() : null;
+console.log("evals", ev?.data().count);
+const ph = p.docs[0] ? await db.collection("playerPhotos").doc(p.docs[0].id).get() : null;
+console.log("photo", ph?.exists, JSON.stringify(ph?.data() || {}).slice(0, 200));

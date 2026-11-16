@@ -24,6 +24,7 @@ import { textOn } from "../utils/teamColors";
 import { depthNameKey, initialKey, fetchEspnRoster, fetchDepthOrder, groupRoster } from "../utils/nflRoster";
 import { useAuth } from "../context/AuthContext";
 import { loadNflFollows, setNflFollow } from "../utils/nflFollows";
+import { NFL_SLUG_BY_ESPN } from "../utils/nflPlayerSlugs";
 import { loadWeeklyMockSummary, weeklyMockTitle, weeklyMockHref, weeklyMockDate, TEAM_PAGE_YEARS } from "../utils/weeklyMockNews";
 
 const BLUE = "#0055a5";
@@ -340,6 +341,8 @@ export default function NFLTeamPage() {
   const [depthOrder, setDepthOrder] = useState(null);
   // ESPN athlete id → We-Draft player Slug (see lastDraftYear above).
   const [profileSlugs, setProfileSlugs] = useState({});
+  // His NFL page when he has one (utils/nflPlayerSlugs.js), else his prospect page.
+  const profileOf = (espnId) => NFL_SLUG_BY_ESPN[espnId] || profileSlugs[espnId];
   // The page's content column — MarginAds centers its Homage rails in the
   // gutters beside it.
   const contentRef = useRef(null);
@@ -874,7 +877,7 @@ export default function NFLTeamPage() {
                       stats={statsCache[player.id]} statsLoading={!!statsLoading[player.id]}
                       onMouseEnter={() => handleMouseEnter(player)} onMouseLeave={handleMouseLeave}
                       onTap={() => openPlayerSheet(player)}
-                      profileSlug={profileSlugs[player.id]}
+                      profileSlug={profileOf(player.id)}
                     />
                   ))}
                 </div>
@@ -982,7 +985,7 @@ export default function NFLTeamPage() {
               player={sheetPlayer} color1={c1} color2={c2}
               stats={statsCache[sheetPlayer.id]} statsLoading={!!statsLoading[sheetPlayer.id]}
               onClose={() => setSheetPlayer(null)}
-              profileSlug={profileSlugs[sheetPlayer.id]}
+              profileSlug={profileOf(sheetPlayer.id)}
             />
           </div>
         </div>

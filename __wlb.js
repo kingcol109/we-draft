@@ -1,0 +1,4 @@
+import { SimEngine } from "./src/sim/engine.js";
+import { TUNING } from "./src/sim/config.js";
+for (const [formation, coverage] of [["pistol","cover2man"],["spreadWeak","cover3"]]) { const e = new SimEngine({ variance: false, ballOn: 85, play: "insideZone", formation, front: "over", coverage, readEnd: "crash", seed: 73 }); e.autoReset = false; e.autopilot = { run: "read" }; for (let t = 0; t < 2.2; t += TUNING.dt) e.step(TUNING.dt); let r = null; e.onFinished = (x) => { r = x; }; e.snap(); const seen = []; for (let i = 0; i < 25 / TUNING.dt && !r; i++) { e.step(TUNING.dt); const l = e.byId.WLB.intent && e.byId.WLB.intent.label; if (e.qbKeep && l && seen[seen.length - 1] !== l) seen.push(e.sinceSnap.toFixed(2) + " " + l); }
+  console.log(formation, coverage, "keep", e.qbKeep, r.type, r.yards.toFixed(1)); console.log("   WLB after the pull:", seen.slice(0, 6).join(" → ")); }

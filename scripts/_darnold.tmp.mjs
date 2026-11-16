@@ -1,0 +1,12 @@
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
+const { getFirestore } = require("./firebaseAdmin");
+const db = getFirestore();
+const h = await db.collection("historical").where("Year", "in", ["2018", 2018]).get();
+const d = h.docs.filter((x) => /darnold/i.test(JSON.stringify(x.data())));
+d.forEach((x) => console.log("historical", x.id, JSON.stringify(x.data())));
+console.log("2018 historical count", h.size, "sample keys", Object.keys(h.docs[0]?.data() || {}));
+const p = await db.collection("players").where("Slug", "==", "sam-darnold-2018-qb").get();
+console.log("players by slug", p.size);
+const c = await db.collection("cfbdPlayers").where("name", "==", "Sam Darnold").get().catch(() => ({ size: "err" }));
+console.log("cfbd", c.size);

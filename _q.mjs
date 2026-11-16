@@ -1,0 +1,11 @@
+import { initializeApp } from "firebase/app";
+import { getFirestore, collection, query, where, getDocs, getDoc, doc } from "firebase/firestore";
+const db = getFirestore(initializeApp({ apiKey: "AIzaSyCdxYPX6WjKEd_x8nKPqpXuqPAsE6k8op4", projectId: "we-draft" }));
+const ids = ["gZStfl7","vSGz9zs","pEP69qt","g1r3FqO","eTrApK2","i9aNjxI"];
+const s = await getDocs(query(collection(db, "schools"), where("School", "==", "Liberty")));
+for (const d of s.docs) for (const [k, v] of Object.entries(d.data())) if (typeof v === "string" && ids.some(i => v.includes(i))) console.log("schools/Liberty", k, v);
+const ads = (await getDoc(doc(db, "compSnapshots", "_ads"))).data();
+JSON.stringify(ads).match(/[a-zA-Z0-9]{7}\.png/g)?.forEach(m => ids.some(i => m.startsWith(i)) && console.log("_ads contains", m));
+const p = (await getDocs(query(collection(db, "players"), where("Slug", "==", "kanye-udoh-2027-rb")))).docs[0].data();
+for (const [k, v] of Object.entries(p)) if (typeof v === "string" && ids.some(i => v.includes(i))) console.log("player", k, v);
+process.exit(0);

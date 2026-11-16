@@ -92,8 +92,9 @@ const ft = (inches) => (inches ? `${Math.floor(inches / 12)}'${inches % 12}"` : 
 const pctTxt = (v) => (v == null ? null : `${(Number(v) * (Number(v) <= 1 ? 100 : 1)).toFixed(1)}%`);
 const num = (v) => (v == null ? null : Number(v).toLocaleString());
 
-// The stat tiles for his position group — only what's there.
-function statTiles(pos, s) {
+// The stat tiles for his position group — only what's there. (Draft Sim's
+// ProspectCard.jsx uses them too: same CFBD stat groups.)
+export function statTiles(pos, s) {
   if (!s) return [];
   const g = (c, k) => s[c]?.[k];
   const t = (label, v) => (v == null ? null : [label, v]);

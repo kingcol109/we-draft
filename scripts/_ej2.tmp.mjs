@@ -1,0 +1,10 @@
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
+const { getFirestore } = require("./firebaseAdmin");
+const db = getFirestore();
+const o = await db.collection("draftOrder").where("Selection", "==", "emmett-johnson-2026-rb").get();
+o.docs.forEach((d) => console.log("pick", d.id, JSON.stringify(d.data())));
+const ev = await db.collection("players").doc("row_390").collection("evaluations").get();
+ev.docs.forEach((d) => { const x = d.data(); console.log("eval", JSON.stringify({ g: x.grade || x.Grade || x.RoundGrade, s: x.strengths || x.Strengths, w: x.weaknesses || x.Weaknesses, keys: Object.keys(x) })); });
+const c = await db.collection("cfbdPlayers").where("wedraftPlayerId", "==", "row_390").get();
+c.docs.forEach((d) => console.log("cfbd", d.id, JSON.stringify(d.data()).slice(0, 300)));
