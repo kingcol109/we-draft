@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
-import { collection, getDocs, doc, setDoc, serverTimestamp, query, where } from "firebase/firestore";
+import { collection, getDocs, getDoc, doc, setDoc, serverTimestamp, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { averageGradesFor, gradeLabel } from "../utils/communityGrades";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -772,12 +772,18 @@ export default function CommunityBoard() {
     if (boardMap.has(p.id)) return;
     setAddingId(p.id);
     try {
+      // An archived eval (archive → fresh start) keeps the original date.
+      const archived = await getDoc(doc(db, "users", user.uid, "archivedEvaluations", p.id)).catch(() => null);
+      const a = archived?.exists() ? archived.data() : null;
       const evalData = {
         uid: user.uid,
         playerId: p.id,
         playerName: (p.First || "") + " " + (p.Last || ""),
         grade: "Watchlist", strengths: [], weaknesses: [],
         nflFit: "", evaluation: "", visibility: "private",
+        // Only ever a first add (boardMap guard above), so this is the
+        // user's first touch on the player — unless an archive says earlier.
+        firstEvaluatedAt: a?.firstEvaluatedAt || a?.updatedAt || serverTimestamp(),
         updatedAt: serverTimestamp(),
       };
       await setDoc(doc(db, "players", p.id, "evaluations", user.uid), canonicalEvalData(evalData));

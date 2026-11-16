@@ -2309,6 +2309,8 @@ export default function PlayerProfile() {
   const [noteTag, setNoteTag] = useState("");
   const [noteText, setNoteText] = useState("");
   const [lastUpdated, setLastUpdated] = useState(null);
+  // When this user first evaluated this player (firstEvaluatedAt).
+  const [firstEvaluated, setFirstEvaluated] = useState(null);
   const [saving, setSaving] = useState(false);
   const [traits, setTraits] = useState({});
   const [communityLive, setCommunity] = useState({ avgGrade: null, topStrengths: [], topWeaknesses: [], topFits: [] });
@@ -2984,7 +2986,7 @@ useEffect(() => {
     if (!user || !player?.id) return;
     // Always reset first so switching to an unevaluated player clears the form
     setGrade(""); setStrengths([]); setWeaknesses([]);
-    setNflFit(""); setEvaluation(""); setVisibility("public"); setLastUpdated(null);
+    setNflFit(""); setEvaluation(""); setVisibility("public"); setLastUpdated(null); setFirstEvaluated(null);
     setGameNotes([]); setShowGameNotes(false); setSelectedGameId(""); setNoteTag(""); setNoteText("");
     try {
       const snap = await getDoc(doc(db,"users",user.uid,"evaluations",player.id));
@@ -2993,6 +2995,7 @@ useEffect(() => {
         setGrade(d.grade||""); setStrengths(d.strengths||[]); setWeaknesses(d.weaknesses||[]);
         setNflFit(d.nflFit||""); setEvaluation(d.evaluation||"");
         setVisibility(d.visibility||"public"); setLastUpdated(d.updatedAt||null);
+        setFirstEvaluated(d.firstEvaluatedAt||null);
         setGameNotes(Array.isArray(d.gameNotes) ? d.gameNotes : []);
       }
     } catch(e) { console.error(e); }
@@ -3533,22 +3536,30 @@ useEffect(() => {
     const gradeLocked = player?.Eligible === "2026" && new Date() >= GRADE_LOCK_DATE;
     setSaving(true);
     try {
+      const existing = await getDoc(doc(db,"users",user.uid,"evaluations",player.id));
+      const prev = existing.exists() ? existing.data() : null;
       let savedGrade = grade;
-      if (gradeLocked) {
-        const existing = await getDoc(doc(db,"users",user.uid,"evaluations",player.id));
-        savedGrade = existing.exists() ? (existing.data().grade || grade) : grade;
-      }
+      if (gradeLocked) savedGrade = prev ? (prev.grade || grade) : grade;
+      // First Evaluated: stamped on the first save and carried on every
+      // re-save (setDoc overwrites the doc) — and across archive → fresh
+      // start, since an archive keeps the original date.
+      // An archive from before First Evaluated existed falls back to its
+      // last save (updatedAt), same as the backfill.
+      const archFirst = archivedEval?.firstEvaluatedAt || archivedEval?.updatedAt || null;
+      const firstEvaluatedAt = prev?.firstEvaluatedAt || archFirst || serverTimestamp();
       const evalData = {
         uid:user.uid, playerId:player.id,
         playerName:`${player.First||""} ${player.Last||""}`.trim(),
         grade: savedGrade, strengths, weaknesses, nflFit, evaluation, visibility,
         gameNotes: overrideGameNotes ?? gameNotes,
+        firstEvaluatedAt,
         updatedAt:serverTimestamp(),
       };
       await setDoc(doc(db,"players",player.id,"evaluations",user.uid), canonicalEvalData(evalData));
       await setDoc(doc(db,"users",user.uid,"evaluations",player.id), evalData);
       confetti({ particleCount:140, spread:75, origin:{y:0.65}, colors:[color1,color2,"#ffffff"] });
       setLastUpdated(Date.now());
+      setFirstEvaluated(prev?.firstEvaluatedAt || archFirst || Date.now());
       // Save Evaluation itself (not a game note's auto-save): offer to share
       // it — once a day (utils/sharePrompt.js).
       if (overrideGameNotes === undefined && grade && claimSharePrompt(user.uid, profile)) setEvalSharePrompt((n) => n + 1);
@@ -3562,7 +3573,7 @@ useEffect(() => {
     try {
       const { deleteDoc, doc:fDoc } = await import("firebase/firestore");
       await Promise.all([deleteDoc(fDoc(db,"players",player.id,"evaluations",user.uid)), deleteDoc(fDoc(db,"users",user.uid,"evaluations",player.id))]);
-      setGrade(""); setStrengths([]); setWeaknesses([]); setNflFit(""); setEvaluation(""); setVisibility("public"); setLastUpdated(null);
+      setGrade(""); setStrengths([]); setWeaknesses([]); setNflFit(""); setEvaluation(""); setVisibility("public"); setLastUpdated(null); setFirstEvaluated(null);
       setGameNotes([]);
       alert("🗑️ Evaluation removed from your board.");
     } catch(e) { alert("❌ Failed to remove evaluation. Try again."); }
@@ -3585,7 +3596,7 @@ useEffect(() => {
       const { deleteDoc, doc:fDoc } = await import("firebase/firestore");
       await Promise.all([deleteDoc(fDoc(db,"players",player.id,"evaluations",user.uid)), deleteDoc(fDoc(db,"users",user.uid,"evaluations",player.id))]);
       setArchivedEval({ ...archiveData, archivedAt: { toDate: () => now } });
-      setGrade(""); setStrengths([]); setWeaknesses([]); setNflFit(""); setEvaluation(""); setVisibility("public"); setLastUpdated(null);
+      setGrade(""); setStrengths([]); setWeaknesses([]); setNflFit(""); setEvaluation(""); setVisibility("public"); setLastUpdated(null); setFirstEvaluated(null);
       setGameNotes([]);
       alert("📦 Evaluation archived and current eval cleared. You can now start a fresh evaluation.");
     } catch(e) { console.error(e); alert("❌ Failed to archive evaluation. Try again."); }
@@ -3595,6 +3606,12 @@ useEffect(() => {
   const renderDate = (ts) => {
     if (!ts) return "";
     try { return ts?.toDate?.() ? ts.toDate().toLocaleString() : typeof ts==="number" ? new Date(ts).toLocaleString() : new Date(ts).toLocaleString(); }
+    catch { return ""; }
+  };
+  // Date only (no time) — First Evaluated.
+  const renderDay = (ts) => {
+    if (!ts) return "";
+    try { const d = ts?.toDate?.() ? ts.toDate() : new Date(ts); return isNaN(d) ? "" : d.toLocaleDateString(undefined, { month:"short", day:"numeric", year:"numeric" }); }
     catch { return ""; }
   };
 
@@ -5960,6 +5977,7 @@ useEffect(() => {
                   )}
                   {lastUpdated && <button onClick={handleRemoveEvaluation} className="w-full text-xs text-gray-400 hover:text-red-500 font-medium underline transition pt-1">Remove from Board</button>}
                   {lastUpdated && <p style={{ textAlign:"center", fontSize:"13px", fontWeight:700, color:"#888", marginTop:"4px" }}>Saved: {renderDate(lastUpdated)}</p>}
+                  {lastUpdated && firstEvaluated && <p style={{ textAlign:"center", fontSize:"13px", fontWeight:700, color:"#888", marginTop:"0" }}>First Evaluated: {renderDay(firstEvaluated)}</p>}
                 </div>
               </div>
             )}
@@ -6124,7 +6142,12 @@ useEffect(() => {
                         <VerifiedNameBadge uid={ev.uid} name={ev.username} verified={!!ev.verified} size={16} />
                       </span>
                     </div>
-                    {ev.updatedAt && <span className="wdm-cardhead-d" style={{ color:"rgba(255,255,255,0.85)", fontSize:"13px", fontWeight:700 }}>{renderDate(ev.updatedAt)}</span>}
+                    {(ev.updatedAt || ev.firstEvaluatedAt) && (
+                      <div className="wdm-cardhead-d" style={{ textAlign:"right", lineHeight:1.25 }}>
+                        {ev.updatedAt && <div style={{ color:"rgba(255,255,255,0.85)", fontSize:"13px", fontWeight:700 }}>{renderDate(ev.updatedAt)}</div>}
+                        {ev.firstEvaluatedAt && <div style={{ color:"rgba(255,255,255,0.7)", fontSize:isMobile?"10px":"11px", fontWeight:700, textTransform:"uppercase", letterSpacing:"0.04em" }}>First Evaluated {renderDay(ev.firstEvaluatedAt)}</div>}
+                      </div>
+                    )}
                   </div>
                   {isMobile ? (
                     <div>

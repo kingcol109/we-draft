@@ -5162,12 +5162,16 @@ function DummyEvaluationsSection() {
       // addDoc would, but synchronously and without writing anything yet —
       // this becomes the dummy's stand-in "uid" everywhere below.
       const dummyUid = editingId || doc(collection(db, "players", selectedPlayer.id, "evaluations")).id;
+      // First Evaluated survives an edit (the setDocs below overwrite).
+      const editing = editingId ? dummyEvals.find((e) => e.id === editingId) : null;
       const evalData = {
         uid: dummyUid, playerId: selectedPlayer.id,
         playerName: `${selectedPlayer.First || ""} ${selectedPlayer.Last || ""}`.trim(),
         grade: formState.grade, strengths: formState.strengths, weaknesses: formState.weaknesses,
         nflFit: formState.nflFit, evaluation: formState.evaluation, visibility: formState.visibility,
-        gameNotes: [], isDummy: true, updatedAt: serverTimestamp(),
+        gameNotes: [], isDummy: true,
+        firstEvaluatedAt: editing?.firstEvaluatedAt || serverTimestamp(),
+        updatedAt: serverTimestamp(),
       };
       await Promise.all([
         setDoc(doc(db, "users", dummyUid), { username: formState.username.trim(), verified: false, isDummy: true, updatedAt: serverTimestamp() }, { merge: true }),
