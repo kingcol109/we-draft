@@ -28,3 +28,30 @@ test("the end screen: follow, the handle, the site", () => {
   valid(svg);
   ["FOLLOW", "FOR MORE", "@WEDRAFTSITE", "WE-DRAFT.COM"].forEach((t) => expect(svg).toContain(`>${t}<`));
 });
+
+test("edits: a typed text replaces its default, an empty one hides it, images can be turned off", () => {
+  const edits = { last: "Metz Jr", first: "", tag: "", stack: "Roll Tide", follow: "Subscribe", handle: "", color: "#112233", showLogo: false, showEndBadge: false };
+  const input = shortInput({ player, school, lines: "9 tkl", badgeLogo: "wd", edits });
+  expect(input.color).toBe("#112233");
+  expect(input.logoDark).toBe("");
+  expect(input.badgeLogo).toBe("wd");
+  expect(input.endBadgeLogo).toBe("");
+  const frame = shortFrame(input, env);
+  valid(frame);
+  expect(frame).toContain(">METZ JR<");
+  expect(frame).toContain("ROLL TIDE");
+  expect(frame).not.toContain(">LUKE<");
+  expect(frame).not.toContain(`LB${kit.DOT}ALABAMA`);
+  const end = shortEnd(input, env);
+  valid(end);
+  expect(end).toContain(">SUBSCRIBE<");
+  expect(end).not.toContain("@WEDRAFTSITE");
+  expect(end).toContain(">WE-DRAFT.COM<");
+});
+
+test("no edits: the same Short as before", () => {
+  const a = shortInput({ player, school, lines: "9 tkl", kicker: "vs LSU" });
+  const b = shortInput({ player, school, lines: "9 tkl", kicker: "vs LSU", edits: {} });
+  expect(shortFrame(b, env)).toBe(shortFrame(a, env));
+  expect(shortEnd(b, env)).toBe(shortEnd(a, env));
+});

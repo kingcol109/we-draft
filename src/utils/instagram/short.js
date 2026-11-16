@@ -27,15 +27,38 @@ export const SHORT_HANDLE = "@WEDRAFTSITE";
 export const SHORT_SITE = "WE-DRAFT.COM";
 const shade = (h, f) => `#${[1, 3, 5].map((i) => Math.max(0, Math.min(255, Math.round(parseInt(h.slice(i, i + 2), 16) * f))).toString(16).padStart(2, "0")).join("")}`;
 
-// lines: the stat lines, one a line ("9 TKL\n1 SACK" or an array); kicker:
-// a small line over them (VS LSU · WEEK 11).
-export function shortInput({ player = {}, school = {}, lines = "", kicker = "", badgeLogo = "" }) {
-  const list = (Array.isArray(lines) ? lines : String(lines || "").split(/\n/)).map((l) => l.trim()).filter(Boolean).slice(0, 3);
+export const SHORT_TAGLINE = "MOCK DRAFTS · BIG BOARDS · DRAFT SIM";
+// Every element's text, its default, and the editor's name for it. A typed
+// value replaces the default; an empty one ("") hides the element.
+export const SHORT_TEXTS = {
+  frame: [["first", "First name"], ["last", "Last name"], ["tag", "Position · school pill"], ["stack", "School name behind the stats"]],
+  end: [["follow", "Big line"], ["forMore", "Second line"], ["handle", "Handle"], ["site", "Website button"], ["tagline", "Bottom line"]],
+};
+export function shortDefaults(player = {}, school = {}) {
+  const schoolName = player.School || school.School || "";
   return {
-    first: player.First || "", last: player.Last || "", pos: player.Position || "", school: player.School || school.School || "",
-    color: hex(school.Color1) || BLUE, color2: hex(school.Color2) || GOLD,
-    logoDark: school.LogoDark || school.Logo1 || "",
-    lines: list, kicker: String(kicker || "").trim(), badgeLogo,
+    first: player.First || "", last: player.Last || "", tag: [player.Position, schoolName].filter(Boolean).join(DOT),
+    stack: schoolName || "WE-DRAFT",
+    follow: "FOLLOW", forMore: "FOR MORE", handle: SHORT_HANDLE, site: SHORT_SITE, tagline: SHORT_TAGLINE,
+  };
+}
+
+// lines: the stat lines, one a line ("9 TKL\n1 SACK" or an array); kicker:
+// a small line over them (VS LSU · WEEK 11). edits: the editor's changes —
+// any SHORT_TEXTS key (a string; "" hides it), color / color2 (hex), and
+// showLogo / showBadge / showEndBadge (false hides that image).
+export function shortInput({ player = {}, school = {}, lines = "", kicker = "", badgeLogo = "", edits = {} }) {
+  const e = edits || {};
+  const list = (Array.isArray(lines) ? lines : String(lines || "").split(/\n/)).map((l) => l.trim()).filter(Boolean).slice(0, 3);
+  const texts = Object.fromEntries(Object.entries(shortDefaults(player, school)).map(([k, d]) => [k, typeof e[k] === "string" ? e[k].trim() : d]));
+  return {
+    ...texts,
+    pos: player.Position || "", school: player.School || school.School || "",
+    color: hex(e.color) || hex(school.Color1) || BLUE, color2: hex(e.color2) || hex(school.Color2) || GOLD,
+    logoDark: e.showLogo === false ? "" : school.LogoDark || school.Logo1 || "",
+    lines: list, kicker: String(kicker || "").trim(),
+    badgeLogo: e.showBadge === false ? "" : badgeLogo,
+    endBadgeLogo: e.showEndBadge === false ? "" : badgeLogo,
   };
 }
 
@@ -62,21 +85,25 @@ export function shortFrame(input, env) {
   // The top band: the school's color, its logo faint right, speed stripes.
   let body = `<g clip-path="url(#topc)"><rect width="${W}" height="${wy}" fill="url(#top)"/>${stripes(0, wy)}`
     + image(env, input.logoDark, W - 420, -30, 480, 480, "xMidYMid meet", 0.12) + "</g>";
-  // His name alone up top, centered in the band: first over last, last big and outlined.
-  const last = up(input.last);
-  const ls = fitSize(env, last, 210, W - 120, 90, 4);
-  const firstY = (wy - (92 * 0.78 + 28 + ls * 0.78)) / 2 + 92 * 0.78 + 10;
-  body += fitLine(env, W / 2, firstY, up(input.first), 92, W - 140, ink, { anchor: "middle", spacing: 6, opacity: 0.9 }).svg;
-  body += `<g filter="url(#sh)">${outlined(W / 2, firstY + 28 + ls * 0.78, last, ls, "#ffffff", c2, 10, 4)}</g>`;
+  // His name alone up top, centered in the band: first over last, last big
+  // and outlined. Either can be blanked; what's left stays centered.
+  const first = up(input.first || "");
+  const last = up(input.last || "");
+  const ls = last ? fitSize(env, last, 210, W - 120, 90, 4) : 0;
+  const fh = first ? 92 * 0.78 : 0;
+  const gap = first && last ? 28 : 0;
+  const firstY = (wy - (fh + gap + ls * 0.78)) / 2 + fh + 10;
+  if (first) body += fitLine(env, W / 2, firstY, first, 92, W - 140, ink, { anchor: "middle", spacing: 6, opacity: 0.9 }).svg;
+  if (last) body += `<g filter="url(#sh)">${outlined(W / 2, firstY + gap + ls * 0.78, last, ls, "#ffffff", c2, 10, 4)}</g>`;
 
   // The window's edges: a bar of the accent and a fine white line.
   body += `<rect y="${wy - 10}" width="${W}" height="10" fill="${c2}"/><rect y="${wy}" width="${W}" height="3" fill="#ffffff" fill-opacity="0.6"/>`
     + `<rect y="${by}" width="${W}" height="10" fill="${c2}"/><rect y="${by - 3}" width="${W}" height="3" fill="#ffffff" fill-opacity="0.6"/>`;
 
   // The bottom band: his school's name stacked faint, slanted, then the stats.
-  const school = up(input.school || "WE-DRAFT");
-  const ws = fitSize(env, school, 230, W + 200, 120, 4);
-  const rows = [0, 1, 2, 3].map((j) => {
+  const school = up(input.stack ?? (input.school || "WE-DRAFT"));
+  const ws = school ? fitSize(env, school, 230, W + 200, 120, 4) : 0;
+  const rows = !school ? "" : [0, 1, 2, 3].map((j) => {
     const y = by + 150 + j * ws * 0.86;
     const x = -60 + (j % 2) * 140;
     return text(x, y, `${school}  ${school}`, ws, "#ffffff", { spacing: 4, opacity: 0.09 });
@@ -87,7 +114,7 @@ export function shortFrame(input, env) {
   const lines = input.lines.map(up);
   // Position · school on a pill at the band's top, then the kicker, then the stats.
   let sy = by + 56;
-  const tag = up([input.pos, input.school].filter(Boolean).join(DOT));
+  const tag = up(input.tag ?? [input.pos, input.school].filter(Boolean).join(DOT));
   if (tag) {
     const ts = fitSize(env, tag, 38, W - 400, 22, 3);
     const tw = widthOf(env, tag, ts, 3) + 56;
@@ -126,18 +153,28 @@ export function shortEnd(input, env) {
   const bs = 340;
   const bcy = 560;
   body += `<circle cx="${W / 2}" cy="${bcy}" r="${bs * 0.95}" fill="url(#eg)"/>`;
-  if (hasImage(env, input.badgeLogo)) body += `<g filter="url(#esh)">${image(env, input.badgeLogo, W / 2 - bs / 2, bcy - bs / 2, bs, bs)}</g>`;
-  // FOLLOW / FOR MORE, the handle.
-  body += `<g filter="url(#esh)">${fitLine(env, W / 2, 1000, "FOLLOW", 250, W - 120, "#ffffff", { anchor: "middle", spacing: 8 }).svg}</g>`
-    + fitLine(env, W / 2, 1120, "FOR MORE", 120, W - 160, GOLD, { anchor: "middle", spacing: 10 }).svg
-    + fitLine(env, W / 2, 1230, SHORT_HANDLE, 70, W - 200, "#ffffff", { anchor: "middle", spacing: 4, opacity: 0.9 }).svg;
-  // A rule, then the site on a gold button.
+  const badge = input.endBadgeLogo ?? input.badgeLogo;
+  if (hasImage(env, badge)) body += `<g filter="url(#esh)">${image(env, badge, W / 2 - bs / 2, bcy - bs / 2, bs, bs)}</g>`;
+  // FOLLOW / FOR MORE, the handle — each the editor's text, or gone when blanked.
+  const t = (k, d) => up(input[k] ?? d);
+  const follow = t("follow", "FOLLOW");
+  const forMore = t("forMore", "FOR MORE");
+  const handle = t("handle", SHORT_HANDLE);
+  const site = t("site", SHORT_SITE);
+  const tagline = t("tagline", SHORT_TAGLINE);
+  if (follow) body += `<g filter="url(#esh)">${fitLine(env, W / 2, 1000, follow, 250, W - 120, "#ffffff", { anchor: "middle", spacing: 8 }).svg}</g>`;
+  if (forMore) body += fitLine(env, W / 2, 1120, forMore, 120, W - 160, GOLD, { anchor: "middle", spacing: 10 }).svg;
+  if (handle) body += fitLine(env, W / 2, 1230, handle, 70, W - 200, "#ffffff", { anchor: "middle", spacing: 4, opacity: 0.9 }).svg;
+  // A rule, then the site on a gold button (as big as fits the frame).
   body += `<rect x="${W / 2 - 60}" y="1300" width="120" height="6" rx="3" fill="${GOLD}"/>`;
-  const sw = widthOf(env, SHORT_SITE, 84, 4) + 110;
-  body += `<g filter="url(#esh)"><rect x="${r1(W / 2 - sw / 2)}" y="1380" width="${r1(sw)}" height="132" rx="66" fill="${GOLD}"/></g>`
-    + text(W / 2, 1446 + 84 * 0.36, SHORT_SITE, 84, NAVY, { anchor: "middle", spacing: 4 })
-    + fitLine(env, W / 2, 1600, "MOCK DRAFTS · BIG BOARDS · DRAFT SIM", 40, W - 200, "#ffffff", { anchor: "middle", spacing: 4, opacity: 0.7 }).svg;
+  if (site) {
+    const ss = fitSize(env, site, 84, W - 260, 40, 4);
+    const sw = widthOf(env, site, ss, 4) + 110;
+    body += `<g filter="url(#esh)"><rect x="${r1(W / 2 - sw / 2)}" y="1380" width="${r1(sw)}" height="132" rx="66" fill="${GOLD}"/></g>`
+      + text(W / 2, 1446 + ss * 0.36, site, ss, NAVY, { anchor: "middle", spacing: 4 });
+  }
+  if (tagline) body += fitLine(env, W / 2, 1600, tagline, 40, W - 200, "#ffffff", { anchor: "middle", spacing: 4, opacity: 0.7 }).svg;
   return `${svgOpen(env, defs)}${body}</svg>`;
 }
 
-export const shortImageUrls = (input) => [...new Set([input.logoDark, input.badgeLogo].filter(Boolean))];
+export const shortImageUrls = (input) => [...new Set([input.logoDark, input.badgeLogo, input.endBadgeLogo].filter(Boolean))];

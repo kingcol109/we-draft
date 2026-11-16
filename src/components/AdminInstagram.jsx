@@ -50,7 +50,7 @@ import { spotlightSlides, spotlightInput, spotlightCaption, spotlightImageUrls, 
 import { fetchEspnCareer } from "./PlayerEspnStats";
 import { customInput, customSlides, customCaption, customImageUrls, customCutoutUrls, customPlayerIds, customTagSpots, layerBox, newLayer, blankSlide, LAYER_LABELS } from "../utils/instagram/custom";
 import { transferSlides, transferInput, transferCaption, transferImageUrls, transferFrame } from "../utils/instagram/transfer";
-import { shortInput, shortFrame, shortEnd, shortImageUrls, SHORT_W, SHORT_H } from "../utils/instagram/short";
+import { shortInput, shortFrame, shortEnd, shortImageUrls, shortDefaults, SHORT_TEXTS, SHORT_W, SHORT_H } from "../utils/instagram/short";
 import { igApi, uploadVideo, videoInfo } from "../utils/instagram/api";
 import { postToSite, siteTitle, siteShortTitle, siteSlug } from "../utils/instagram/sitePost";
 import { X_MAX_MEDIA, textFromCaption } from "../utils/x/posts";
@@ -1564,6 +1564,12 @@ function ShortMaker({ setMsg, saved, onSaved }) {
   const [school, setSchool] = useState(null);
   const [lines, setLines] = useState(st.lines || "");
   const [kicker, setKicker] = useState(st.kicker || "");
+  // The editor's changes to the elements (short.js shortInput's edits): a
+  // text key → its text ("" hides it), color / color2, showLogo / showBadge /
+  // showEndBadge. A key that's absent is the element's default.
+  const [edits, setEdits] = useState(st.edits || {});
+  const setEdit = (k, v) => setEdits((e) => ({ ...e, [k]: v }));
+  const resetEdit = (k) => setEdits((e) => { const n = { ...e }; delete n[k]; return n; });
   const [svgs, setSvgs] = useState([]);
 
   useEffect(() => {
@@ -1577,13 +1583,15 @@ function ShortMaker({ setMsg, saved, onSaved }) {
     return players.filter((p) => `${p.First} ${p.Last}`.toLowerCase().includes(q)).slice(0, 12);
   }, [players, search]);
 
-  const pick = async (p) => {
+  // keep: a saved Short reopening keeps its edits; picking another player starts clean.
+  const pick = async (p, keep = false) => {
     setSearch("");
     setMsg("");
     try {
       const snap = await getDocs(query(collection(db, "schools"), where("School", "==", p.School || ""), limit(1)));
       setPlayer(p);
       setSchool(snap.docs[0]?.data() || {});
+      if (!keep) setEdits({});
     } catch (e) {
       setMsg(`Couldn't load him: ${e.message}`);
     }
@@ -1591,11 +1599,41 @@ function ShortMaker({ setMsg, saved, onSaved }) {
   // A saved Short: its player.
   useEffect(() => {
     if (!st.playerId) return;
-    getDoc(doc(db, "players", st.playerId)).then((d) => { if (d.exists()) pick({ id: d.id, ...d.data() }); })
+    getDoc(doc(db, "players", st.playerId)).then((d) => { if (d.exists()) pick({ id: d.id, ...d.data() }, true); })
       .catch((e) => setMsg(`Couldn't open it: ${e.message}`));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const input = useMemo(() => (player && school ? shortInput({ player, school, lines, kicker, badgeLogo: WdBadge }) : null), [player, school, lines, kicker]);
+  const input = useMemo(() => (player && school ? shortInput({ player, school, lines, kicker, badgeLogo: WdBadge, edits }) : null), [player, school, lines, kicker, edits]);
+  const defaults = useMemo(() => (player ? shortDefaults(player, school || {}) : {}), [player, school]);
+  // One text element: its field (the default until changed; empty hides it) and ↺.
+  const textRow = ([k, name]) => {
+    const changed = typeof edits[k] === "string";
+    const v = changed ? edits[k] : defaults[k] || "";
+    return (
+      <div key={k}>
+        <div style={{ ...label, display: "flex", alignItems: "center", gap: "6px" }}>
+          {name}
+          {changed && <span style={{ color: v.trim() ? "#0055a5" : "#a52a1e", fontWeight: 900 }}>{v.trim() ? "· edited" : "· hidden"}</span>}
+          {changed && <button onClick={() => resetEdit(k)} title={`Back to "${defaults[k] || ""}"`} style={{ marginLeft: "auto", border: "none", background: "none", color: "#0055a5", fontSize: "10px", fontWeight: 900, cursor: "pointer", padding: 0 }}>↺ RESET</button>}
+        </div>
+        <input value={v} onChange={(e) => setEdit(k, e.target.value)} placeholder="(hidden)" style={field} />
+      </div>
+    );
+  };
+  const colorRow = (k, name, fallback) => (
+    <div>
+      <div style={{ ...label, display: "flex", alignItems: "center" }}>
+        {name}
+        {edits[k] && <button onClick={() => resetEdit(k)} style={{ marginLeft: "auto", border: "none", background: "none", color: "#0055a5", fontSize: "10px", fontWeight: 900, cursor: "pointer", padding: 0 }}>↺ SCHOOL&apos;S</button>}
+      </div>
+      <input type="color" value={edits[k] || input?.[k] || fallback} onChange={(e) => setEdit(k, e.target.value)} style={{ ...field, padding: "2px", height: "34px" }} />
+    </div>
+  );
+  const showRow = (k, name) => (
+    <label key={k} style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "12px", fontWeight: 800, color: "#33415a", marginRight: "12px" }}>
+      <input type="checkbox" checked={edits[k] !== false} onChange={(e) => (e.target.checked ? resetEdit(k) : setEdit(k, false))} /> {name}
+    </label>
+  );
   useEffect(() => {
     if (!input) { setSvgs([]); return undefined; }
     let live = true;
@@ -1634,12 +1672,28 @@ function ShortMaker({ setMsg, saved, onSaved }) {
               <div style={label}>Over the stats (optional)</div>
               <input value={kicker} onChange={(e) => setKicker(e.target.value)} placeholder="VS LSU · WEEK 11" style={field} />
             </div>
+            <div style={{ border: "1px solid #e3e8ef", borderRadius: "8px", padding: "8px 10px", background: "#f8fafc", display: "flex", flexDirection: "column", gap: "8px" }}>
+              <div style={{ display: "flex", alignItems: "center" }}>
+                <div style={{ ...label, marginBottom: 0 }}>Elements · Frame</div>
+                {Object.keys(edits).length > 0 && <button onClick={() => setEdits({})} title="Every element back to its default" style={{ marginLeft: "auto", border: "none", background: "none", color: "#0055a5", fontSize: "10px", fontWeight: 900, cursor: "pointer", padding: 0 }}>RESET ALL</button>}
+              </div>
+              {SHORT_TEXTS.frame.map(textRow)}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+                {colorRow("color", "Main color", "#0055a5")}
+                {colorRow("color2", "Accent color", "#f6a21d")}
+              </div>
+              <div>{showRow("showLogo", "School logo")}{showRow("showBadge", "WD badge")}</div>
+              <div style={{ ...label, marginBottom: 0, marginTop: "4px" }}>Elements · End screen</div>
+              {SHORT_TEXTS.end.map(textRow)}
+              <div>{showRow("showEndBadge", "WD badge")}</div>
+              <div style={{ fontSize: "11px", color: "#8a97ab", fontWeight: 700 }}>Clear a field to hide that element.</div>
+            </div>
             <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
               <button onClick={async () => { await download(0); await new Promise((r) => setTimeout(r, 350)); await download(1); }} disabled={!svgs.length} style={{ ...btn(true), opacity: svgs.length ? 1 : 0.5 }}>Download both</button>
             </div>
             <SaveBar type="short" saveOnly defaultName={`Short · ${player.First} ${player.Last}`} caption="" svgs={svgs} post={post} setPost={setPost} onSaved={onSaved} setMsg={setMsg}
               playerIds={[player.id]} subject={{ kind: "player", playerId: player.id }}
-              stateNow={() => ({ playerId: player.id, lines, kicker })} />
+              stateNow={() => ({ playerId: player.id, lines, kicker, edits })} />
           </>
         )}
       </div>
