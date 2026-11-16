@@ -160,3 +160,19 @@ test("editedStats: ESPN as is, the admin's own numbers, and the highlighted one 
   expect(own.hero).toEqual({ year: "", team: "", tiles: [{ label: "INT", value: "6", rank: "3" }] });
   expect(editedStats(null, { tiles: [], lead: 0 })).toBeNull();
 });
+
+test("the admin picks how many strengths and weaknesses the report shows", () => {
+  const list = (names) => names.map((term) => ({ term, pct: 50 }));
+  const report = { ...scoutingReport({ player, evaluations: [] }), strengths: list(["Hands", "Speed", "Routes", "Size", "YAC"]), weaknesses: list(["Blocking", "Drops", "Stamina", "Hips", "Burst"]) };
+  const slide = (opts) => spotlightSlides(spotlightInput({ player, report, ...opts }), env)[1].svg;
+  const all = slide({});
+  ["HANDS", "YAC", "BLOCKING", "BURST"].forEach((t) => expect(all).toContain(t));
+  const some = slide({ strengthCount: 2, weaknessCount: 4 });
+  ["HANDS", "SPEED", "BLOCKING", "HIPS"].forEach((t) => expect(some).toContain(t));
+  ["ROUTES", "YAC", "BURST"].forEach((t) => expect(some).not.toContain(t));
+  // Out of range: clamped to 1–5.
+  expect(spotlightInput({ player, report, strengthCount: 0, weaknessCount: 9 })).toMatchObject({ strengthCount: 5, weaknessCount: 5 });
+  expect(spotlightInput({ player, report, strengthCount: -2 }).strengthCount).toBe(1);
+  // The caption names no more than the slide shows.
+  expect(spotlightCaption(spotlightInput({ player, report, strengthCount: 1 }))).toContain("Top strengths: Hands.");
+});

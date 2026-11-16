@@ -133,9 +133,13 @@ export function scoutingReport({ player, evaluations = [], classSnap = null, nfl
 // posRank, posOf, classRank, classOf, strengths / weaknesses: [{ term, pct }],
 // bars (show the trait bars — 5+ evaluations), fits: [{ name, logo }] };
 // advance: his class is past the next draft; showRanks / showFits: the
-// report's class rank and NFL fits.
-export function spotlightInput({ player, school = {}, photo = null, headshot = "", report = {}, advance = false, brandLogo = "", badgeLogo = "", address = "", look = "wash", accent = "", badge = "crest", showRanks = true, showFits = false, highlights = false, stats = null, showStats = true, classLogo = "", jersey = "" }) {
+// report's class rank and NFL fits; strengthCount / weaknessCount: how many
+// of his top traits the report lists (1–MAX_TRAITS, all by default).
+export const MAX_TRAITS = 5;
+const traitCount = (n) => Math.max(1, Math.min(MAX_TRAITS, Math.round(Number(n)) || MAX_TRAITS));
+export function spotlightInput({ player, school = {}, photo = null, headshot = "", report = {}, advance = false, brandLogo = "", badgeLogo = "", address = "", look = "wash", accent = "", badge = "crest", showRanks = true, showFits = false, highlights = false, stats = null, showStats = true, classLogo = "", jersey = "", strengthCount = MAX_TRAITS, weaknessCount = MAX_TRAITS }) {
   return {
+    strengthCount: traitCount(strengthCount), weaknessCount: traitCount(weaknessCount),
     first: player?.First || "", last: player?.Last || "", pos: player?.Position || "", school: player?.School || "", year: String(player?.Eligible || ""),
     height: heightText(player?.Height), weight: player?.Weight ? String(player.Weight) : "",
     measurements: measurementsOf(player || {}),
@@ -427,9 +431,13 @@ function reportSvg(env, input, i, total) {
   const cw = W - x0 * 2;
   const gap = 18;
   const halfW = (cw - gap) / 2;
-  const strengths = (r.strengths || []).slice(0, 5);
-  const weaknesses = (r.weaknesses || []).slice(0, 5);
-  const traitRows = Math.max(3, strengths.length, weaknesses.length);
+  // As many as the admin picked (input.strengthCount / weaknessCount). The
+  // panels hold room for three at least, unless fewer were asked for.
+  const sMax = input.strengthCount ?? MAX_TRAITS;
+  const wMax = input.weaknessCount ?? MAX_TRAITS;
+  const strengths = (r.strengths || []).slice(0, sMax);
+  const weaknesses = (r.weaknesses || []).slice(0, wMax);
+  const traitRows = Math.max(Math.min(3, Math.max(sMax, wMax)), strengths.length, weaknesses.length);
   const fits = input.showFits ? (r.fits || []).filter((f) => f.logo && hasImage(env, f.logo)).slice(0, 4) : [];
   const meas = (input.measurements || []).slice(0, 8);
   const ranks = input.showRanks ? [
@@ -1057,11 +1065,12 @@ export function spotlightCaption(input) {
   const name = `${input.first} ${input.last}`.trim();
   const tag = (s) => String(s || "").replace(/[^A-Za-z0-9]/g, "");
   const g = input.report?.grade;
-  const traits = (list) => (list || []).slice(0, 3).map((t) => t.term).join(", ");
+  // Up to three, never more than the slide shows.
+  const traits = (list, n = MAX_TRAITS) => (list || []).slice(0, Math.min(3, n)).map((t) => t.term).join(", ");
   const grade = [
     g?.avg != null ? `We-Draft.com Community Grade: ${g.label}.` : "",
-    input.report?.strengths?.length ? `Top strengths: ${traits(input.report.strengths)}.` : "",
-    input.report?.weaknesses?.length ? `Top weaknesses: ${traits(input.report.weaknesses)}.` : "",
+    input.report?.strengths?.length ? `Top strengths: ${traits(input.report.strengths, input.strengthCount)}.` : "",
+    input.report?.weaknesses?.length ? `Top weaknesses: ${traits(input.report.weaknesses, input.weaknessCount)}.` : "",
   ].filter(Boolean).join("\n");
   return [
     `Today's Player Spotlight: ${name}, ${[input.pos, input.school].filter(Boolean).join(", ")}`,

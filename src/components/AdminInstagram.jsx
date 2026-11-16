@@ -46,7 +46,7 @@ import { NFL_TEAMS } from "../utils/coachHistory";
 import {
   IG_W, IG_H, IG_MAX_SLIDES, mockSlides, mockInput, mockCaption, mockSlidePlan, mockTagSlides, playerPost, playerInput, playerCaption,
 } from "../utils/instagram/posts";
-import { spotlightSlides, spotlightInput, spotlightCaption, spotlightImageUrls, scoutingReport, spotlightFrame, espnStats, editedStats, statsSeed, MAX_STAT_TILES } from "../utils/instagram/spotlight";
+import { spotlightSlides, spotlightInput, spotlightCaption, spotlightImageUrls, scoutingReport, spotlightFrame, espnStats, editedStats, statsSeed, MAX_STAT_TILES, MAX_TRAITS } from "../utils/instagram/spotlight";
 import { fetchEspnCareer } from "./PlayerEspnStats";
 import { customInput, customSlides, customCaption, customImageUrls, customCutoutUrls, customPlayerIds, customTagSpots, layerBox, newLayer, blankSlide, LAYER_LABELS } from "../utils/instagram/custom";
 import { transferSlides, transferInput, transferCaption, transferImageUrls, transferFrame } from "../utils/instagram/transfer";
@@ -1229,6 +1229,9 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
   // The report's class rank (in by default) and NFL fits (out by default).
   const [showRanks, setShowRanks] = useState(true);
   const [showFits, setShowFits] = useState(false);
+  // How many strengths / weaknesses the report lists (1–MAX_TRAITS).
+  const [strengthCount, setStrengthCount] = useState(MAX_TRAITS);
+  const [weaknessCount, setWeaknessCount] = useState(MAX_TRAITS);
   // The stats slide (his ESPN college stats), in when he has them.
   const [showStats, setShowStats] = useState(true);
   // The admin's own stats (utils/instagram/spotlight.js editedStats): null =
@@ -1311,6 +1314,8 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
         setAccent(restore.accent || "");
         setShowRanks(restore.showRanks !== false);
         setShowFits(!!restore.showFits);
+        setStrengthCount(restore.strengthCount || MAX_TRAITS);
+        setWeaknessCount(restore.weaknessCount || MAX_TRAITS);
         setShowStats(restore.showStats !== false);
         setStatEdit(restore.statEdit && Array.isArray(restore.statEdit.tiles) ? restore.statEdit : null);
         setVideos(Array.isArray(restore.videos) ? restore.videos.filter((v) => v?.path) : []);
@@ -1325,9 +1330,9 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
   };
 
   const input = useMemo(() => (player && data ? {
-    ...spotlightInput({ player, school: data.school, photo: photoUrl ? { url: photoUrl } : null, headshot: data.headshot, report: data.report, advance, brandLogo: WdLogo, badgeLogo: WdBadge, look, accent, badge, showRanks, showFits, highlights: videos.length > 0, stats: editedStats(data.stats, statEdit), showStats, classLogo: advance ? CLASS_LOGOS[player.Eligible] || "" : "", jersey: data.jersey }),
+    ...spotlightInput({ player, school: data.school, photo: photoUrl ? { url: photoUrl } : null, headshot: data.headshot, report: data.report, advance, brandLogo: WdLogo, badgeLogo: WdBadge, look, accent, badge, showRanks, showFits, highlights: videos.length > 0, stats: editedStats(data.stats, statEdit), showStats, classLogo: advance ? CLASS_LOGOS[player.Eligible] || "" : "", jersey: data.jersey, strengthCount, weaknessCount }),
     focus, adjust,
-  } : null), [player, data, photoUrl, advance, focus, adjust, look, accent, badge, showRanks, showFits, showStats, statEdit, videos.length]);
+  } : null), [player, data, photoUrl, advance, focus, adjust, look, accent, badge, showRanks, showFits, showStats, statEdit, videos.length, strengthCount, weaknessCount]);
   const cap = useCaption(saved, useMemo(() => (input ? spotlightCaption(input) : ""), [input]));
 
   useEffect(() => {
@@ -1469,6 +1474,20 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
                 ))}
               </div>
             </div>
+            <div>
+              <div style={label}>Scouting report traits</div>
+              <div style={{ display: "flex", gap: "14px", flexWrap: "wrap" }}>
+                {[["Strengths", strengthCount, setStrengthCount, data.report.strengths], ["Weaknesses", weaknessCount, setWeaknessCount, data.report.weaknesses]].map(([t, n, set, have]) => (
+                  <label key={t} style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: 800, color: "#33415a" }}>
+                    {t}
+                    <select value={n} onChange={(e) => set(Number(e.target.value))} style={{ ...field, width: "auto", padding: "3px 6px" }}>
+                      {Array.from({ length: MAX_TRAITS }, (_, i) => i + 1).map((k) => <option key={k} value={k}>{k}</option>)}
+                    </select>
+                    <span style={{ fontWeight: 700, color: "#8a97ab" }}>of {(have || []).length}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
             <StatsEditor espn={data.stats} edit={statEdit} onChange={setStatEdit} />
             <div style={{ fontSize: "12px", fontWeight: 700, color: "#5b6b84" }}>
               Report: {data.report.grade.avg == null ? "Watchlist" : data.report.grade.label} · {data.report.evals} evaluation{data.report.evals === 1 ? "" : "s"}
@@ -1514,7 +1533,7 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
             <SaveBar type="spotlight" defaultName={`Spotlight · ${player.First} ${player.Last}`} caption={cap.caption} svgs={svgs} post={post} setPost={setPost} onSaved={onSaved} setMsg={setMsg}
               playerIds={[player.id]} subject={{ kind: "player", playerId: player.id }}
               videos={videos.map((v, k) => ({ at: 1 + k, path: v.path }))} hold={uploading ? "Wait for the video to finish uploading." : ""}
-              stateNow={() => ({ playerId: player.id, photoUrl, focus, advance, adjust, look, accent, badge, showRanks, showFits, showStats, statEdit, videos })} />
+              stateNow={() => ({ playerId: player.id, photoUrl, focus, advance, adjust, look, accent, badge, showRanks, showFits, strengthCount, weaknessCount, showStats, statEdit, videos })} />
             <CaptionBox c={cap} />
           </>
         )}
