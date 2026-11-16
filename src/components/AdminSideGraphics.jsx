@@ -150,21 +150,56 @@ export function espnStats(league, athleteId) {
   return statsCache[key];
 }
 
-// A season's stats → [{ key, label, value, rank? }]: the named ones in
-// STAT_NAMES order, then the rest; zeros (and games played) last.
-// ranks: CFBD's seasonRanks for that season ({ [category]: { [stat]: "12" | "T-12" } }).
-function statOptions(espn, year, ranks = null) {
+// An athlete's games in one season (ESPN's game log), oldest first:
+// [{ id, date, week, post, at: "vs" | "@", opp, result, score,
+// stats: { [category]: { [name]: "348" } } }]. The log's names/labels run
+// category by category (categories[].count each), the same ESPN stat
+// names as the season line.
+const gamelogCache = {};
+export function espnGamelog(league, athleteId, season) {
+  const key = `${league}/${athleteId}/${season || ""}`;
+  if (!gamelogCache[key]) {
+    gamelogCache[key] = fetch(`${ESPN}/common/v3/sports/football/${league}/athletes/${athleteId}/gamelog${season ? `?season=${season}` : ""}`).then((r) => r.json()).then((j) => {
+      const names = j.names || [];
+      const catOf = (j.categories || []).flatMap((c) => Array(c.count || 0).fill(c.name));
+      const games = new Map();
+      (j.seasonTypes || []).forEach((st) => (st.categories || []).filter((c) => c.type === "event").forEach((c) => (c.events || []).forEach((ge) => {
+        const e = j.events?.[ge.eventId];
+        if (!e || games.has(String(ge.eventId))) return;
+        const stats = {};
+        (ge.stats || []).forEach((v, i) => { if (catOf[i] && names[i]) (stats[catOf[i]] ||= {})[names[i]] = v; });
+        games.set(String(ge.eventId), {
+          id: String(ge.eventId), date: e.gameDate || "", week: e.week, post: /post/i.test(st.displayName || ""),
+          at: e.atVs === "@" ? "@" : "vs", opp: e.opponent?.abbreviation || e.opponent?.displayName || "",
+          result: e.gameResult || "", score: e.score || "", stats,
+        });
+      })));
+      return [...games.values()].sort((a, b) => a.date.localeCompare(b.date));
+    });
+    gamelogCache[key].catch(() => { delete gamelogCache[key]; });
+  }
+  return gamelogCache[key];
+}
+// A game in the picker ("Wk 3 · @ DEN · W 31-10") and as the stats title ("@ DEN · W 31-10").
+const gameTitle = (g) => [`${g.at === "@" ? "@" : "VS"} ${g.opp}`, [g.result, g.score].filter(Boolean).join(" ")].filter(Boolean).join(" · ");
+const gameLabel = (g) => `${g.post ? "Postseason" : g.week ? `Wk ${g.week}` : g.date.slice(5, 10)} · ${gameTitle(g)}`;
+
+// A season's (or one game's) stats → [{ key, label, value, rank? }]: the
+// named ones in STAT_NAMES order, then the rest; zeros (and games played)
+// last. ranks: CFBD's seasonRanks for that season ({ [category]: { [stat]:
+// "12" | "T-12" } }) — a season's only. game: one of espnGamelog's.
+function statOptions(espn, year, ranks = null, game = null) {
   const order = Object.keys(STAT_NAMES);
   const rank = (o) => (order.includes(o.key) ? order.indexOf(o.key) : order.length);
-  const all = Object.entries(espn?.cats || {}).filter(([cat]) => cat !== "scoring").flatMap(([cat, c]) => {
-    const line = c.seasons[year]?.stats;
-    if (!line) return [];
+  const lines = game ? game.stats : Object.fromEntries(Object.entries(espn?.cats || {}).map(([cat, c]) => [cat, c.seasons[year]?.stats]));
+  const all = Object.entries(lines).filter(([cat, line]) => cat !== "scoring" && line).flatMap(([cat, line]) => {
+    const labels = espn?.cats?.[cat]?.labels || {};
     return Object.entries(line).filter(([name]) => name !== "gamesPlayed").map(([name, v]) => {
       const key = `${cat}.${name}`;
       const [rc, rs] = (RANK_KEY[key] || "").split(".");
       const r = ranks?.[rc]?.[rs] || "";
       return {
-        key, label: STAT_NAMES[key] || `${CAT_SHORT[cat] || cat} ${c.labels[name] || name}`,
+        key, label: STAT_NAMES[key] || `${CAT_SHORT[cat] || cat} ${labels[name] || name}`,
         value: name === "completionPct" ? `${v}%` : String(v), zero: !statNumber(v), ...(r ? { rank: r } : {}),
       };
     });
@@ -672,6 +707,9 @@ export default function AdminSideGraphics() {
   const [batch, setBatch] = useState("");
   // The elements whose X / Y are open beside their fields ({ [element]: true }).
   const [moving, setMoving] = useState({});
+  // The season's games (espnGamelog) for the season card's "Stats from"; null while loading.
+  const [games, setGames] = useState([]);
+  const gameList = games || [];
   const canvasRef = useRef(null);
 
   const preset = (presets || []).find((p) => p.id === presetId) || null;
@@ -712,6 +750,16 @@ export default function AdminSideGraphics() {
     setRoster([]);
     fetchEspnRoster(nflTeam).then(setRoster).catch((e) => setMsg(`Couldn't load the roster: ${e.message}`));
   }, [league, nflTeam]);
+
+  // His games that season, once a player is on a season card.
+  useEffect(() => {
+    const a = card.athlete;
+    if (kind !== "season" || !a?.id || !card.season) { setGames([]); return; }
+    setGames(null); // loading
+    let live = true;
+    espnGamelog(a.league, a.id, card.season).then((g) => { if (live) setGames(g); }).catch(() => { if (live) setGames([]); });
+    return () => { live = false; };
+  }, [kind, card.athlete, card.season]);
 
   // Redraw on every change.
   useEffect(() => {
@@ -757,14 +805,19 @@ export default function AdminSideGraphics() {
     const p = list.find((x) => x.id === id);
     if (!p) return;
     setPresetId(id);
+    const titleFor = (c) => (p.settings.statsTitle || "").replace("{season}", c.season || "");
     setCard((c) => ({
-      ...c, ...BASE, ...p.settings, statsTitle: (p.settings.statsTitle || "").replace("{season}", c.season || ""),
+      ...c, ...BASE, ...p.settings,
+      // On a single game, its title stays; the template's waits for the season.
+      ...(c.gameId ? { statsTitle: c.statsTitle, seasonTitle: titleFor(c) } : { statsTitle: titleFor(c) }),
       // Into a custom list from anything else: a fresh one to title and fill.
       ...(p.kind === "list" && kind !== "list" ? { line1: "2029", line2: "WATCHLIST", sub: "", c1: BLUE, c2: GOLD, classList: [] } : {}),
     }));
   };
   const layoutNow = () => {
     const d = Object.fromEntries(LAYOUT_KEYS.map((key) => [key, card[key]]));
+    // On a single game, the template keeps the season's title, not the game's.
+    if (card.gameId && "statsTitle" in d) d.statsTitle = card.seasonTitle ?? d.statsTitle;
     // The stats title keeps its {season} placeholder when it's the season's.
     if (card.season && typeof d.statsTitle === "string") d.statsTitle = d.statsTitle.replace(card.season, "{season}");
     return d;
@@ -794,12 +847,15 @@ export default function AdminSideGraphics() {
 
   // A player's ESPN stats onto the card: the season's options and picks, and
   // the career table in his position's group.
-  const withStats = (espn, pos, ranks, rankYear) => {
+  // athlete: { league, id } — his ESPN id, for the game log.
+  const withStats = (espn, pos, ranks, rankYear, athlete) => {
     const year = espn?.years?.[espn.years.length - 1] || "";
-    const options = espn ? statOptions(espn, year, year === rankYear ? ranks : null) : [];
+    const seasonRanks = year === rankYear ? ranks : null;
+    const options = espn ? statOptions(espn, year, seasonRanks) : [];
     const groups = careerGroups(espn, pos);
     return {
       espn, pos, season: year, statOptions: options, stats: defaultStats(options, pos),
+      athlete: athlete || null, seasonRanks, gameId: "", seasonTitle: undefined,
       careerCat: groups[0] || "", career: groups[0] ? careerTable(espn, groups[0], pos) : null,
       statsTitle: (preset?.settings.statsTitle || BASE.statsTitle).replace("{season}", year),
     };
@@ -825,7 +881,7 @@ export default function AdminSideGraphics() {
         ...c, ...BASE, ...(preset?.settings || {}),
         line1: p.First, line2: p.Last, sub: [p.Position, p.School].filter(Boolean).join(" · "),
         c1: s.Color1 || BLUE, c2: s.Color2 || GOLD, logo: s.Logo1 || s.LogoDark || "", headshot: photo?.headshot?.url || ath?.headshot || "",
-        ...withStats(espn, p.Position, ranks[rankYear], rankYear),
+        ...withStats(espn, p.Position, ranks[rankYear], rankYear, ath ? { league: "college-football", id: ath.id } : null),
       }));
       setEditing({});
       setMsg(!ath ? "Couldn't find him on his school's ESPN roster — add custom stats." : espn?.years?.length ? "" : "ESPN has no stats for him yet — add custom stats.");
@@ -843,11 +899,35 @@ export default function AdminSideGraphics() {
       ...c, ...BASE, ...(preset?.settings || {}),
       line1: a.firstName, line2: a.lastName, sub: [a.position, teamNameFromAbbr(nflTeam)].filter(Boolean).join(" · "),
       c1: b.Color1 || BLUE, c2: b.Color2 || GOLD, logo: b.Logo1 || b.LogoDark || "", headshot: a.headshot || "",
-      ...withStats(espn, a.position, null, ""),
+      ...withStats(espn, a.position, null, "", { league: "nfl", id: String(a.id) }),
     }));
     setEditing({});
     setMsg(espn?.years?.length ? "" : "ESPN has no stats for him yet — add custom stats.");
   };
+
+  // Stats from the whole season ("") or one game: the options switch, the
+  // stats already picked keep their spots with the new numbers (custom ones
+  // stay as typed), and the title becomes the game's ("@ DEN · W 31-10") —
+  // the season's comes back with the season.
+  const pickGame = (id) => setCard((c) => {
+    const game = gameList.find((g) => g.id === id) || null;
+    const options = statOptions(c.espn, c.season, game ? null : c.seasonRanks, game);
+    const kept = c.stats.map((s) => {
+      if (s.custom) return s;
+      const o = options.find((x) => x.key === s.key);
+      if (!o) return null;
+      // A game has no national rank; showRank stays for the way back to the season.
+      const { rank, ...rest } = s; // eslint-disable-line no-unused-vars
+      return { ...rest, value: o.value, ...(o.rank ? { rank: o.rank } : {}) };
+    }).filter(Boolean);
+    const seasonTitle = c.gameId ? c.seasonTitle : c.statsTitle;
+    return {
+      ...c, gameId: game ? id : "", statOptions: options,
+      stats: kept.some((s) => !s.custom) ? kept : [...defaultStats(options, c.pos), ...kept.filter((s) => s.custom)].slice(0, STATS),
+      statsTitle: game ? gameTitle(game) : (seasonTitle ?? c.statsTitle), seasonTitle: game ? seasonTitle : undefined,
+    };
+  });
+  const pickedGame = gameList.find((g) => g.id === card.gameId) || null;
 
   const setCareerCat = (cat) => setCard((c) => ({ ...c, careerCat: cat, career: careerTable(c.espn, cat, c.pos) }));
 
@@ -937,7 +1017,8 @@ export default function AdminSideGraphics() {
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
       const base = [card.line1, card.line2].filter(Boolean).join("-").toLowerCase().replace(/[^a-z0-9-]+/g, "-") || "side-graphic";
-      a.download = `${base}-${kind}.png`;
+      const game = kind === "season" && pickedGame ? `-${pickedGame.at === "@" ? "at" : "vs"}-${pickedGame.opp.toLowerCase().replace(/[^a-z0-9]+/g, "-")}` : "";
+      a.download = `${base}-${kind}${game}.png`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 5000);
     }, "image/png");
@@ -1150,6 +1231,16 @@ export default function AdminSideGraphics() {
 
         {kind === "season" && (
           <div>
+            {card.athlete && card.season && (
+              <div style={{ marginBottom: "10px" }}>
+                <div style={label}>Stats from</div>
+                <select value={card.gameId || ""} onChange={(e) => pickGame(e.target.value)} style={field}>
+                  <option value="">{card.season} season</option>
+                  {gameList.map((g) => <option key={g.id} value={g.id}>{gameLabel(g)}</option>)}
+                </select>
+                {(games === null || !games.length) && <div style={{ fontSize: "11px", color: "#8a97ab", fontWeight: 700, marginTop: "3px" }}>{games === null ? `Loading his ${card.season} games…` : `ESPN has no ${card.season} games for him.`}</div>}
+              </div>
+            )}
             <div style={label}>Stats on the card · {card.stats.length}/{STATS}</div>
             {card.stats.length === 0 && <div style={{ fontSize: "12px", color: "#8a97ab", fontWeight: 700, marginBottom: "6px" }}>None picked — choose from his season below{card.statOptions.length ? "" : ", or add a custom stat"}.</div>}
             {card.stats.map((st, i) => (
@@ -1181,7 +1272,7 @@ export default function AdminSideGraphics() {
             ))}
             {card.statOptions.length > 0 && (
               <>
-                <div style={{ ...label, marginTop: "8px" }}>His {card.season} season (ESPN) · click to pick</div>
+                <div style={{ ...label, marginTop: "8px" }}>{pickedGame ? `His game ${gameLabel(pickedGame)}` : `His ${card.season} season`} (ESPN) · click to pick</div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: "5px", maxHeight: "170px", overflowY: "auto" }}>
                   {card.statOptions.map((o) => {
                     const on = card.stats.some((st) => st.key === o.key);
