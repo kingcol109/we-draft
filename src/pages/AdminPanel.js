@@ -26,6 +26,9 @@ import CfbUniverseSearch from "../components/CfbUniverseSearch";
 import AdminTransferPortal from "../components/AdminTransferPortal";
 import AdminPortalGrades from "../components/AdminPortalGrades";
 import AdminPortalSim from "../components/AdminPortalSim";
+import AdminPortalTargets from "../components/AdminPortalTargets";
+import AdminPortalPages from "../components/AdminPortalPages";
+import AdminPortalManual from "../components/AdminPortalManual";
 import AdminEligibility, { classChange } from "../components/AdminEligibility";
 import { activePortalSeason, currentDraftClass, classTag, firstClassFor } from "../utils/eligibility";
 import AdminSubPositions from "../components/AdminSubPositions";
@@ -332,10 +335,16 @@ const PLAYER_GROUPS = [
   },
   {
     // The Transfer Portal: transfer stars for every player
-    // (components/AdminPortalGrades.jsx) and the CFBD portal sync with its
+    // (components/AdminPortalGrades.jsx), manual portal moves while CFBD
+    // lags (AdminPortalManual.jsx), recommended targets per team
+    // (AdminPortalTargets.jsx), the public team pages' data + 2027 signee
+    // import (AdminPortalPages.jsx) and the CFBD portal sync with its
     // recommended player updates (AdminTransferPortal.js).
     key: "transfer", label: "Transfer Portal", tabs: [
       { key: "grades", label: "Grades" },
+      { key: "portalManual", label: "Manual Entries" },
+      { key: "portalTargets", label: "Targets" },
+      { key: "portalPages", label: "Team Pages" },
       { key: "portal", label: "Portal Sync" },
       { key: "portalSim", label: "Portal Sim" },
     ],
@@ -1566,6 +1575,12 @@ function PlayerDataSection() {
         <AdminPortalGrades allPlayers={allPlayers} />
       ) : playerDataTab === "portalSim" ? (
         <AdminPortalSim />
+      ) : playerDataTab === "portalTargets" ? (
+        <AdminPortalTargets allPlayers={allPlayers} />
+      ) : playerDataTab === "portalPages" ? (
+        <AdminPortalPages />
+      ) : playerDataTab === "portalManual" ? (
+        <AdminPortalManual allPlayers={allPlayers} />
       ) : playerDataTab === "eligibility" ? (
         <AdminEligibility allPlayers={allPlayers} setAllPlayers={setAllPlayers} />
       ) : playerDataTab === "recruits" ? (
@@ -5980,6 +5995,9 @@ function RecruitsSection() {
     });
   }, [allRecruits, searchQuery, selectedClasses, selectedPositions, selectedStates, selectedCommitments, selectedGrades, selectedGroups, groupNamesByRecruit]);
 
+  const [recruitsShown, setRecruitsShown] = useState(300);
+  useEffect(() => { setRecruitsShown(300); }, [filtered]);
+
   const isNew = selectedRecruit?.isNew === true;
 
   const startNewRecruit = () => {
@@ -6221,6 +6239,20 @@ function RecruitsSection() {
       // Fresh slugs (not the list loaded with the page), so two admins can't collide.
       const playersSnap = await getDocs(collection(db, "players"));
       const existingSlugs = new Set(playersSnap.docs.map((d) => d.data().Slug).filter(Boolean));
+      // Already a We-Draft player in this class by the same name (added by
+      // hand or from 247 screenshots): link him, never a second page.
+      const draftClass = draftClassForRecruitClass(formState.RecruitClass);
+      const twin = playersSnap.docs.filter((d) => d.data().Eligible === draftClass && personKey(`${d.data().First} ${d.data().Last}`) === personKey(`${formState.First} ${formState.Last}`));
+      if (twin.length === 1 && window.confirm(`${formState.First} ${formState.Last} already has a class of ${draftClass} page (${twin[0].data().Slug}). Link this recruit to it instead of creating a new one?`)) {
+        const linkFields = { promotedPlayerId: twin[0].id, promotedSlug: twin[0].data().Slug || "", promotedAt: serverTimestamp(), linkedFrom: "admin" };
+        await updateDoc(doc(db, "recruits", selectedRecruit.id), linkFields);
+        const linked = { ...selectedRecruit, ...formState, ...linkFields };
+        setAllRecruits((prev) => prev.map((r) => (r.id === linked.id ? linked : r)));
+        setSelectedRecruit(linked);
+        setFormState(linked);
+        setSaveMessage(`Linked to the existing page "${linkFields.promotedSlug}".`);
+        return;
+      }
       const { payload, slug } = recruitToPlayer({ ...selectedRecruit, ...formState }, { highSchools: highSchoolOptions, takenSlugs: existingSlugs });
       const newPlayerRef = await addDoc(collection(db, "players"), { ...payload, updatedAt: serverTimestamp() });
 
@@ -6251,7 +6283,11 @@ function RecruitsSection() {
   // "Promote N" is clicked; then players are created in batches (each with
   // its recruit's promotedPlayerId in the same batch, so a failure never
   // leaves one without the other).
-  const [classPlan, setClassPlan] = useState(null); // { cls, rows }
+  const [classPlan, setClassPlan] = useState(null); // { cls, rows, links, imports }
+  // CFBD imports (Source "cfbd" — Transfer Portal → Team Pages) stay out of
+  // a class promotion unless ticked in: promoting the whole signing class
+  // would create thousands of pages.
+  const [includeImports, setIncludeImports] = useState(false);
   const [classPromoting, setClassPromoting] = useState(false);
   const [classMessage, setClassMessage] = useState(""); // shown in the list, not the editor
   // Recruits' saved Instagram handles → Pending accounts in Admin → Social,
@@ -6274,20 +6310,46 @@ function RecruitsSection() {
   const igSummary = (r) => (r.added || r.failed.length
     ? ` Instagram: ${r.added} added to Social as Pending${r.failed.length ? `; ${r.failed.length} not added (${r.failed.join("; ")})` : ""}.`
     : "");
-  const planClass = async (cls) => {
+  const planClass = async (cls, withImports = includeImports) => {
     setClassMessage("");
     const playersSnap = await getDocs(collection(db, "players"));
-    const players = playersSnap.docs.map((d) => d.data());
+    const players = playersSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
     const taken = new Set(players.map((p) => p.Slug).filter(Boolean));
-    const rows = allRecruits
-      .filter((r) => r.RecruitClass === cls && !r.promotedPlayerId)
+    const draftClass = draftClassForRecruitClass(cls);
+    const open = allRecruits.filter((r) => r.RecruitClass === cls && !r.promotedPlayerId);
+    const imports = open.filter((r) => r.Source === "cfbd").length;
+    const links = [];
+    const rows = open
+      .filter((r) => withImports || r.Source !== "cfbd")
+      .filter((r) => {
+        // Already a page in this class by his name: link, don't create.
+        const twin = players.filter((p) => p.Eligible === draftClass && personKey(`${p.First} ${p.Last}`) === personKey(`${r.First} ${r.Last}`));
+        if (twin.length === 1) { links.push({ r, player: twin[0] }); return false; }
+        return true;
+      })
       .sort((a, b) => (a.Last || "").localeCompare(b.Last || ""))
       .map((r) => ({ r, ...recruitToPlayer(r, { highSchools: highSchoolOptions, takenSlugs: taken, players }) }));
-    setClassPlan({ cls, rows, already: allRecruits.filter((r) => r.RecruitClass === cls && r.promotedPlayerId).length });
+    setClassPlan({ cls, rows, links, imports, already: allRecruits.filter((r) => r.RecruitClass === cls && r.promotedPlayerId).length });
   };
   const promoteClass = async () => {
     const rows = classPlan?.rows || [];
-    if (!rows.length) return;
+    const links = classPlan?.links || [];
+    if (!rows.length && !links.length) return;
+    if (!rows.length) {
+      // Only links to make.
+      const batch = writeBatch(db);
+      const done = {};
+      links.forEach(({ r, player }) => {
+        const f = { promotedPlayerId: player.id, promotedSlug: player.Slug || "", linkedFrom: "admin" };
+        batch.update(doc(db, "recruits", r.id), { ...f, promotedAt: serverTimestamp() });
+        done[r.id] = f;
+      });
+      await batch.commit();
+      setAllRecruits((prev) => prev.map((r) => (done[r.id] ? { ...r, ...done[r.id] } : r)));
+      setClassMessage(`Linked ${links.length} recruits to their existing pages.`);
+      setClassPlan(null);
+      return;
+    }
     if (!window.confirm(`Create ${rows.length} player pages for the ${classPlan.cls} recruiting class (draft class ${draftClassForRecruitClass(classPlan.cls)})?\n\n${isUnreleasedYear(draftClassForRecruitClass(classPlan.cls)) ? "The class is unreleased: only admins can see these pages until it launches." : "They're public as soon as they're created."}`)) return;
     setClassPromoting(true);
     const done = {};
@@ -6299,6 +6361,14 @@ function RecruitsSection() {
           batch.set(ref, { ...payload, updatedAt: serverTimestamp() });
           batch.update(doc(db, "recruits", r.id), { promotedPlayerId: ref.id, promotedSlug: slug, promotedAt: serverTimestamp() });
           done[r.id] = { promotedPlayerId: ref.id, promotedSlug: slug };
+        });
+        await batch.commit();
+      }
+      if (links.length) {
+        const batch = writeBatch(db);
+        links.forEach(({ r, player }) => {
+          batch.update(doc(db, "recruits", r.id), { promotedPlayerId: player.id, promotedSlug: player.Slug || "", promotedAt: serverTimestamp(), linkedFrom: "admin" });
+          done[r.id] = { promotedPlayerId: player.id, promotedSlug: player.Slug || "" };
         });
         await batch.commit();
       }
@@ -6354,14 +6424,21 @@ function RecruitsSection() {
                 Promote the {classPlan.cls} class → draft class {draftClassForRecruitClass(classPlan.cls)}
               </div>
               <span style={{ fontSize: "12px", fontWeight: 800, color: "#666" }}>
-                {classPlan.rows.length} to create{classPlan.already ? ` · ${classPlan.already} already promoted` : ""} · {classPlan.rows.filter((x) => x.hs).length} high schools matched · {classPlan.rows.filter((x) => x.warnings.length).length} to check
+                {classPlan.rows.length} to create{classPlan.links?.length ? ` · ${classPlan.links.length} to link to existing pages` : ""}{classPlan.already ? ` · ${classPlan.already} already promoted` : ""} · {classPlan.rows.filter((x) => x.hs).length} high schools matched · {classPlan.rows.filter((x) => x.warnings.length).length} to check
               </span>
+              {classPlan.imports > 0 && (
+                <label style={{ display: "flex", alignItems: "center", gap: "5px", fontSize: "12px", fontWeight: 800, color: "#8a5a00" }}>
+                  <input type="checkbox" checked={includeImports} disabled={classPromoting}
+                    onChange={(e) => { setIncludeImports(e.target.checked); planClass(classPlan.cls, e.target.checked); }} />
+                  Include {classPlan.imports} CFBD imports
+                </label>
+              )}
               <span style={{ marginLeft: "auto", display: "flex", gap: "6px" }}>
                 <button type="button" onClick={() => setClassPlan(null)} disabled={classPromoting}
                   style={{ background: "#fff", color: "#666", border: "2px solid #ccc", borderRadius: "6px", padding: "5px 10px", fontWeight: 900, fontSize: "11px", textTransform: "uppercase", cursor: "pointer" }}>Cancel</button>
-                <button type="button" onClick={promoteClass} disabled={classPromoting || !classPlan.rows.length}
+                <button type="button" onClick={promoteClass} disabled={classPromoting || !(classPlan.rows.length || classPlan.links?.length)}
                   style={{ background: "#2e7d32", color: "#fff", border: "none", borderRadius: "6px", padding: "6px 12px", fontWeight: 900, fontSize: "11px", textTransform: "uppercase", cursor: "pointer", opacity: classPromoting ? 0.6 : 1 }}>
-                  {classPromoting ? "Promoting…" : `Promote ${classPlan.rows.length}`}
+                  {classPromoting ? "Promoting…" : classPlan.rows.length ? `Promote ${classPlan.rows.length}${classPlan.links?.length ? ` · link ${classPlan.links.length}` : ""}` : `Link ${classPlan.links?.length || 0}`}
                 </button>
               </span>
             </div>
@@ -6495,9 +6572,10 @@ function RecruitsSection() {
         ) : (
           <div style={{ maxHeight: "600px", overflowY: "auto" }}>
             <div style={{ padding: "8px 14px", fontSize: "11px", fontWeight: 700, color: "#aaa" }}>
-              {filtered.length} recruit{filtered.length !== 1 ? "s" : ""}
+              {filtered.length} recruit{filtered.length !== 1 ? "s" : ""}{filtered.length > recruitsShown ? ` · showing ${recruitsShown}` : ""}
             </div>
-            {filtered.map((r) => {
+            {/* The CFBD signee import puts thousands here — render a page at a time. */}
+            {filtered.slice(0, recruitsShown).map((r) => {
               const isSelected = selectedRecruit?.id === r.id;
               return (
                 <div
@@ -6556,6 +6634,12 @@ function RecruitsSection() {
                 </div>
               );
             })}
+            {filtered.length > recruitsShown && (
+              <button type="button" onClick={() => setRecruitsShown((n) => n + 300)}
+                style={{ display: "block", width: "100%", padding: "10px", border: "none", borderTop: "1px solid #eee", background: "#f6f9fd", color: BLUE, fontWeight: 900, fontSize: "12px", textTransform: "uppercase", cursor: "pointer" }}>
+                Show more ({filtered.length - recruitsShown} left)
+              </button>
+            )}
           </div>
         )}
       </div>

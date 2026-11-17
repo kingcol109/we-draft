@@ -205,6 +205,9 @@ function useHighSchool(name, state) {
 
 const GAP = 12; // between stops
 // fallback: the marker's text with no logo (default: the name's initials).
+// Exported as CareerStop: the Transfer Portal's player card draws its career
+// path with it (pages/TransferPortal.jsx — same look as here).
+export function CareerStop(props) { return <Stop {...props} />; }
 function Stop({ name, sub, span, current, brand, label, to, accolades, fallback, isMobile, last }) {
   const c1 = isHex(brand?.Color1) ? brand.Color1 : "#5f6b7a";
   const filled = current && isHex(brand?.Color1);

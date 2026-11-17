@@ -33,6 +33,7 @@
 //   engine   utils/portalSim/engine.js     data   utils/portalSim/data.js
 //   flow     components/portalSim/usePortalSim.js
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import DepartureIcon from "../components/DepartureIcon";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import LoadingSpinner from "../components/LoadingSpinner";
@@ -471,6 +472,8 @@ function PlayerLine({ p, brand, to, isMobile, right, extra, onOpen }) {
       <span style={{ width: isMobile ? 38 : 46, flexShrink: 0, textAlign: "center", fontSize: 12, fontWeight: 900, color: "#9fc3ff", background: "#13233f", borderRadius: 6, padding: "4px 0" }}>{p.sub || p.pos}</span>
       {brand(p.team, p) ? <Logo b={brand(p.team, p)} size={isMobile ? 22 : 26} /> : null}
       {to && <><span style={{ color: SUB, fontWeight: 900 }}>→</span><Logo b={brand(to)} size={isMobile ? 22 : 26} /></>}
+      {/* Off to the NFL, or out of eligibility (dark sim: the white cap). */}
+      {!to && p.status === "declared" && <><span style={{ color: SUB, fontWeight: 900 }}>→</span><DepartureIcon kind={p.reason === "exhausted" ? "grad" : "nfl"} dark size={isMobile ? 22 : 26} /></>}
       <div style={{ flex: 1, minWidth: 0 }}>
         {onOpen
           ? <button type="button" onClick={() => onOpen(p.id)} style={{ all: "unset", cursor: "pointer", fontWeight: 900, fontSize: isMobile ? 14 : 16, overflowWrap: "break-word", textDecoration: "underline", textDecorationColor: "rgba(255,255,255,0.25)", textUnderlineOffset: 3 }}>{p.name}</button>

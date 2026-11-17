@@ -38,6 +38,7 @@
 // the header; an on-the-spot commit plays a celebration (the new colors
 // wipe in, the logo pops with a COMMITTED stamp, confetti).
 import { useEffect, useMemo, useRef, useState } from "react";
+import DepartureIcon from "../DepartureIcon";
 import { collection, getDocs, limit, query, where } from "firebase/firestore";
 import { db } from "../../firebase";
 import TransferStars from "../TransferStars";
@@ -243,6 +244,9 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
   // Moving: in the portal, signed somewhere, or unsigned — the → ? and the
   // recruitment only show then (a player still on a roster has neither).
   const moving = ["portal", "committed", "unsigned"].includes(p.status);
+  // Gone to the NFL, or out of eligibility: the shield / the cap (white —
+  // team-color header) where a new school would go.
+  const gone = p.status === "declared" ? (p.reason === "exhausted" ? "grad" : "nfl") : null;
   const status = keeping ? (p.considering === "nfl" ? ["Deciding on the NFL", GOLD] : [WANTS_LABEL[p.reason] || "Wants to leave", RED])
     : p.status === "portal" ? ["In the portal", GOLD] : p.status === "committed" ? [`Committed to ${state.teams[p.to]?.school}`, GREEN] : p.status === "unsigned" ? ["Unsigned", SUB] : ["", SUB];
   const bio = [
@@ -275,7 +279,8 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
               <div style={{ fontSize: isMobile ? 30 : 48, fontWeight: 900, textTransform: "uppercase", lineHeight: 0.95, letterSpacing: "-0.01em", paddingRight: isMobile ? 70 : 150, textShadow: "0 2px 12px rgba(0,0,0,0.35)" }}>{p.name}</div>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: isMobile ? 10 : 14 }}>
                 <Logo onColor b={b} size={isMobile ? 34 : 44} />
-                {moving && <span style={{ fontSize: isMobile ? 20 : 26, fontWeight: 900, opacity: 0.85 }}>→</span>}
+                {(moving || gone) && <span style={{ fontSize: isMobile ? 20 : 26, fontWeight: 900, opacity: 0.85 }}>→</span>}
+                {gone && <DepartureIcon kind={gone} dark size={isMobile ? 34 : 44} />}
                 {!moving ? null : to ? <span key={celebrate || "to"} className="wdc-anim" style={{ display: "inline-flex", animation: celebrate ? "wdcPop .7s .35s cubic-bezier(.2,.8,.2,1) both" : undefined }}><Logo onColor b={brand(to)} size={isMobile ? 34 : 44} /></span>
                   : <span aria-label="Undecided" style={{ width: isMobile ? 34 : 44, height: isMobile ? 34 : 44, borderRadius: "50%", border: "2px dashed rgba(255,255,255,0.6)", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: isMobile ? 18 : 22, fontWeight: 900 }}>?</span>}
                 <div style={{ minWidth: 0, marginLeft: 4 }}>

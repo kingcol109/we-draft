@@ -9,7 +9,7 @@
   ],
   "functions": {
     "api/live-ingest.js": { "maxDuration": 300, "includeFiles": "src/utils/liveStats.mjs" },
-    "api/portal-sync.js": { "maxDuration": 120, "includeFiles": "{src/utils/portalStars.mjs,src/utils/portalSim/stats.mjs}" },
+    "api/portal-sync.js": { "maxDuration": 120, "includeFiles": "{src/utils/portalStars.mjs,src/utils/portalSim/**,src/utils/portalTeams.js,src/utils/highSchoolMatch.js,src/utils/draftSim/draftHistory.json}" },
     "api/live-chat.js": { "maxDuration": 15, "includeFiles": "src/utils/chatFilter.mjs" },
     "api/stream-manager.js": { "maxDuration": 30, "includeFiles": "{server/stream-manager/assets/BebasNeue-Regular.ttf,src/assets/Logo2.png}" },
     "api/stream-orchestrator.js": { "maxDuration": 60 },

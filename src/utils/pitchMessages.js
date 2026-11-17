@@ -19,17 +19,15 @@ const CLOSE = "Would you be interested in participating? Appreciate your time!";
 // The questions Message 2 offers (numbered in that order); a player answers
 // one, and it goes on their profile (players.Answers, Info tab).
 export const PITCH_QUESTIONS = [
-  "What is something that separates you from other players at your position?",
-  "What is one aspect of your game you're currently trying to take to another level?",
+  "What separates you from other players at your position?",
+  "What is one part of your game you're currently trying to take to another level?",
   "What college football or NFL player does your game most resemble and why?",
-  "Which personal goal in football would mean the most to you to achieve?",
-  "What's one thing you look for when studying an opposing player?",
 ];
 
 export const PITCH_MESSAGES = [
   {
     title: "Message 1: intro",
-    text: `Hey {first}!\n\nI’m reaching out from We-Draft.com, an NFL Draft and college football website. We cover NFL draft prospects and introduce them to a wider audience.\n\nYou already have a profile on We-Draft.com (I included a sample of your profile page), and we want to add some of your own words to it to help introduce you to football fans. We’d send you a few questions, you pick one that interests you, and answer in just 1–2 sentences. Won’t take more than a minute. We would add your answer to your profile.\n\n${CLOSE}`,
+    text: `Hey {first}!\n\nI’m reaching out from We-Draft.com, an NFL Draft and college football website. We cover NFL draft prospects and introduce them to a wider audience.\n\nYou already have a profile on We-Draft.com and we want to add some of your own words to it to help introduce you to football fans. We’d send you a few questions, you pick one that interests you, and answer in just 1–2 sentences. Won’t take more than a minute.\n\n${CLOSE}`,
     noPage: `Hey {first}!\nI’m reaching out from We-Draft.com, an NFL Draft and college football website. We cover NFL draft prospects and introduce them to a wider audience. We are excited about adding you to our website and I included a sample of what your profile will look like.\n\nWe are activating your player profile on signing day in December and we wanted to add some of your own words to it to help introduce you to football fans. We’d send you a few questions, you pick one that interests you, and answer in just 1–2 sentences. Won’t take more than a minute. We would then add your answer to your profile.\n\n${CLOSE}`,
   },
   {

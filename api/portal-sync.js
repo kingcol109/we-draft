@@ -3,7 +3,9 @@
 // The admin panel's Offseason Manager (Players → Offseason Manager):
 //   POST { year }                 Transfer Portal "Run sync"
 //                                 (components/AdminTransferPortal.js) —
-//                                 server/portal/sync.js, one CFBD call.
+//                                 server/portal/sync.js, one CFBD call;
+//                                 then the public team pages rebuild
+//                                 (server/portal/public.js).
 //   POST { action: "cfbdIndex" }  Eligibility Manager "Refresh CFBD data"
 //                                 (components/AdminEligibility.jsx) —
 //                                 server/offseason/cfbdIndex.js, no CFBD calls.
@@ -13,6 +15,11 @@
 //   POST { action: "stars" }      Transfer Portal → Grades "Rebuild"
 //                                 (components/AdminPortalGrades.jsx) —
 //                                 server/portal/stars.js, no outside calls.
+//   POST { action: "pages" }      Transfer Portal → Team Pages "Rebuild" —
+//                                 server/portal/public.js (the public team
+//                                 pages' rosters, needs and sim targets)
+//   POST { action: "signees", year, dry }  Team Pages "Import signees" —
+//                                 server/portal/signees.js, one CFBD call
 // Neither writes to players; the admin applies every change.
 //
 // Auth: the caller's Firebase ID token (Authorization: Bearer <token>),
@@ -54,6 +61,16 @@ module.exports = async function handler(req, res) {
       const { buildPortalSimPool } = require("../server/portalSim/pool");
       return res.status(200).json(await buildPortalSimPool(db));
     }
+    if (req.body?.action === "pages") {
+      const { buildPortalPages } = require("../server/portal/public");
+      return res.status(200).json(await buildPortalPages(db, { dry: !!req.body?.dry }));
+    }
+    if (req.body?.action === "signees") {
+      const y = Number(req.body?.year) || new Date().getFullYear() + 1;
+      const { importSignees } = require("../server/portal/signees");
+      const r = await importSignees(db, { year: y, dry: !!req.body?.dry });
+      return res.status(200).json({ ...r, sampleCreates: undefined, sampleUpdates: undefined });
+    }
     if (req.body?.action === "cfbdIndex") {
       const { buildCfbdIndex } = require("../server/offseason/cfbdIndex");
       return res.status(200).json(await buildCfbdIndex(db));
@@ -61,7 +78,17 @@ module.exports = async function handler(req, res) {
     const year = Number(req.body?.year) || new Date().getFullYear() + 1;
     if (year < 2021 || year > new Date().getFullYear() + 2) return res.status(400).json({ error: "bad year" });
     const { runPortalSync } = require("../server/portal/sync");
-    return res.status(200).json(await runPortalSync(db, { year }));
+    const synced = await runPortalSync(db, { year });
+    // The public portal pages follow the sync (their own failure doesn't
+    // fail it — Team Pages → Rebuild retries).
+    let pages = null;
+    try {
+      const { buildPortalPages } = require("../server/portal/public");
+      pages = await buildPortalPages(db);
+    } catch (e) {
+      pages = { error: String(e.message || e).slice(0, 200) };
+    }
+    return res.status(200).json({ ...synced, pages });
   } catch (e) {
     console.error("portal-sync failed:", e.stack || e.message);
     return res.status(500).json({ error: "sync failed", detail: String(e.message || e).slice(0, 300) });
