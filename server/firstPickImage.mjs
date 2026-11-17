@@ -19,7 +19,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { createRequire } from "module";
 import zlib from "zlib";
-import { knockOut, hasBackdrop, opaqueBounds } from "../src/utils/instagram/knockout.js";
+import { knockOut, hasBackdrop, opaqueBounds, inkBounds } from "../src/utils/instagram/knockout.js";
 import { firstPickInput, firstPickSvg, firstPickImageUrls } from "../src/utils/instagram/firstPick.js";
 
 const require = createRequire(import.meta.url);
@@ -71,7 +71,8 @@ function encodePng(px, w, h) {
 
 // An image as loadFeatureImage(url, true) makes it: at most FEATURE_MAX
 // tall, its plain backdrop out, trimmed to what's left → { href, w, h }.
-async function featureImage(url) {
+// ink: a logo or wordmark, trimmed as loadFeatureImage's ink option does.
+async function featureImage(url, { ink = false } = {}) {
   const { Resvg } = require("@resvg/resvg-js");
   const got = await fetchBytes(directUrl(url));
   if (!got) return null;
@@ -86,7 +87,7 @@ async function featureImage(url) {
   const h = Math.round(size.h * k);
   const px = new Uint8Array(new Resvg(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><image href="${href0}" width="${w}" height="${h}" preserveAspectRatio="none"/></svg>`, { fitTo: { mode: "original" } }).render().pixels);
   if (hasBackdrop(px, w, h)) knockOut(px, w, h);
-  const b = opaqueBounds(px, w, h);
+  const b = ink ? inkBounds(px, w, h) : opaqueBounds(px, w, h);
   if (!b || (b.w >= w && b.h >= h)) return { href: `data:image/png;base64,${encodePng(px, w, h).toString("base64")}`, w, h };
   const out = new Uint8Array(b.w * b.h * 4);
   for (let y = 0; y < b.h; y++) out.set(px.subarray(((b.y + y) * w + b.x) * 4, ((b.y + y) * w + b.x + b.w) * 4), y * b.w * 4);
@@ -153,9 +154,9 @@ export async function firstPickPng(db, team, year, { random = Math.random, width
   const images = {};
   const wd = fs.readFileSync(path.join(ROOT, "src", "assets", "Logo2.png"));
   images[WD_LOGO] = { href: `data:image/png;base64,${wd.toString("base64")}`, ...pngSize(wd) };
-  const trimmed = new Set([input.photo, input.wordmark, input.bgLogo].filter(Boolean));
+  const marks = new Set([input.wordmark, input.bgLogo].filter((u) => u && u !== input.photo));
   await Promise.all(firstPickImageUrls(input).filter((u) => u !== WD_LOGO).map(async (u) => {
-    const im = trimmed.has(u) ? await featureImage(u) : await plainImage(u);
+    const im = u === input.photo ? await featureImage(u) : marks.has(u) ? await featureImage(u, { ink: true }) : await plainImage(u);
     if (im) images[u] = im;
   }));
   // His photo wouldn't load: no graphic rather than one without him.

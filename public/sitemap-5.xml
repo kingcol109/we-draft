@@ -1,6 +1,26 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
 
+  <url>
+    <loc>https://we-draft.com/live/tulane-vs-kansas-state-9-19-2026</loc>
+    <lastmod>2026-09-20</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/live/bowling-green-vs-iowa-state-9-19-2026</loc>
+    <lastmod>2026-09-20</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/live/arizona-state-vs-kansas-9-19-2026</loc>
+    <lastmod>2026-09-20</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/live/mercer-vs-georgia-tech-9-19-2026</loc>
+    <lastmod>2026-09-20</lastmod>
+    <priority>0.6</priority>
+  </url>
   <url>
     <loc>https://we-draft.com/live/north-carolina-vs-clemson-9-19-2026</loc>
     <lastmod>2026-09-20</lastmod>
@@ -3498,17 +3518,17 @@
   </url>
   <url>
     <loc>https://we-draft.com/live/florida-atlantic-vs-east-carolina-11-27-2026</loc>
-    <lastmod>2026-07-14</lastmod>
+    <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/live/temple-vs-memphis-11-27-2026</loc>
-    <lastmod>2026-07-14</lastmod>
+    <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/live/tulane-vs-south-florida-11-27-2026</loc>
-    <lastmod>2026-07-14</lastmod>
+    <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
@@ -3593,7 +3613,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/live/oklahoma-vs-missouri-11-28-2026</loc>
-    <lastmod>2026-07-14</lastmod>
+    <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
@@ -3608,22 +3628,22 @@
   </url>
   <url>
     <loc>https://we-draft.com/live/arizona-state-vs-arizona-11-28-2026</loc>
-    <lastmod>2026-07-14</lastmod>
+    <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/live/baylor-vs-houston-11-28-2026</loc>
-    <lastmod>2026-07-14</lastmod>
+    <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/live/ucf-vs-colorado-11-28-2026</loc>
-    <lastmod>2026-07-14</lastmod>
+    <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/live/cincinnati-vs-byu-11-28-2026</loc>
-    <lastmod>2026-07-14</lastmod>
+    <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
@@ -3633,17 +3653,17 @@
   </url>
   <url>
     <loc>https://we-draft.com/live/kansas-vs-oklahoma-state-11-28-2026</loc>
-    <lastmod>2026-07-14</lastmod>
+    <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/live/kansas-state-vs-iowa-state-11-28-2026</loc>
-    <lastmod>2026-07-14</lastmod>
+    <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/live/boston-college-vs-miami-11-28-2026</loc>
-    <lastmod>2026-07-14</lastmod>
+    <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
@@ -3653,17 +3673,17 @@
   </url>
   <url>
     <loc>https://we-draft.com/live/nc-state-vs-north-carolina-11-28-2026</loc>
-    <lastmod>2026-07-14</lastmod>
+    <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/live/notre-dame-vs-syracuse-11-28-2026</loc>
-    <lastmod>2026-07-14</lastmod>
+    <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/live/pittsburgh-vs-california-11-28-2026</loc>
-    <lastmod>2026-07-14</lastmod>
+    <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
@@ -3673,12 +3693,12 @@
   </url>
   <url>
     <loc>https://we-draft.com/live/virginia-vs-virginia-tech-11-28-2026</loc>
-    <lastmod>2026-07-14</lastmod>
+    <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/live/illinois-vs-northwestern-11-28-2026</loc>
-    <lastmod>2026-07-14</lastmod>
+    <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
@@ -3693,7 +3713,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/live/penn-state-vs-maryland-11-28-2026</loc>
-    <lastmod>2026-07-14</lastmod>
+    <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
@@ -3703,12 +3723,12 @@
   </url>
   <url>
     <loc>https://we-draft.com/live/michigan-state-vs-rutgers-11-28-2026</loc>
-    <lastmod>2026-07-14</lastmod>
+    <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/live/usc-vs-ucla-11-28-2026</loc>
-    <lastmod>2026-07-14</lastmod>
+    <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
@@ -3733,7 +3753,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/live/uconn-vs-wyoming-11-28-2026</loc>
-    <lastmod>2026-07-14</lastmod>
+    <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
@@ -3743,27 +3763,27 @@
   </url>
   <url>
     <loc>https://we-draft.com/live/tulsa-vs-utsa-11-28-2026</loc>
-    <lastmod>2026-07-14</lastmod>
+    <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/live/army-vs-rice-11-28-2026</loc>
-    <lastmod>2026-07-14</lastmod>
+    <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/live/navy-vs-charlotte-11-28-2026</loc>
-    <lastmod>2026-07-14</lastmod>
+    <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/live/uab-vs-north-texas-11-28-2026</loc>
-    <lastmod>2026-07-14</lastmod>
+    <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/live/utep-vs-northern-illinois-11-28-2026</loc>
-    <lastmod>2026-07-14</lastmod>
+    <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
@@ -3773,22 +3793,22 @@
   </url>
   <url>
     <loc>https://we-draft.com/live/umass-vs-bowling-green-11-28-2026</loc>
-    <lastmod>2026-10-03</lastmod>
+    <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/live/coastal-carolina-vs-james-madison-11-28-2026</loc>
-    <lastmod>2026-07-14</lastmod>
+    <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/live/louisiana-tech-vs-georgia-southern-11-28-2026</loc>
-    <lastmod>2026-07-14</lastmod>
+    <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/live/louisiana-vs-georgia-state-11-28-2026</loc>
-    <lastmod>2026-07-14</lastmod>
+    <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
@@ -3798,12 +3818,12 @@
   </url>
   <url>
     <loc>https://we-draft.com/live/marshall-vs-louisiana-monroe-11-28-2026</loc>
-    <lastmod>2026-07-14</lastmod>
+    <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/live/southern-miss-vs-old-dominion-11-28-2026</loc>
-    <lastmod>2026-07-14</lastmod>
+    <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
   </url>
   <url>

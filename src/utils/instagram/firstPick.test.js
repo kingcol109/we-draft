@@ -64,3 +64,17 @@ test("a light team color takes the light-background wordmark (the Steelers' blac
   expect(firstPickInput({ player, team: { ...marks, Color1: "#125740" } }).wordmark).toBe("white.png");
   expect(firstPickInput({ player, team: { WordmarkDark: "white.png", Color1: "#FFB612" } }).wordmark).toBe("white.png");
 });
+
+test("a wordmark's trim ignores stray specks at its edge (the Browns')", () => {
+  // eslint-disable-next-line global-require
+  const { inkBounds, opaqueBounds } = require("./knockout");
+  const w = 200;
+  const h = 100;
+  const px = new Uint8Array(w * h * 4);
+  const on = (x, y) => { px[(y * w + x) * 4 + 3] = 255; };
+  // Two specks along the top; the lettering from row 40 to 79, columns 20–179.
+  on(5, 0); on(150, 1);
+  for (let y = 40; y < 80; y++) for (let x = 20; x < 180; x++) on(x, y);
+  expect(opaqueBounds(px, w, h, 24, 0)).toEqual({ x: 5, y: 0, w: 175, h: 80 });
+  expect(inkBounds(px, w, h)).toEqual({ x: 20, y: 40, w: 160, h: 40 });
+});

@@ -61,7 +61,7 @@ export default function FirstPickSetup({ player, shot, onSave, onClose }) {
     // him; the wordmark trimmed to its ink, so it runs edge to edge.
     const overrides = { [input.photo]: loadFeatureImage(input.photo, true) };
     // The wordmark and the big logo trimmed to their ink: edge to edge, and meeting.
-    [input.wordmark, input.bgLogo].filter(Boolean).forEach((u) => { if (u !== input.photo) overrides[u] = loadFeatureImage(u, true); });
+    [input.wordmark, input.bgLogo].filter(Boolean).forEach((u) => { if (u !== input.photo) overrides[u] = loadFeatureImage(u, true, { ink: true }); });
     envFor(input, overrides, firstPickImageUrls(input)).then((env) => {
       if (!live) return;
       setSvg(firstPickSvg(input, env));

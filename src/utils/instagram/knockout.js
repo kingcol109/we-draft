@@ -68,6 +68,33 @@ export function knockOut(px, w, h, { tol = 6, soft = 16 } = {}) {
 // The box around what's left once the backdrop is out (alpha over min),
 // a little padding kept — so a cut-out player fills the frame he's drawn
 // into rather than the empty photo around him. null when nothing is.
+// The box around a logo's or wordmark's ink: like opaqueBounds, but a row
+// or column counts only with a real share of its pixels opaque, so stray
+// specks at an image's edge (the Browns' wordmark has a faint line along
+// its top) don't keep the empty space around it. No padding: a wordmark
+// trimmed this way runs right to the box it's fitted in.
+export function inkBounds(px, w, h, min = 24, share = 0.004) {
+  const rows = new Uint32Array(h);
+  const cols = new Uint32Array(w);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (px[(y * w + x) * 4 + 3] > min) { rows[y]++; cols[x]++; }
+    }
+  }
+  const rowMin = Math.max(2, Math.round(w * share));
+  const colMin = Math.max(2, Math.round(h * share));
+  let y0 = 0;
+  while (y0 < h && rows[y0] < rowMin) y0++;
+  let y1 = h - 1;
+  while (y1 > y0 && rows[y1] < rowMin) y1--;
+  let x0 = 0;
+  while (x0 < w && cols[x0] < colMin) x0++;
+  let x1 = w - 1;
+  while (x1 > x0 && cols[x1] < colMin) x1--;
+  if (y0 >= h || x0 >= w) return opaqueBounds(px, w, h, min, 0);
+  return { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+}
+
 export function opaqueBounds(px, w, h, min = 24, pad = 0.015) {
   let x0 = w;
   let y0 = h;

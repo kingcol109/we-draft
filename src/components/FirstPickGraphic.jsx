@@ -41,8 +41,8 @@ async function drawLocally(pick, team, year, shots) {
     team: nfl?.exists() ? nfl.data() : {}, abbr: team, pick: { overall: pick.overall, round: pick.round }, year, photo: shot, brandLogo: WdLogo,
     address: `we-draft.com/mocks/${team.toLowerCase()}${year === "2027" ? "" : `/${year}`}`,
   });
-  const overrides = {};
-  [input.photo, input.wordmark, input.bgLogo].filter(Boolean).forEach((u) => { overrides[u] = kit.loadFeatureImage(u, true); });
+  const overrides = { [input.photo]: kit.loadFeatureImage(input.photo, true) };
+  [input.wordmark, input.bgLogo].filter(Boolean).forEach((u) => { if (u !== input.photo) overrides[u] = kit.loadFeatureImage(u, true, { ink: true }); });
   const env = await kit.envFor(input, overrides, fp.firstPickImageUrls(input));
   if (!env.images[input.photo]) return "";
   return URL.createObjectURL(new Blob([fp.firstPickSvg(input, env)], { type: "image/svg+xml" }));

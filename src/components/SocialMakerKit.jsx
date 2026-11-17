@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState } from "react";
 import { sanitizeImgur } from "./MarginAds";
 import { IG_W, IG_H, IG_FONT, PHOTO_SCALE, imageUrls } from "../utils/instagram/posts";
-import { knockOut, hasBackdrop, opaqueBounds } from "../utils/instagram/knockout";
+import { knockOut, hasBackdrop, opaqueBounds, inkBounds } from "../utils/instagram/knockout";
 import { fmtET } from "../utils/contentCalendar/platforms";
 import BebasNeue from "../assets/fonts/BebasNeue-Regular.ttf";
 
@@ -68,11 +68,13 @@ export function loadDataImage(url) {
   return imageCache[url];
 }
 // An action shot at most FEATURE_MAX tall (ours are up to 7680), its plain
-// backdrop taken out when it has one and cutout is on.
+// backdrop taken out when it has one and cutout is on. ink: a logo or
+// wordmark, trimmed to its ink (knockout.js inkBounds: stray specks at its
+// edges ignored, no padding) rather than to every opaque pixel.
 const FEATURE_MAX = 1400;
 const featureCache = {};
-export function loadFeatureImage(url, cutout) {
-  const key = `${cutout ? 1 : 0}|${url}`;
+export function loadFeatureImage(url, cutout, { ink = false } = {}) {
+  const key = `${cutout ? 1 : 0}${ink ? "i" : ""}|${url}`;
   if (!featureCache[key]) {
     featureCache[key] = fetch(sanitizeImgur(url) || url, { mode: "cors" }).then((r) => (r.ok ? r.blob() : null)).then(async (blob) => {
       if (!blob) return null;
@@ -92,7 +94,7 @@ export function loadFeatureImage(url, cutout) {
           ctx.putImageData(data, 0, 0);
         }
         // Trimmed to the player (a cut-out shot's empty edges too), so he fills the frame.
-        const b = opaqueBounds(data.data, w, h);
+        const b = ink ? inkBounds(data.data, w, h) : opaqueBounds(data.data, w, h);
         if (b && (b.w < w || b.h < h)) {
           const t = document.createElement("canvas");
           t.width = b.w;
