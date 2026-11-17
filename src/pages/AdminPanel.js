@@ -12713,6 +12713,7 @@ function TeamBrandingPane({ league }) {
       WordmarkDark: t.WordmarkDark || "",
       LogoDark: t.LogoDark || "",
       LogoBlack: t.LogoBlack || "",
+      ...(league === "nfl" ? { LogoAlt: t.LogoAlt || "" } : {}),
       Color1: t.Color1 || BLUE,
       Color2: t.Color2 || GOLD,
     });
@@ -12742,6 +12743,7 @@ function TeamBrandingPane({ league }) {
       WordmarkDark: "",
       LogoDark: "",
       LogoBlack: "",
+      ...(league === "nfl" ? { LogoAlt: "" } : {}),
       Color1: BLUE,
       Color2: GOLD,
     });
@@ -12827,6 +12829,8 @@ function TeamBrandingPane({ league }) {
         WordmarkDark: formState.WordmarkDark.trim(),
         LogoDark: formState.LogoDark.trim(),
         LogoBlack: formState.LogoBlack.trim(),
+        // NFL only: the alternate logo the graphics draw in the background (the First Pick graphic).
+        ...(league === "nfl" ? { LogoAlt: (formState.LogoAlt || "").trim() } : {}),
         Color1: formState.Color1.trim(),
         Color2: formState.Color2.trim(),
         updatedAt: serverTimestamp(),
@@ -13128,6 +13132,20 @@ function TeamBrandingPane({ league }) {
               <div style={{ fontSize: "11px", fontWeight: 700, color: "#888", marginTop: "-8px" }}>
                 Optional — several spots on the site (PlayerProfile.js's left margin, GamePage.js, WePickHub.js) use this team's dark logo by default and switch to this black version once set.
               </div>
+              {league === "nfl" && (
+                <>
+                  <LogoUrlField
+                    label="Alternate Logo (Graphics)"
+                    value={formState.LogoAlt || ""}
+                    onChange={(v) => handleFieldChange("LogoAlt", v)}
+                    onCopy={() => handleCopyImage("LogoAlt", formState.LogoAlt || "")}
+                    copyStatus={logoCopyStatus.LogoAlt || "idle"}
+                  />
+                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#888", marginTop: "-8px" }}>
+                    Optional — the logo drawn big in the background of graphics (the First Pick graphic on team mock pages). Falls back to the dark logo.
+                  </div>
+                </>
+              )}
               <ColorHexField
                 label="Color 1 (Primary)"
                 value={formState.Color1}

@@ -457,7 +457,7 @@ export function buildSiteSnapshotDocs({ historical, players, draftOrder, evalsBy
     docs.push({ id: "_staffRail", data: { version, rows: coaches.map((p) => ({ id: p.id, Name: p.Name || "", Current: p.Current || [] })) } });
     docs.push({ id: "_nflBranding", data: { version, teams: Object.fromEntries(nflTeams.map((t) => [t.id, {
       City: t.City || "", Team: t.Team || "", Color1: t.Color1 || "", Color2: t.Color2 || "", Logo1: t.Logo1 || "", LogoDark: t.LogoDark || "",
-      Wordmark: t.Wordmark || "", WordmarkDark: t.WordmarkDark || "",
+      Wordmark: t.Wordmark || "", WordmarkDark: t.WordmarkDark || "", LogoAlt: t.LogoAlt || "",
     }])) } });
 
     // The next class only (activeYears[0]) — the one a staff is drafting from.

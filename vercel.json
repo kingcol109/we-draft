@@ -19,6 +19,7 @@
     "api/bot-render-clear.js": { "maxDuration": 15 },
     "api/recache-mocks.js": { "maxDuration": 30 },
     "api/mock-og.js": { "maxDuration": 20, "includeFiles": "{server/stream-manager/assets/BebasNeue-Regular.ttf,src/assets/Logo2.png}" },
+    "api/first-pick.js": { "maxDuration": 30, "includeFiles": "{server/firstPickImage.mjs,server/stream-manager/assets/BebasNeue-Regular.ttf,src/assets/Logo2.png,src/utils/instagram/*.js,src/utils/*.js}" },
     "api/instagram.js": { "maxDuration": 300 },
     "api/instagram-webhook.js": { "maxDuration": 30 }
   }

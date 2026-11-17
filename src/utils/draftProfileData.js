@@ -164,7 +164,7 @@ async function teamTargetsLive(team, staff) {
 
 // ── Shared lookups ──
 
-// NFL team branding { [abbr]: { City, Team, Color1, Color2, Logo1, LogoDark, Wordmark, WordmarkDark } }
+// NFL team branding { [abbr]: { City, Team, Color1, Color2, Logo1, LogoDark, Wordmark, WordmarkDark, LogoAlt } }
 // — _nflBranding, else the 32 nfl docs.
 const lookupCache = {};
 export function fetchNflBranding() {

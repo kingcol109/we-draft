@@ -6,7 +6,7 @@
 // layout as DraftOrderPage.jsx: a centered column, top prospects / recent
 // videos side columns when the window has room, and the NFL margin ads in
 // the gutters outside both; phones get MobileAdCard in the content instead.
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import MarginAds, { useAdSelection, teamNameFromAbbr } from "./MarginAds";
 import { MobileAdCard, MOBILE_AD_HEIGHT } from "./AdBanner";
@@ -125,20 +125,27 @@ export function MockHero({ eyebrow, title, actions, isMobile, watermark, childre
 // ink (text), accent (date badge, kicker, bottom edge), logo, logoTitle,
 // href, wordmark }. actions sit top-right, like MockHero's — on phones, a
 // row of their own under the title, which wraps there instead of shrinking.
-export function ArticleHero({ hero, isMobile, kicker, headline, dek, date, byline, actions }) {
-  const logoSize = isMobile ? 56 : 88;
+// aside (desktop only): a column at the header's right — a team page's
+// First Pick graphic — in place of the faded wordmark.
+export function ArticleHero({ hero, isMobile, kicker, headline, dek, date, byline, actions, aside = null }) {
+  const side = aside && !isMobile;
+  // Beside an aside the header is taller: a bigger logo, and the title wraps
+  // big rather than shrinking to one line.
+  const logoSize = isMobile ? 56 : side ? 104 : 88;
   return (
     <header style={{
       position: "relative", overflow: "hidden", borderRadius: 16, marginBottom: 14, padding: isMobile ? "18px 16px" : "26px 30px",
       background: `linear-gradient(120deg, ${hero.c1} 0%, ${hero.c1} 62%, ${hero.c2} 140%)`, color: hero.ink, boxShadow: "0 10px 28px rgba(0,0,0,0.2)",
       ...(hero.accent ? { borderBottom: `5px solid ${hero.accent}` } : {}),
     }}>
-      {hero.wordmark && (
+      {hero.wordmark && !side && (
         <img src={hero.wordmark} alt="" aria-hidden="true" style={{
           position: "absolute", right: isMobile ? -24 : 8, top: "50%", transform: "translateY(-50%)", height: isMobile ? 90 : 150,
           maxWidth: "62%", objectFit: "contain", opacity: 0.12, pointerEvents: "none",
         }} />
       )}
+      <div style={side ? { position: "relative", display: "flex", alignItems: "center", gap: 28 } : { display: "contents" }}>
+      <div style={side ? { flex: 1, minWidth: 0 } : { display: "contents" }}>
       <div style={{ position: "relative", display: "flex", alignItems: "center", gap: isMobile ? 14 : 22 }}>
         {hero.logo && (
           <Link to={hero.href} title={hero.logoTitle} style={{ flexShrink: 0, lineHeight: 0 }}>
@@ -147,14 +154,15 @@ export function ArticleHero({ hero, isMobile, kicker, headline, dek, date, bylin
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
           <span style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.14em", textTransform: "uppercase", ...(hero.accent ? { color: hero.accent } : { opacity: 0.8 }) }}>{kicker}</span>
-          <h1 style={{ margin: "6px 0 0", fontWeight: 900, lineHeight: 1.15, letterSpacing: "-0.01em", ...(isMobile ? { fontSize: 22, overflowWrap: "anywhere" } : {}) }}>
-            {isMobile ? headline : <FitLine max={34} min={14}>{headline}</FitLine>}
+          <h1 style={{ margin: "6px 0 0", fontWeight: 900, lineHeight: side ? 1.1 : 1.15, letterSpacing: "-0.01em", ...(isMobile ? { fontSize: 22, overflowWrap: "anywhere" } : side ? { fontSize: 34, textWrap: "balance" } : {}) }}>
+            {isMobile ? headline : side ? keepHyphenated(headline) : <FitLine max={34} min={14}>{headline}</FitLine>}
           </h1>
         </div>
-        {actions && !isMobile && <div style={{ display: "flex", flexWrap: "wrap", gap: 8, flexShrink: 0, alignSelf: "flex-start" }}>{actions}</div>}
+        {actions && !isMobile && !side && <div style={{ display: "flex", flexWrap: "wrap", gap: 8, flexShrink: 0, alignSelf: "flex-start" }}>{actions}</div>}
       </div>
-      {actions && isMobile && <div style={{ position: "relative", display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>{actions}</div>}
-      {dek && <p style={{ position: "relative", margin: isMobile ? "12px 0 0" : "14px 0 0", maxWidth: 640, fontSize: isMobile ? 15 : 17, lineHeight: 1.5, fontFamily: "Georgia, 'Times New Roman', serif", opacity: 0.95 }}>{dek}</p>}
+      {/* Phones, and beside an aside (the title gets the row): the actions on a row of their own. */}
+      {actions && (isMobile || side) && <div style={{ position: "relative", display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>{actions}</div>}
+      {dek && <p style={{ position: "relative", margin: isMobile ? "12px 0 0" : side ? "16px 0 0" : "14px 0 0", maxWidth: side ? "none" : 640, fontSize: isMobile ? 15 : 17, lineHeight: 1.5, fontFamily: "Georgia, 'Times New Roman', serif", opacity: 0.95 }}>{dek}</p>}
       {/* The date: under the dek, above the byline. */}
       {date && (
         <div style={{ position: "relative", marginTop: 12 }}>
@@ -165,8 +173,19 @@ export function ArticleHero({ hero, isMobile, kicker, headline, dek, date, bylin
         </div>
       )}
       {byline && <div style={{ position: "relative", marginTop: 10, fontSize: 12, fontWeight: 700, fontFamily: BODY_FONT, opacity: 0.9 }}>{byline}</div>}
+      </div>
+      {side && <div style={{ position: "relative", width: 300, flexShrink: 0 }}>{aside}</div>}
+      </div>
     </header>
   );
+}
+
+// A wrapping title that never breaks inside a hyphenated word ("7-Round").
+function keepHyphenated(text) {
+  if (typeof text !== "string") return text;
+  return text.split(" ").map((w, i) => (
+    <Fragment key={i}>{i ? " " : ""}{w.includes("-") ? <span style={{ whiteSpace: "nowrap" }}>{w}</span> : w}</Fragment>
+  ));
 }
 
 // Text kept to one line: the biggest font size from max down to min that

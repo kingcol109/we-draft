@@ -125,6 +125,21 @@ async function getWeeklyMockSummary(docId) {
   const snap = await getDoc(doc(db, "config", docId));
   return snap.exists() ? snap.data() : null;
 }
+// The teams whose first pick in this week has a First Pick graphic (an
+// action shot placed for it — playerPhotos action[i].firstPick), as
+// api/first-pick.js and WeeklyTeamMock.jsx decide it: Set of abbrs.
+async function firstPickGraphicTeams(weekId, abbrs) {
+  const week = weekId ? await getDoc(doc(db, "weeklyMocks", weekId)) : null;
+  const picks = week?.exists() ? week.data().picks || [] : [];
+  const out = new Set();
+  await Promise.all(abbrs.map(async (abbr) => {
+    const first = picks.filter((p) => p.owner === abbr && p.player?.id).sort((a, b) => a.overall - b.overall)[0];
+    if (!first) return;
+    const ph = await getDoc(doc(db, "playerPhotos", first.player.id));
+    if ((ph.exists() ? ph.data().action || [] : []).some((a) => a?.url && a.firstPick)) out.add(abbr);
+  }));
+  return out;
+}
 async function getAllGames() {
   const colRef = collection(db, "schedule26");
   const snapshot = await getDocs(colRef);
@@ -404,11 +419,17 @@ for (const doc of allTeams) {
     const weeklyDate = weekly?.publishedAt?.toDate?.()?.toLocaleDateString("en-CA", { timeZone: "America/New_York" }) || null;
     if (!weekly || !weeklyDate) continue;
     const priority = cls.suffix ? 0.6 : 0.7;
+    // A team page whose first pick has a graphic lists it (its permanent
+    // URL — the image there is always the current week's).
+    const graphics = cls.teamPages === false ? new Set() : await firstPickGraphicTeams(weekly.weekId, NFL_TEAM_ABBRS);
     weeklyMockPages.push(
-      ...(cls.teamPages === false ? [] : NFL_TEAM_ABBRS.map((abbr) => ({ path: `/mocks/${abbr.toLowerCase()}${cls.suffix}`, priority, lastmod: weeklyDate }))),
+      ...(cls.teamPages === false ? [] : NFL_TEAM_ABBRS.map((abbr) => ({
+        path: `/mocks/${abbr.toLowerCase()}${cls.suffix}`, priority, lastmod: weeklyDate,
+        ...(graphics.has(abbr) ? { image: `${baseUrl}/api/first-pick?team=${abbr.toLowerCase()}&year=${cls.year}` } : {}),
+      }))),
       { path: `/mocks/${cls.year}`, priority: priority + 0.05, lastmod: weeklyDate },
     );
-    console.log(`✅ ${cls.year} Weekly Mock published ${weeklyDate}.`);
+    console.log(`✅ ${cls.year} Weekly Mock published ${weeklyDate}${graphics.size ? ` — ${graphics.size} First Pick graphics` : ""}.`);
   }
   console.log(`✅ ${weeklyMockPages.length} Weekly Mock pages.`);
 
@@ -450,12 +471,13 @@ for (const doc of allTeams) {
 
   chunks.forEach((chunk, idx) => {
     const chunkXml = `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
 ${chunk.map(u => `
   <url>
     <loc>${baseUrl}${u.path}</loc>
     <lastmod>${u.lastmod}</lastmod>
-    <priority>${u.priority}</priority>
+    <priority>${u.priority}</priority>${u.image ? `
+    <image:image><image:loc>${u.image.replace(/&/g, "&amp;")}</image:loc></image:image>` : ""}
   </url>`).join("")}
 </urlset>`;
     fs.writeFileSync(`public/sitemap-${idx + 1}.xml`, chunkXml);

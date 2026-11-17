@@ -7,7 +7,9 @@
 //   { name, slug, headshot: Photo | null, action: Photo[], updatedAt }
 //   Photo: { url, width, height, source, credit, addedAt }
 //   — an action shot also has orientation: which way the player is facing,
-//   "left" | "center" (toward the camera) | "right".
+//   "left" | "center" (toward the camera) | "right" — and firstPick: its
+//   placement on the First Pick graphic ({ x, y, scale, rotate }, FirstPickSetup.jsx;
+//   utils/instagram/firstPick.js), set on the Jets template.
 // Source (where it came from) and credit (who to credit) are kept with
 // every photo, so any one can be credited on a page or taken down on request.
 // Most headshots come from ESPN's rosters (scripts/importEspnHeadshots.js);
@@ -17,6 +19,7 @@ import { useEffect, useMemo, useState } from "react";
 import { arrayUnion, collection, deleteField, doc, getDoc, getDocs, setDoc, updateDoc, serverTimestamp, Timestamp } from "firebase/firestore";
 import { db } from "../firebase";
 import { sanitizeImgur } from "./MarginAds";
+import FirstPickSetup from "./FirstPickSetup";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -52,6 +55,8 @@ export default function AdminPhotos() {
   const [selectedId, setSelectedId] = useState(null);
   const [busy, setBusy] = useState("");
   const [err, setErr] = useState("");
+  // The action shot (its url) being placed on the First Pick graphic.
+  const [setupUrl, setSetupUrl] = useState("");
 
   useEffect(() => {
     Promise.all([getDocs(collection(db, "players")), getDocs(collection(db, "playerPhotos")), getDoc(doc(db, "config", "headshotReview"))])
@@ -110,6 +115,8 @@ export default function AdminPhotos() {
     const img = await loadImage(link);
     if ((current.action || []).some((a) => a.url === img.url)) throw new Error("That action shot is already saved.");
     await save({ action: [...(current.action || []), { ...img, orientation, source: "", credit: "", addedAt: Timestamp.now() }] });
+    // A new shot goes straight to its First Pick placement.
+    setSetupUrl(img.url);
   });
   const removeAction = (i) => run(`action:${i}`, async () => {
     if (!window.confirm("Remove this action shot?")) return;
@@ -129,6 +136,8 @@ export default function AdminPhotos() {
   const dismissReview = () => run("headshot", () => clearReview(true));
   const editHeadshot = (changes) => run("headshot", () => save({ headshot: { ...current.headshot, ...changes } }));
   const editAction = (i, changes) => run(`action:${i}`, () => save({ action: current.action.map((a, j) => (j === i ? { ...a, ...changes } : a)) }));
+  const setupShot = (current.action || []).find((a) => a.url === setupUrl) || null;
+  const setupIndex = (current.action || []).indexOf(setupShot);
 
   if (loading) return <div style={{ padding: "20px", fontFamily: "Arial, sans-serif", color: "#777" }}>Loading players…</div>;
 
@@ -229,6 +238,10 @@ export default function AdminPhotos() {
                     <a href={a.url} target="_blank" rel="noreferrer"><img src={a.url} alt={`${player.First} ${player.Last} action shot`} style={{ width: "100%", height: 160, objectFit: "cover", display: "block", background: "#eef1f5" }} /></a>
                     <div style={{ padding: "10px", display: "flex", flexDirection: "column", gap: "8px" }}>
                       <OrientationPick value={a.orientation} disabled={!!busy} onChange={(orientation) => editAction(i, { orientation })} />
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <button disabled={!!busy} onClick={() => setSetupUrl(a.url)} style={smallBtn(BLUE, !a.firstPick)}>{a.firstPick ? "Edit First Pick placement" : "Place on First Pick graphic"}</button>
+                        <span style={{ fontSize: "11px", fontWeight: 800, color: a.firstPick ? "#15803d" : "#9aa4b2" }}>{a.firstPick ? "✓ Placed" : "Not placed"}</span>
+                      </div>
                       <PhotoMeta photo={a} disabled={!!busy} onSave={(changes) => editAction(i, changes)} />
                       <button disabled={!!busy} onClick={() => removeAction(i)} style={{ ...smallBtn("#c0392b"), alignSelf: "flex-start" }}>Remove</button>
                     </div>
@@ -237,6 +250,10 @@ export default function AdminPhotos() {
               </div>
               {!current.action?.length && <div style={{ fontSize: "12px", color: "#9aa4b2", marginTop: "10px" }}>No action shots yet.</div>}
             </div>
+            {setupShot && (
+              <FirstPickSetup key={setupShot.url} player={player} shot={setupShot} onClose={() => setSetupUrl("")}
+                onSave={(firstPick) => editAction(setupIndex, { firstPick })} />
+            )}
           </>
         )}
       </div>

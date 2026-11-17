@@ -20,7 +20,7 @@
 // cached — it names this week's and last week's weeklyMocks docs), those
 // two docs, and the other classes' summaries for the switch (a player the
 // editor swapped in, with no saved logo, costs his position's class snapshot).
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { collection, doc, getDoc, getDocs, query, where, documentId } from "firebase/firestore";
 import { Helmet } from "react-helmet-async";
@@ -38,6 +38,7 @@ import { textOn } from "../utils/teamColors";
 import { PickRow } from "./ViewMock";
 import ShareLinkButton from "../components/ShareLinkButton";
 import PickVotes, { pickVoteKey, loadPickVotes } from "../components/PickVotes";
+import { useFirstPickGraphic, FirstPickImage } from "../components/FirstPickGraphic";
 import {
   BLUE, CARD_SHADOW, BODY_FONT, MOCK_CARD_CSS, useIsMobile, MockPageShell, ArticleHero, WeeklyByline, MakeYourOwnBanner, TradeCard, tradeChip,
   Breadcrumbs, breadcrumbLd, SITE_PUBLISHER, TeamMocksRail, WeeklyYearSwitch, PhoneAd,
@@ -131,13 +132,20 @@ export default function WeeklyTeamMock({ team, year = MAIN_WEEKLY_YEAR }) {
     return () => { live = false; };
   }, [weeks, team]);
 
+  // The First Pick graphic: the team's first pick this week, drawn when he
+  // has an action shot placed for it (FirstPickGraphic.jsx) — in the header
+  // on desktop, over the pick on phones.
+  const firstPick = useMemo(() => (weeks?.[0] ? teamWeek(weeks[0], null, team).picks.find((p) => p.player?.id) || null : null), [weeks, team]);
+  const fpg = useFirstPickGraphic({ pick: firstPick, team, year });
+
   // Prerender.io (public/index.html, middleware.js) snapshots the page for
   // crawlers once prerenderReady is true: here when the weeks and team
   // branding are in (the whole page — every round, note and link — renders
   // from those), or straight away for a code that isn't a team. The same
   // 8s cap every page has, and one frame for Helmet to write the head.
   const validTeam = NFL_TEAM_ABBRS.includes(team);
-  const settled = !validTeam || (weeks !== null && teams !== null && classes !== null);
+  // (And the First Pick check, so the snapshot has its image when there is one.)
+  const settled = !validTeam || (weeks !== null && teams !== null && classes !== null && fpg.checked);
   useEffect(() => {
     window.prerenderReady = false;
     const t = setTimeout(() => { window.prerenderReady = true; }, 8000);
@@ -311,7 +319,7 @@ export default function WeeklyTeamMock({ team, year = MAIN_WEEKLY_YEAR }) {
         <title>{title}</title>
         <meta name="description" content={description} />
         <link rel="canonical" href={url} />
-        {!latest && <meta name="robots" content="noindex, follow" />}
+        <meta name="robots" content={latest ? "index, follow, max-image-preview:large" : "noindex, follow"} />
         <meta property="og:type" content="article" />
         <meta property="og:title" content={title} />
         <meta property="og:description" content={description} />
@@ -330,7 +338,10 @@ export default function WeeklyTeamMock({ team, year = MAIN_WEEKLY_YEAR }) {
           "@context": "https://schema.org", "@type": "WebPage", url, name: headline, description,
           ...(publishedIso ? { dateModified: publishedIso } : {}), inLanguage: "en-US",
           isPartOf: { "@type": "WebSite", name: "We-Draft", url: "https://we-draft.com" }, publisher: SITE_PUBLISHER,
-          ...(brand.Logo1 ? { primaryImageOfPage: { "@type": "ImageObject", url: brand.Logo1 } } : {}),
+          // The First Pick graphic when there is one (its permanent URL), else the team's logo.
+          ...(fpg.src && firstPick?.player
+            ? { primaryImageOfPage: { "@type": "ImageObject", url: fpg.src, width: 1080, height: 1350, caption: `${firstPick.player.First} ${firstPick.player.Last}, the ${nick(team)}' first pick in We-Draft.com's ${year} mock draft` } }
+            : brand.Logo1 ? { primaryImageOfPage: { "@type": "ImageObject", url: brand.Logo1 } } : {}),
         })}</script>
         <script type="application/ld+json">{JSON.stringify(breadcrumbLd(crumbs))}</script>
       </Helmet>
@@ -340,7 +351,8 @@ export default function WeeklyTeamMock({ team, year = MAIN_WEEKLY_YEAR }) {
         <Breadcrumbs items={crumbs} />
         <ArticleHero hero={heroTeam} isMobile={isMobile} kicker={`Weekly Mock Draft · ${year}`}
           headline={headline} dek={intro} date={updated ? <time dateTime={publishedIso}>Updated {updated}</time> : ""}
-          byline={latest && <WeeklyByline />} actions={switcher} />
+          byline={latest && <WeeklyByline />} actions={switcher}
+          aside={fpg.src && <FirstPickImage g={fpg} pick={firstPick} nick={nick(team)} year={year} sizes="300px" style={{ borderRadius: 12, boxShadow: "0 8px 24px rgba(0,0,0,0.35)" }} />} />
 
         {!latest ? (
           <div style={{ background: "#fff", borderRadius: 14, boxShadow: CARD_SHADOW, padding: 24, textAlign: "center", fontFamily: BODY_FONT, color: "#2a313d" }}>
@@ -366,12 +378,20 @@ export default function WeeklyTeamMock({ team, year = MAIN_WEEKLY_YEAR }) {
                 </h2>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {roundItems(r).map((it) => (it.card ? <Fragment key={`trade-${it.n}`}>{it.card}</Fragment> : (
-                    <PickRow key={it.pick.slot} isMobile={isMobile} vertical={isMobile} brand={brand} sub={subOf(it.pick)} teamPage collegeLogo={it.pick.player?.logo || logos[it.pick.player?.id] || ""} headshot={headshots[it.pick.player?.id] || ""}
+                    <Fragment key={it.pick.slot}>
+                    {/* Phones: the team's first pick's graphic over it (desktop has it in the header). */}
+                    {isMobile && fpg.src && it.pick.slot === firstPick?.slot && (
+                      <div style={{ margin: "4px 0 10px" }}>
+                        <FirstPickImage g={fpg} pick={firstPick} nick={nick(team)} year={year} sizes="100vw" style={{ borderRadius: 14, boxShadow: "0 6px 22px rgba(10,20,40,0.18)" }} />
+                      </div>
+                    )}
+                    <PickRow isMobile={isMobile} vertical={isMobile} brand={brand} sub={subOf(it.pick)} teamPage collegeLogo={it.pick.player?.logo || logos[it.pick.player?.id] || ""} headshot={headshots[it.pick.player?.id] || ""}
                       actions={(() => {
                         const key = pickVoteKey(latest?.year, it.pick);
                         return key && <PickVotes key={key} voteKey={key} year={latest.year} team={team} playerId={it.pick.player.id} counts={votes[key]} />;
                       })()}
                       pick={{ pickNumber: it.pick.overall, round: it.pick.round, currentTeam: it.pick.owner, tradedFrom: it.pick.original !== it.pick.owner ? it.pick.original : null, selection: it.pick.player, note: it.pick.note || "" }} />
+                    </Fragment>
                   )))}
                 </div>
                 {/* The sim, as this team and class, after its first round of picks. */}
