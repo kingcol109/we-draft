@@ -2,6 +2,11 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
 
   <url>
+    <loc>https://we-draft.com/player/micah-pettus-2026-ol</loc>
+    <lastmod>2026-11-17</lastmod>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://we-draft.com/player/micahi-danzy-2027-wr</loc>
     <lastmod>2026-11-10</lastmod>
     <priority>0.7</priority>
@@ -2592,6 +2597,11 @@
     <priority>0.6</priority>
   </url>
   <url>
+    <loc>https://we-draft.com/comparison/bott-mulitalo-2029-ol</loc>
+    <lastmod>2026-11-17</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
     <loc>https://we-draft.com/comparison/boubacar-traore-2027-edge</loc>
     <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
@@ -4989,16 +4999,6 @@
   <url>
     <loc>https://we-draft.com/comparison/jacarrius-peak-2027-ol</loc>
     <lastmod>2026-11-17</lastmod>
-    <priority>0.6</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/comparison/jack-endries-2026-te</loc>
-    <lastmod>2026-11-17</lastmod>
-    <priority>0.6</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/comparison/jack-foley-2028-wr</loc>
-    <lastmod>2026-10-25</lastmod>
     <priority>0.6</priority>
   </url>
 </urlset>
