@@ -6,6 +6,7 @@
 // button that opens a short walkthrough, one step at a time. Keep the copy
 // in step with the engine's rules (pages/PortalSim.jsx's header notes).
 import { useEffect, useState } from "react";
+import { useScrollLock } from "../../utils/scrollLock";
 
 const GOLD = "#f6a21d";
 const LINE = "#1f2b42";
@@ -49,6 +50,7 @@ const STEPS = [
 export default function PortalTutorial({ isMobile, onColor = false }) {
   const [open, setOpen] = useState(false);
   const [i, setI] = useState(0);
+  useScrollLock(open);
   useEffect(() => {
     if (!open) return undefined;
     const onKey = (e) => {
@@ -73,7 +75,7 @@ export default function PortalTutorial({ isMobile, onColor = false }) {
       </button>
       {open && (
         <div role="dialog" aria-modal="true" aria-label="How the Transfer Portal Sim works" onClick={() => setOpen(false)}
-          style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(3,7,14,0.78)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          style={{ position: "fixed", inset: 0, zIndex: 20000, background: "rgba(3,7,14,0.78)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, overscrollBehavior: "contain" }}>
           <div onClick={(e) => e.stopPropagation()} className="wd-sim-pop" style={{ width: "100%", maxWidth: 520, background: "#0e1626", border: `1px solid ${LINE}`, borderRadius: 18, overflow: "hidden", boxShadow: "0 24px 60px rgba(0,0,0,0.6)", color: "#eef2f8", fontFamily: "Arial, sans-serif" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", borderBottom: `1px solid ${LINE}`, background: "linear-gradient(120deg, #0d2f5c, #0a1430)" }}>
               <img src="/logos/transfer-portal-white.svg" alt="" aria-hidden="true" style={{ width: 24, height: 24 }} />

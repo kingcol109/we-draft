@@ -3,6 +3,7 @@ import { wePickHref } from "../utils/wePickRoutes";
 import { useAuth } from "../context/AuthContext";
 import { useEffect, useRef, useState } from "react";
 import Logo2 from "../assets/Logo2.png";
+import SiteFullscreenButton from "./SiteFullscreenButton";
 
 import {
   collection,
@@ -707,6 +708,8 @@ export default function Navbar() {
             </div>
 
 
+            {/* The whole site full screen (desktop). */}
+            <SiteFullscreenButton />
             {user ? (
               <Link to="/profile" className="wd-nav-link" style={navLink(onSection("/profile"))}>
                 Profile

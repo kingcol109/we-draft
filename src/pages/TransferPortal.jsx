@@ -588,16 +588,21 @@ export default function TransferPortal({ view = "board" }) {
   // Status — All / Uncommitted (in the portal, yet to transfer) / Committed.
   const StatusBar = (
     <div role="tablist" aria-label="Portal status" style={{ display: "flex", justifyContent: "center", marginBottom: isMobile ? "8px" : "12px" }}>
-      <div style={{ display: "inline-flex", padding: "3px", borderRadius: "999px", background: "#fff", border: "1px solid #e3e8ef", gap: "2px" }}>
+      {/* Phones: four equal cells across the screen, the count under each
+          label — it used to run off the right edge (user, 2026-11-18). */}
+      <div style={isMobile
+        ? { display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", width: "100%", boxSizing: "border-box", padding: "3px", borderRadius: "14px", background: "#fff", border: "1px solid #e3e8ef", gap: "2px" }
+        : { display: "inline-flex", padding: "3px", borderRadius: "999px", background: "#fff", border: "1px solid #e3e8ef", gap: "2px" }}>
         {STATUSES.map(([k, label]) => {
           const on = status === k;
           return (
             <button key={k || "all"} type="button" role="tab" aria-selected={on} onClick={() => setParam("status", k)} style={{
-              padding: isMobile ? "6px 12px" : "7px 18px", borderRadius: "999px", border: "none", cursor: "pointer", fontFamily: "inherit",
-              background: on ? BLUE : "transparent", color: on ? "#fff" : BLUE, fontWeight: 900, fontSize: isMobile ? "12px" : "13px",
-              textTransform: "uppercase", letterSpacing: "0.05em", whiteSpace: "nowrap",
+              padding: isMobile ? "6px 2px" : "7px 18px", borderRadius: isMobile ? "11px" : "999px", border: "none", cursor: "pointer", fontFamily: "inherit",
+              background: on ? BLUE : "transparent", color: on ? "#fff" : BLUE, fontWeight: 900, fontSize: isMobile ? "10px" : "13px",
+              textTransform: "uppercase", letterSpacing: isMobile ? "0.02em" : "0.05em", whiteSpace: "nowrap", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis",
+              ...(isMobile ? { display: "flex", flexDirection: "column", alignItems: "center", lineHeight: 1.2 } : {}),
             }}>
-              {label}{!loading && <span style={{ marginLeft: "6px", opacity: 0.7, fontSize: "11px" }}>{statusCounts[k]}</span>}
+              {label}{!loading && <span style={{ marginLeft: isMobile ? 0 : "6px", opacity: 0.7, fontSize: "11px" }}>{statusCounts[k]}</span>}
             </button>
           );
         })}
@@ -1762,6 +1767,9 @@ export default function TransferPortal({ view = "board" }) {
         + " .tp-hero-home { transition: transform 0.15s ease, opacity 0.15s ease; } .tp-hero-home:hover { opacity: 0.9; } a.tp-hero-home:hover img { transform: scale(1.04); transition: transform 0.15s ease; } h1 a.tp-hero-home:hover { text-decoration: underline !important; text-underline-offset: 4px; text-decoration-thickness: 2px !important; }"
         + " @media (prefers-reduced-motion: reduce) { [style*='tpHero'] { animation: none !important; } }"}</style>
       {CardModal}
+      {/* Phones: the page never moves sideways (user, 2026-11-18) — rows of
+          pills scroll inside their own strips instead. */}
+      {isMobile && <style>{"html, body { overflow-x: clip; }"}</style>}
       {isMobile && <style>{".wd-mobile-filter-grid button { width: 100%; box-sizing: border-box; text-align: center; } .wd-mobile-filter-grid > *:last-child:nth-child(odd) { grid-column: 1 / -1; }"}</style>}
       {isMobile ? (
         <div className="wdb" style={{ padding: "4px 10px 60px", display: "flex", flexDirection: "column", gap: "20px" }}>

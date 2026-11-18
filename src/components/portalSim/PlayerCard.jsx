@@ -50,7 +50,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import DepartureIcon, { GRAD_ICON, NFL_ICON } from "../DepartureIcon";
 import { CareerStop, useCareerPath } from "../PlayerEligibilityInfo";
-import { CoachTags, RecQuote, RecChip } from "./StaffParts";
+import { CoachTags, CoachButtons, RecQuote, RecChip } from "./StaffParts";
+import { lockScroll } from "../../utils/scrollLock";
 import { fetchPortalTeamPage } from "../../utils/portalData";
 import { currentDraftClass } from "../../utils/eligibility";
 import { collection, getDocs, limit, query, where } from "firebase/firestore";
@@ -84,6 +85,10 @@ const CELEBRATE_CSS = `
   @keyframes wdcToast { 0% { opacity: 0; transform: translate(-50%, 12px) scale(.96); } 12%, 82% { opacity: 1; transform: translate(-50%, 0) scale(1); } 100% { opacity: 0; transform: translate(-50%, -4px) scale(.98); } }
   @media (prefers-reduced-motion: reduce) { .wdc-anim { animation-duration: 1ms !important; animation-delay: 0s !important; } }
 `;
+// Phones: the header's fixed height, and the name's size to fit one line
+// in the space beside the headshot (Arial Black-ish caps run ~0.68em).
+const HEADER_H = 150;
+const nameSize = (name) => Math.max(16, Math.min(28, Math.floor(232 / (Math.max(String(name || "").length, 1) * 0.68))));
 const VALUE_LABEL = { tier: "Program", nil: "NIL", loc: "Close to home", pt: "Playing time", success: "Winning", dev: "Development" };
 const WANTS_LABEL = { level: "Wants a bigger stage", snaps: "Wants snaps", money: "Wants a bigger NIL deal", home: "Wants to be closer to home", winning: "Wants to win", development: "Wants to develop", roster: "Cut for roster space", released: "Released" };
 // The NFL header (a player gone to the draft).
@@ -227,9 +232,9 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
   useEffect(() => {
     const k = (e) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", k);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => { window.removeEventListener("keydown", k); document.body.style.overflow = prev; };
+    // html and body both (iOS ignores a body-only lock) — utils/scrollLock.js.
+    const unlock = lockScroll();
+    return () => { window.removeEventListener("keydown", k); unlock(); };
   }, [onClose]);
 
   // A school he's cut from his list can't offer again.
@@ -316,10 +321,10 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
   ].filter(Boolean);
 
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 20000, background: "rgba(3,7,14,0.72)", display: "flex", alignItems: isMobile ? "stretch" : "flex-start", justifyContent: "center", padding: isMobile ? 0 : "70px 16px 24px", overflowY: "auto" }}>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 20000, background: "rgba(3,7,14,0.72)", display: "flex", alignItems: isMobile ? "stretch" : "flex-start", justifyContent: "center", padding: isMobile ? 0 : "70px 16px 24px", overflowY: "auto", overscrollBehavior: "contain" }}>
       <div role="dialog" aria-label={p.name} onClick={(e) => e.stopPropagation()} className="wd-sim-pop wd-sim-scroll" style={{
         position: "relative", width: "100%", maxWidth: 860, background: "#0e1626", border: isMobile ? "none" : `1px solid ${LINE}`, borderRadius: isMobile ? 0 : 18, overflow: "hidden", color: INK,
-        maxHeight: isMobile ? "100%" : "none", overflowY: isMobile ? "auto" : "hidden", boxShadow: "0 20px 60px rgba(0,0,0,0.6)",
+        maxHeight: isMobile ? "100%" : "none", overflowY: isMobile ? "auto" : "hidden", overflowX: "hidden", overscrollBehavior: "contain", boxShadow: "0 20px 60px rgba(0,0,0,0.6)",
       }}>
         <style>{CELEBRATE_CSS}</style>
         {/* Header, in his school's colors (his new one once he's committed):
@@ -331,17 +336,19 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
           {/* No headshot: the faint logo sits on the right on its own. */}
           {!shot && (drafted ? NFL_ICON : hb.LogoDark || hb.Logo1) && <img key={hb.School} src={drafted ? NFL_ICON : hb.LogoDark || hb.Logo1} alt="" aria-hidden="true" className="wdc-anim" style={{ position: "absolute", right: isMobile ? 10 : 24, top: "50%", marginTop: isMobile ? -55 : -75, height: isMobile ? 110 : 150, width: "auto", opacity: 0.16, pointerEvents: "none", animation: celebrate ? "wdcMark 3.2s .4s ease-out both" : undefined }} />}
           {celebrate ? <div key={`s${celebrate}`} className="wdc-anim" style={{ position: "absolute", top: 0, bottom: 0, left: 0, width: "30%", background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent)", animation: "wdcShine 1.1s .5s ease-out both", pointerEvents: "none" }} /> : null}
-          <div style={{ position: "relative", display: "flex", alignItems: "flex-end", gap: isMobile ? 10 : 18, padding: isMobile ? "14px 14px 0" : "18px 22px 0" }}>
-            <div style={{ flex: 1, minWidth: 0, paddingBottom: isMobile ? 14 : 18 }}>
-              <div style={{ fontSize: isMobile ? 30 : 48, fontWeight: 900, textTransform: "uppercase", lineHeight: 0.95, letterSpacing: "-0.01em", paddingRight: isMobile ? 70 : 150, textShadow: "0 2px 12px rgba(0,0,0,0.35)" }}>{p.name}</div>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: isMobile ? 10 : 14 }}>
-                <Logo onColor b={b} size={isMobile ? 34 : 44} />
-                {(moving || gone) && <span style={{ fontSize: isMobile ? 20 : 26, fontWeight: 900, opacity: 0.85 }}>→</span>}
-                {gone && <DepartureIcon kind={gone} dark size={isMobile ? 34 : 44} />}
-                {!moving ? null : to ? <span key={celebrate || "to"} className="wdc-anim" style={{ display: "inline-flex", animation: celebrate ? "wdcPop .7s .35s cubic-bezier(.2,.8,.2,1) both" : undefined }}><Logo onColor b={brand(to)} size={isMobile ? 34 : 44} /></span>
-                  : <span aria-label="Undecided" style={{ width: isMobile ? 34 : 44, height: isMobile ? 34 : 44, borderRadius: "50%", border: "2px dashed rgba(255,255,255,0.6)", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: isMobile ? 18 : 22, fontWeight: 900 }}>?</span>}
-                <div style={{ minWidth: 0, marginLeft: 4 }}>
-                  <div style={{ fontSize: isMobile ? 12 : 14, fontWeight: 900, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{home?.school}{to ? ` → ${state.teams[to]?.school}` : ""}</div>
+          <div style={{ position: "relative", display: "flex", alignItems: "flex-end", gap: isMobile ? 8 : 18, padding: isMobile ? "12px 12px 0" : "18px 22px 0", ...(isMobile ? { height: HEADER_H, boxSizing: "border-box" } : {}) }}>
+            <div style={{ flex: 1, minWidth: 0, paddingBottom: isMobile ? 12 : 18, alignSelf: isMobile ? "stretch" : undefined, display: isMobile ? "flex" : undefined, flexDirection: "column", justifyContent: "flex-end" }}>
+              {/* Phones: one line, sized to fit beside the buttons (user, 2026-11-18). */}
+              <div style={{ fontSize: isMobile ? nameSize(p.name) : 48, fontWeight: 900, textTransform: "uppercase", lineHeight: isMobile ? 1.05 : 0.95, letterSpacing: "-0.01em", paddingRight: isMobile ? 0 : 150, textShadow: "0 2px 12px rgba(0,0,0,0.35)", ...(isMobile ? { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginTop: "auto" } : {}) }}>{p.name}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 6 : 10, marginTop: isMobile ? 8 : 14, minWidth: 0 }}>
+                <Logo onColor b={b} size={isMobile ? 28 : 44} />
+                {(moving || gone) && <span style={{ fontSize: isMobile ? 16 : 26, fontWeight: 900, opacity: 0.85 }}>→</span>}
+                {gone && <DepartureIcon kind={gone} dark size={isMobile ? 28 : 44} />}
+                {!moving ? null : to ? <span key={celebrate || "to"} className="wdc-anim" style={{ display: "inline-flex", animation: celebrate ? "wdcPop .7s .35s cubic-bezier(.2,.8,.2,1) both" : undefined }}><Logo onColor b={brand(to)} size={isMobile ? 28 : 44} /></span>
+                  : <span aria-label="Undecided" style={{ width: isMobile ? 28 : 44, height: isMobile ? 28 : 44, flexShrink: 0, borderRadius: "50%", border: "2px dashed rgba(255,255,255,0.6)", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: isMobile ? 15 : 22, fontWeight: 900 }}>?</span>}
+                <div style={{ minWidth: 0, marginLeft: 2, flex: 1 }}>
+                  {/* Phones: the school's name wraps to a second line rather than cut off. */}
+                  <div style={{ fontSize: isMobile ? 11 : 14, fontWeight: 900, lineHeight: 1.2, ...(isMobile ? { display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" } : { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }) }}>{home?.school}{to ? ` → ${state.teams[to]?.school}` : ""}</div>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
                     <TransferStars stars={p.stars} size="sm" />
                     <span style={{ fontSize: 11, fontWeight: 900, background: "rgba(0,0,0,0.35)", borderRadius: 6, padding: "3px 7px" }}>{p.pos}</span>
@@ -357,12 +364,12 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
             {shot && (
               <div style={{ position: "relative", flexShrink: 0, alignSelf: "flex-end", display: "flex" }}>
                 {(drafted ? NFL_ICON : hb.LogoDark || hb.Logo1) && (
-                  <div aria-hidden="true" style={{ position: "absolute", left: "50%", top: "46%", transform: "translate(-50%, -50%)", width: isMobile ? 140 : 200, height: isMobile ? 140 : 200, pointerEvents: "none" }}>
+                  <div aria-hidden="true" style={{ position: "absolute", left: "50%", top: "46%", transform: "translate(-50%, -50%)", width: isMobile ? 110 : 200, height: isMobile ? 110 : 200, pointerEvents: "none" }}>
                     <img key={hb.School} src={drafted ? NFL_ICON : hb.LogoDark || hb.Logo1} alt="" className="wdc-anim" style={{ width: "100%", height: "100%", objectFit: "contain", opacity: 0.18, animation: celebrate ? "wdcMark 3.2s .4s ease-out both" : undefined }} />
                   </div>
                 )}
                 <img src={`https://a.espncdn.com/i/headshots/college-football/players/full/${p.id}.png`} alt="" onError={() => setShot(false)}
-                  style={{ position: "relative", height: isMobile ? 110 : 160, width: "auto", objectFit: "contain", filter: "drop-shadow(0 4px 10px rgba(0,0,0,0.45))" }} />
+                  style={{ position: "relative", height: isMobile ? 96 : 160, maxWidth: isMobile ? 96 : "none", width: "auto", objectFit: "contain", objectPosition: "bottom", filter: "drop-shadow(0 4px 10px rgba(0,0,0,0.45))" }} />
               </div>
             )}
           </div>
@@ -416,47 +423,6 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
             {bio.map(([k, v]) => <Box key={k} label={k}>{v}</Box>)}
           </div>
           {row?.slug && <a href={`/player/${row.slug}`} target="_blank" rel="noopener noreferrer" style={{ display: "inline-block", marginTop: 10, fontSize: 12, fontWeight: 900, color: GOLD }}>Full We-Draft profile ↗</a>}
-
-          {/* The We-Draft draft grade. */}
-          {look && (
-            <>
-              <H right={<span style={{ fontSize: 11, fontWeight: 800, color: SUB }}>Community grade on We-Draft.com</span>}>We-Draft draft grade</H>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <div style={{ alignSelf: "flex-start", minWidth: 150, background: "#111a2b", border: `1px solid ${LINE}`, borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", gap: 12 }}>
-                  <div style={{ background: look.bg, border: `2px solid ${look.border}`, borderRadius: 10, padding: "6px 12px", fontWeight: 900, fontSize: 22, lineHeight: 1, textAlign: "center" }}>
-                    {look.qualifier && <div style={{ fontSize: 9, letterSpacing: "0.12em", marginBottom: 3 }}>{look.qualifier}</div>}{look.short}
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 14, fontWeight: 900 }}>{label}</div>
-                    <div style={{ fontSize: 12, fontWeight: 800, color: SUB }}>{draftClass ? `${draftClass} draft class` : "Draft class"}</div>
-                  </div>
-                </div>
-                {[["Strengths", p.str, GREEN], ["Weaknesses", p.weak, RED]].map(([k, list, color]) => list?.length ? (
-                  <div key={k} style={{ background: "#111a2b", border: `1px solid ${LINE}`, borderRadius: 10, padding: "8px 12px" }}>
-                    <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.12em", color, textTransform: "uppercase" }}>{k}</div>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
-                      {list.map((x) => <span key={x} style={{ fontSize: 12, fontWeight: 900, borderRadius: 999, padding: "4px 10px", border: `1px solid ${color}55`, color }}>{x}</span>)}
-                    </div>
-                  </div>
-                ) : null)}
-              </div>
-            </>
-          )}
-
-          {/* Last season's stats — only when there are some. */}
-          {tiles.length > 0 && (
-            <>
-              <H>Last season</H>
-              <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill, minmax(${isMobile ? 92 : 104}px, 1fr))`, gap: 8 }}>
-                {tiles.map(([k, v]) => (
-                  <div key={k} style={{ background: "#111a2b", border: `1px solid ${LINE}`, borderRadius: 10, padding: "8px 10px", textAlign: "center" }}>
-                    <div style={{ fontSize: 20, fontWeight: 900 }}>{v}</div>
-                    <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.1em", color: SUB, textTransform: "uppercase" }}>{k}</div>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
 
           {/* College interest — the recruitment. */}
           {moving && <H right={to ? null : <span style={{ fontSize: 11, fontWeight: 800, color: SUB }}>{p.list ? `Down to his top ${p.list} · ` : ""}Commits at {Math.round(bar * 100)}+ · offers land the window after they're made</span>}>{to ? "Commitment" : "College interest"}</H>}
@@ -553,11 +519,12 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
                 <span> Contacts {sim.board.count}/{sim.board.limit}.</span>
                 {onBoard && (p.coach?.[team] || 0) > 0 && <span style={{ color: GOLD }}> Your coaches have built +{Math.round(p.coach[team] * 100)}.</span>}
               </div>
+              {/* Your coaches: tap one to put him on this player (user,
+                  2026-11-18 — no dragging needed). */}
               {onBoard && (
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <span style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.12em", color: SUB }}>COACHES ON HIM</span>
-                  <CoachTags state={state} slug={team} pid={p.id} />
-                  {!sim.staff || !Object.values(sim.staff).includes(p.id) ? <span style={{ fontSize: 11, fontWeight: 800, color: SUB }}>None — drag a coach onto him on My Board</span> : null}
+                <div style={{ flexBasis: "100%" }}>
+                  <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.12em", color: SUB, marginBottom: 6 }}>YOUR COACHES · TAP TO PUT ONE ON HIM</div>
+                  <CoachButtons sim={sim} pid={p.id} />
                 </div>
               )}
               {!onBoard && (
@@ -659,6 +626,49 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
               </div>
             </>
           )}
+          {/* The draft grade and last season's stats — below the recruitment
+              (user, 2026-11-18: college interest sits right under the bio). */}
+          {/* The We-Draft draft grade. */}
+          {look && (
+            <>
+              <H right={<span style={{ fontSize: 11, fontWeight: 800, color: SUB }}>Community grade on We-Draft.com</span>}>We-Draft draft grade</H>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ alignSelf: "flex-start", minWidth: 150, background: "#111a2b", border: `1px solid ${LINE}`, borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", gap: 12 }}>
+                  <div style={{ background: look.bg, border: `2px solid ${look.border}`, borderRadius: 10, padding: "6px 12px", fontWeight: 900, fontSize: 22, lineHeight: 1, textAlign: "center" }}>
+                    {look.qualifier && <div style={{ fontSize: 9, letterSpacing: "0.12em", marginBottom: 3 }}>{look.qualifier}</div>}{look.short}
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 900 }}>{label}</div>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: SUB }}>{draftClass ? `${draftClass} draft class` : "Draft class"}</div>
+                  </div>
+                </div>
+                {[["Strengths", p.str, GREEN], ["Weaknesses", p.weak, RED]].map(([k, list, color]) => list?.length ? (
+                  <div key={k} style={{ background: "#111a2b", border: `1px solid ${LINE}`, borderRadius: 10, padding: "8px 12px" }}>
+                    <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.12em", color, textTransform: "uppercase" }}>{k}</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+                      {list.map((x) => <span key={x} style={{ fontSize: 12, fontWeight: 900, borderRadius: 999, padding: "4px 10px", border: `1px solid ${color}55`, color }}>{x}</span>)}
+                    </div>
+                  </div>
+                ) : null)}
+              </div>
+            </>
+          )}
+
+          {/* Last season's stats — only when there are some. */}
+          {tiles.length > 0 && (
+            <>
+              <H>Last season</H>
+              <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill, minmax(${isMobile ? 92 : 104}px, 1fr))`, gap: 8 }}>
+                {tiles.map(([k, v]) => (
+                  <div key={k} style={{ background: "#111a2b", border: `1px solid ${LINE}`, borderRadius: 10, padding: "8px 10px", textAlign: "center" }}>
+                    <div style={{ fontSize: 20, fontWeight: 900 }}>{v}</div>
+                    <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.1em", color: SUB, textTransform: "uppercase" }}>{k}</div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
           {/* Career path — moved along by the sim; at the very bottom, dark
               (only the high school keeps a light circle). */}
           {careerPlayer && (() => {

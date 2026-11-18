@@ -67,6 +67,7 @@ import { retainOdds, urgencyOf, teamNeeds, tiesOf, competitive, needLevelOf, eff
 import { gradeLabel } from "../utils/gradeScale";
 import { SimTabs, MyClasses, PortalCommunity, SaveClassButton, ShareClass, DraftSimPromo, useBranding } from "../components/portalSim/PortalCommunity";
 import PortalTutorial from "../components/portalSim/PortalTutorial";
+import { useScrollLock } from "../utils/scrollLock";
 import { CLASSES_PATH, COMMUNITY_PATH, RECENT_PATH, recordPortalResult } from "../utils/portalSim/publicSims";
 import { portalSimYear } from "../utils/portalSim/meta";
 
@@ -136,6 +137,12 @@ const CSS = `
   .wd-sim-scroll::-webkit-scrollbar-track { background: #0b1322; }
   .wd-sim-scroll::-webkit-scrollbar-thumb { background: linear-gradient(#f6a21d, #0055a5); border-radius: 999px; border: 2px solid #0b1322; }
   html.wd-sim-dark, html.wd-sim-dark body { background: #070d18; }
+  html.wd-sim-lock, html.wd-sim-lock body { overflow: hidden; overscroll-behavior: none; }
+  html.wd-sim-navhide .wd-navbar-wrap { transform: translateY(-100%); transition: transform .25s ease !important; }
+  html.wd-sim-navhide.wd-sim-navopen .wd-navbar-wrap { transform: none; }
+  .wd-sim-nofooter footer { display: none; }
+  .wd-ps-tabs { scrollbar-width: none; }
+  .wd-ps-tabs::-webkit-scrollbar { display: none; }
   @keyframes psDrift { 0% { transform: translate(0, 0); } 100% { transform: translate(-80px, -46px); } }
   @keyframes psGlow { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
   @keyframes psToast { 0% { opacity: 0; transform: translate(-50%, 10px); } 12%, 80% { opacity: 1; transform: translate(-50%, 0); } 100% { opacity: 0; transform: translate(-50%, -6px); } }
@@ -432,12 +439,13 @@ function LiveSim({ data, run, isMobile, onSettings, onRerun, onOptions, tabs: do
   // window 2), then — once the portal opens — Results first, the portal's
   // tabs, and Leaving. NFL decisions live in Roster & Needs from then on.
   // Each window lands on its first tab.
+  // Roster & Needs sits right after My Board (user, 2026-11-18).
   const tabs = [
     ...(market ? [["market", `Market Watch${view.considering.length ? ` (${view.considering.length})` : ""}`]] : []),
-    ...(portalOpen && !market ? [["results", "Results"], ["portal", `Portal (${sim.portal.length})`], ["board", `My Board (${sim.board.count}/${sim.board.limit})`]] : []),
+    ...(portalOpen && !market ? [["results", "Results"], ["portal", `Portal (${sim.portal.length})`], ["board", `My Board (${sim.board.count}/${sim.board.limit})`], ["needs", "Roster & Needs"]] : []),
     ...(!portalOpen ? [["nfl", stage === "nfl" ? `NFL Decisions (${view.considering.length})` : "NFL Decisions"]] : []),
     ...(stage !== "nfl" && stage !== "ready" && !market ? [["leaving", stage === "retain" ? `Leaving (${view.considering.length})` : "Leaving"]] : []),
-    ...(market ? [] : [["needs", "Roster & Needs"]]),
+    ...(!portalOpen ? [["needs", "Roster & Needs"]] : []),
     ...(isMobile ? [["desk", "The Desk"]] : []),
   ];
   const [tabPick, setTab] = useState(null);
@@ -466,6 +474,98 @@ function LiveSim({ data, run, isMobile, onSettings, onRerun, onOptions, tabs: do
   useEffect(() => {
     if (stage === "window" && state.window === 1 && phase === "window" && !briefed.current) { briefed.current = true; setBrief(true); }
   }, [stage, state.window, phase]);
+
+  const body = tab === "desk" ? <SimFeed feed={sim.feed} branding={data.branding} height="auto" isMobile filters={DESK_FILTERS} />
+    : tab === "market" ? <MarketTab sim={sim} team={run.team} brand={brand} isMobile={isMobile} />
+      : tab === "nfl" ? <NflTab sim={sim} team={run.team} isMobile={isMobile} />
+        : tab === "leaving" ? <LeavingTab sim={sim} team={run.team} brand={brand} isMobile={isMobile} />
+          : tab === "portal" ? <PortalTab sim={sim} team={run.team} brand={brand} isMobile={isMobile} />
+            : tab === "board" ? <BoardTab sim={sim} team={run.team} brand={brand} isMobile={isMobile} />
+              : tab === "results" ? <ResultsTab sim={sim} team={run.team} brand={brand} isMobile={isMobile} />
+                : <NeedsTab sim={sim} team={run.team} brand={brand} isMobile={isMobile} />;
+
+  // ── Phones, mid-run (user, 2026-11-18 — the Draft Sim's way): one screen
+  // pinned to the viewport. The header and the tab bar never move; only the
+  // tab's content scrolls (up and down — nothing wider than the screen). The
+  // page itself doesn't scroll (wd-sim-lock), the footer is hidden, and the
+  // navbar slides up out of the way with an arrow tab to bring it back.
+  const live = isMobile && (phase === "window" || phase === "simming");
+  const [navOpen, setNavOpen] = useState(false);
+  const bodyRef = useRef(null);
+  useEffect(() => {
+    if (!live) return undefined;
+    const html = document.documentElement;
+    window.scrollTo(0, 0);
+    document.body.classList.add("wd-sim-nofooter");
+    html.classList.add("wd-sim-lock", "wd-sim-navhide");
+    return () => {
+      document.body.classList.remove("wd-sim-nofooter");
+      html.classList.remove("wd-sim-lock", "wd-sim-navhide", "wd-sim-navopen");
+    };
+  }, [live]);
+  useEffect(() => { document.documentElement.classList.toggle("wd-sim-navopen", live && navOpen); }, [live, navOpen]);
+  // A new tab (or window) starts at its top.
+  useEffect(() => { if (bodyRef.current) bodyRef.current.scrollTop = 0; }, [tab, state.window, stage]);
+  if (live) {
+    const school = b.School || "";
+    const schoolSize = Math.max(13, Math.min(19, Math.floor(168 / (Math.max(school.length, 1) * 0.68))));
+    return (
+      <>
+        <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", flexDirection: "column", background: BG, color: INK, fontFamily: "Arial, sans-serif", paddingBottom: "env(safe-area-inset-bottom)" }}>
+          {/* Header: logo, window, school, money, the advance button; the track under it. */}
+          <div style={{ position: "relative", flexShrink: 0, background: `linear-gradient(115deg, ${c1} 0%, ${c1} 55%, color-mix(in srgb, ${c2} 60%, ${c1}) 100%)`, boxShadow: "0 4px 14px rgba(0,0,0,0.45)" }}>
+            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(rgba(0,0,0,0.25), rgba(0,0,0,0.45))" }} />
+            <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 8, padding: "16px 10px 6px" }}>
+              <Logo onColor b={b} size={34} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 9, fontWeight: 900, letterSpacing: "0.14em", opacity: 0.9, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</div>
+                <div style={{ fontSize: schoolSize, fontWeight: 900, textTransform: "uppercase", lineHeight: 1.1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{school}</div>
+                <div style={{ fontSize: 10, fontWeight: 800, opacity: 0.9, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  <span style={{ color: "#fff" }}>{money(view.available)}</span> left{portalOpen ? <> · <span style={{ color: sim.board.full ? GOLD : undefined }}>{sim.board.count}/{sim.board.limit} contacts</span></> : null}
+                </div>
+              </div>
+              {advance && (
+                <button type="button" disabled={!advance[1]} onClick={advance[1] || undefined} style={{
+                  border: "none", borderRadius: 999, padding: "9px 12px", fontWeight: 900, fontSize: 12, letterSpacing: "0.04em", textTransform: "uppercase",
+                  background: advance[1] ? GOLD : "rgba(0,0,0,0.35)", color: "#fff", cursor: advance[1] ? "pointer" : "default", fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0,
+                }}>{advance[0]}</button>
+              )}
+            </div>
+            <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 3, padding: "0 10px 8px" }}>
+              {(run.live ? [] : ["nfl", "retain"]).map((k) => {
+                const done = portalOpen || (k === "nfl" && stage === "retain");
+                return <div key={k} style={{ flex: 1.4, height: 4, borderRadius: 2, background: done ? c2 : stage === k ? "#fff" : "rgba(255,255,255,0.2)", marginRight: k === "retain" ? 6 : 0 }} />;
+              })}
+              {Array.from({ length: state.windows }, (_, i) => i + 1).map((w) => (
+                <Fragment key={w}>
+                  <div style={{ flex: 1, height: 4, borderRadius: 2, background: (portalOpen && (w < state.window || (market && w === state.window))) ? c2 : portalOpen && w === state.window ? "#fff" : "rgba(255,255,255,0.2)" }} />
+                  {w === split && split < state.windows && <div style={{ width: 7, height: 7, transform: "rotate(45deg)", borderRadius: 1, flexShrink: 0, margin: "0 3px", background: market ? "#fff" : portalOpen && state.window > split ? c2 : "rgba(255,255,255,0.2)" }} />}
+                </Fragment>
+              ))}
+            </div>
+          </div>
+          {/* Tab bar — scrolls sideways on its own; the screen never does. */}
+          <div className="wd-ps-tabs" style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 5, padding: "7px 8px", borderBottom: `1px solid ${LINE}`, background: "#0b1322", overflowX: "auto", overscrollBehaviorX: "contain" }}>
+            {tabs.map(([k, text]) => <button key={k} type="button" onClick={() => setTab(k)} style={{ ...pillBtn(tab === k, c1), padding: "6px 11px", fontSize: 11, flexShrink: 0 }}>{text}</button>)}
+            {portalOpen && !market && <button type="button" onClick={() => setBrief(true)} style={{ ...pillBtn(false), padding: "6px 11px", fontSize: 11, flexShrink: 0, color: GOLD, borderColor: "rgba(246,162,29,0.5)" }}>Briefing</button>}
+            <button type="button" onClick={onSettings} aria-label="Settings" style={{ ...pillBtn(false), padding: "6px 10px", fontSize: 11, flexShrink: 0 }}>⚙ Settings</button>
+          </div>
+          {sim.error && <div style={{ flexShrink: 0, padding: "7px 12px", background: "#3a1219", color: "#ffb3a8", fontWeight: 800, fontSize: 12 }}>{sim.error}</div>}
+          {/* The tab: the only thing that scrolls. */}
+          <div ref={bodyRef} className="wd-sim-scroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden", overscrollBehavior: "contain", WebkitOverflowScrolling: "touch" }}>
+            {phase === "simming" ? <LoadingSpinner label="Simming the window" size={36} minHeight="40vh" /> : body}
+            <div style={{ padding: "12px 12px 20px", fontSize: 10, color: SUB, fontWeight: 700 }}>For simulation purposes only — not We-Draft.com projections. Seed {run.seed}.</div>
+          </div>
+        </div>
+        <button type="button" onClick={() => setNavOpen((o) => !o)} aria-label={navOpen ? "Hide the menu" : "Show the menu"} aria-expanded={navOpen} style={{
+          position: "fixed", top: navOpen ? 66 : 0, left: "50%", transform: "translateX(-50%)", zIndex: 10002, transition: "top .25s ease",
+          border: "none", borderRadius: "0 0 10px 10px", background: "#0055a5", color: "#fff", padding: "1px 16px 3px", fontSize: 11, lineHeight: 1.2, cursor: "pointer", boxShadow: "0 2px 6px rgba(0,0,0,0.35)",
+        }}>{navOpen ? "▲" : "▼"}</button>
+        {brief && !sim.card && <Briefing sim={sim} team={run.team} brand={brand} isMobile onClose={() => setBrief(false)} />}
+        {sim.card && <PlayerCard pid={sim.card} sim={sim} team={run.team} brand={brand} isMobile onClose={sim.closeCard} />}
+      </>
+    );
+  }
 
   return (
     <div ref={fsRef} className={fs ? "wd-sim-scroll" : undefined} style={fs ? { background: BG, padding: 14, overflowY: "auto", height: "calc(100vh / var(--pz, 1))", boxSizing: "border-box", color: INK, fontFamily: "Arial, sans-serif" } : undefined}>
@@ -541,14 +641,7 @@ function LiveSim({ data, run, isMobile, onSettings, onRerun, onOptions, tabs: do
         </div>
         {sim.error && <div style={{ padding: "8px 14px", background: "#3a1219", color: "#ffb3a8", fontWeight: 800, fontSize: 13 }}>{sim.error}</div>}
         <div className="wd-sim-scroll" style={{ maxHeight: isMobile ? "70vh" : fs ? FS_LIST : 720, minHeight: fs ? FS_LIST : undefined, overflowY: "auto" }}>
-          {tab === "desk" ? <SimFeed feed={sim.feed} branding={data.branding} height="auto" isMobile filters={DESK_FILTERS} />
-            : tab === "market" ? <MarketTab sim={sim} team={run.team} brand={brand} isMobile={isMobile} />
-            : tab === "nfl" ? <NflTab sim={sim} team={run.team} isMobile={isMobile} />
-            : tab === "leaving" ? <LeavingTab sim={sim} team={run.team} brand={brand} isMobile={isMobile} />
-              : tab === "portal" ? <PortalTab sim={sim} team={run.team} brand={brand} isMobile={isMobile} />
-                : tab === "board" ? <BoardTab sim={sim} team={run.team} brand={brand} isMobile={isMobile} />
-                  : tab === "results" ? <ResultsTab sim={sim} team={run.team} brand={brand} isMobile={isMobile} />
-                    : <NeedsTab sim={sim} team={run.team} brand={brand} isMobile={isMobile} />}
+          {body}
         </div>
       </div>
       {!isMobile && (
@@ -665,6 +758,7 @@ const Undecided = ({ size }) => (
 // while he's in the portal undecided), then any Info / Stats columns.
 function PlayerLine({ p, brand, to, isMobile, right, extra, onOpen, cols, flush = false }) {
   const lg = isMobile ? 22 : 26;
+  if (isMobile) return <PlayerLineMobile p={p} brand={brand} to={to} right={right} extra={extra} onOpen={onOpen} cols={cols} flush={flush} />;
   return (
     <div className="wd-sim-row" style={{ display: "flex", alignItems: "center", gap: isMobile ? 8 : 12, padding: isMobile ? "9px 10px" : "10px 16px", borderBottom: flush ? "none" : `1px solid ${LINE}` }}>
       <TransferStars stars={p.stars} size="sm" />
@@ -690,6 +784,56 @@ function PlayerLine({ p, brand, to, isMobile, right, extra, onOpen, cols, flush 
   );
 }
 
+// Phones (user, 2026-11-18 — rows redesigned to fit): stars over the
+// position on the left; the name gets the full line; under it, where he's
+// from → where he's going and the row's note; then the row's own pieces
+// (status, offers, buttons), wrapping as needed — never wider than the
+// screen. Info / Stats columns become small labeled cells.
+function PlayerLineMobile({ p, brand, to, right, extra, onOpen, cols, flush }) {
+  const lg = 18;
+  const arrow = <span style={{ color: SUB, fontWeight: 900, fontSize: 11 }}>→</span>;
+  const nameStyle = { fontWeight: 900, fontSize: 14, lineHeight: 1.2, display: "block", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" };
+  return (
+    <div className="wd-sim-row" style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "9px 10px", borderBottom: flush ? "none" : `1px solid ${LINE}`, minWidth: 0 }}>
+      <div style={{ width: 40, flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, paddingTop: 1 }}>
+        <TransferStars stars={p.stars} size="sm" />
+        <span style={{ width: 40, textAlign: "center", fontSize: 10, fontWeight: 900, color: "#9fc3ff", background: "#13233f", borderRadius: 5, padding: "2px 0" }}>{p.sub || p.pos}</span>
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {onOpen
+          ? <button type="button" onClick={() => onOpen(p.id)} style={{ all: "unset", cursor: "pointer", ...nameStyle, textDecoration: "underline", textDecorationColor: "rgba(255,255,255,0.25)", textUnderlineOffset: 3 }}>{p.name}</button>
+          : <div style={nameStyle}>{p.name}</div>}
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "6px 8px", marginTop: 3, minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0, flex: "1 1 130px" }}>
+          {brand(p.team, p) ? <Logo b={brand(p.team, p)} size={lg} /> : null}
+          {to && <>{arrow}<Logo b={brand(to)} size={lg} /></>}
+          {!to && p.status === "portal" && <>{arrow}<Undecided size={lg} /></>}
+          {!to && p.status === "declared" && <>{arrow}<DepartureIcon kind={p.reason === "exhausted" ? "grad" : "nfl"} dark size={lg} /></>}
+          <span style={{ marginLeft: 2, minWidth: 0, fontSize: 11, fontWeight: 700, color: SUB, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            {extra ? <span style={{ color: "#9fc3ff" }}>{extra} · </span> : null}{p.elig} yr{p.elig === 1 ? "" : "s"} · {ROLE_LABEL[p.role] || "—"}
+          </span>
+        </div>
+        {right && !cols && <div className="wd-ps-right" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end", gap: 6, marginLeft: "auto", minWidth: 0, maxWidth: "100%" }}>{right}</div>}
+        </div>
+        {cols && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 10px", marginTop: 5 }}>
+            {cols.map(([k, label, fmt]) => {
+              const v = cellValue(k, fmt, p);
+              const blank = v == null || v === "";
+              return (
+                <span key={k} style={{ display: "inline-flex", alignItems: "baseline", gap: 3, fontSize: 12, fontWeight: 800, color: blank ? "#3a4a66" : INK, whiteSpace: "nowrap" }}>
+                  <span style={{ fontSize: 9, fontWeight: 900, letterSpacing: "0.06em", color: SUB, textTransform: "uppercase" }}>{label}</span>{blank ? "—" : v}
+                </span>
+              );
+            })}
+          </div>
+        )}
+        {right && cols && <div className="wd-ps-right" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end", gap: 6, marginTop: 6, minWidth: 0 }}>{right}</div>}
+      </div>
+    </div>
+  );
+}
+
 // ── Portal: who's available, and making offers ──
 function PortalTab({ sim, team, brand, isMobile }) {
   const { portal, view } = sim;
@@ -706,8 +850,8 @@ function PortalTab({ sim, team, brand, isMobile }) {
   const cols = tableCols(f);
   return (
     <>
-      <EvalBanner sim={sim} />
-      <FilterBar f={f} view={view} extra={<button type="button" style={pillBtn(picks, GOLD)} onClick={() => setPicks((v) => !v)} title="Players your staff recommends">★ Coach picks ({Object.keys(recs).filter((id) => sim.state.players[id]?.status === "portal").length})</button>} />
+      <EvalBanner sim={sim} isMobile={isMobile} />
+      <FilterBar f={f} view={view} isMobile={isMobile} extra={<button type="button" style={{ ...pillBtn(picks, GOLD), ...(isMobile ? { padding: "5px 10px", fontSize: 11 } : {}) }} onClick={() => setPicks((v) => !v)} title="Players your staff recommends">★ Coach picks ({Object.keys(recs).filter((id) => sim.state.players[id]?.status === "portal").length})</button>} />
       {list.length === 0 ? <div style={{ padding: 40, textAlign: "center", color: SUB }}>{picks ? "No coach picks match." : "No one available matches."}</div> : <TableWrap cols={cols} f={f} isMobile={isMobile}>{list.slice(0, shown).map((p) => {
         const mine = p.offers[team];
         // Other schools interested: contacted or offering.
@@ -806,11 +950,29 @@ function TableWrap({ cols, f, isMobile, children }) {
       {cols && <span style={{ width: rightW(isMobile), flexShrink: 0 }} />}
     </div>
   );
+  if (isMobile) {
+    // Phones (user, 2026-11-18): nothing wider than the screen — the view
+    // picker, then "Sort" chips (the columns sit in each row as cells).
+    return (
+      <>
+        <div style={{ padding: "8px 10px", borderBottom: `1px solid ${LINE}`, background: "#0b1322" }}>
+          <ViewPicker f={f} />
+          {cols && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 8, alignItems: "center" }}>
+              <span style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.12em", color: SUB, marginRight: 2 }}>SORT</span>
+              {[["stars", "★"], ["name", "Name"], ...cols.map(([k, label]) => [k, label])].map(([k, label]) => {
+                const on = f.sort.key === k;
+                return <button key={k} type="button" onClick={() => f.sortBy(k)} style={{ ...pillBtn(on, GOLD), padding: "3px 8px", fontSize: 10 }}>{label}{on ? (f.sort.dir < 0 ? " ▼" : " ▲") : ""}</button>;
+              })}
+            </div>
+          )}
+        </div>
+        {children}
+      </>
+    );
+  }
   if (!cols) return <>{row}{children}</>;
-  const inner = <>{row}{children}</>;
-  return isMobile
-    ? <div style={{ overflowX: "auto" }}><div style={{ minWidth: 420 + cols.length * (colW(true) + 8) }}>{inner}</div></div>
-    : inner;
+  return <>{row}{children}</>;
 }
 // A row: the player line, with the view's columns when it has them.
 function PlayerRow(props) { return <PlayerLine {...props} />; }
@@ -849,7 +1011,36 @@ const NeedDot = ({ v, size = 8 }) => {
   const [, label, color] = needLevelOf(v);
   return <span title={label} style={{ width: size, height: size, borderRadius: "50%", background: color, flexShrink: 0, display: "inline-block" }} />;
 };
-function FilterBar({ f, view, extra = null }) {
+function FilterBar({ f, view, extra = null, isMobile = false }) {
+  if (isMobile) {
+    // Phones: the positions scroll sideways in their own strip; the rest
+    // wraps under it — the screen itself never goes sideways.
+    return (
+      <div style={{ borderBottom: `1px solid ${LINE}` }}>
+        <div className="wd-ps-tabs" style={{ display: "flex", gap: 5, padding: "8px 10px 6px", overflowX: "auto", overscrollBehaviorX: "contain" }}>
+          <button type="button" style={{ ...pillBtn(!f.pos), padding: "5px 10px", fontSize: 11, flexShrink: 0 }} onClick={() => f.setPos("")}>All</button>
+          {POS_TABS.map((x) => (
+            <button key={x} type="button" style={{ ...pillBtn(f.pos === x), padding: "5px 10px", fontSize: 11, flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 5 }} onClick={() => f.setPos(f.pos === x ? "" : x)}>
+              {x}<NeedDot v={needAt(view.needs, x)} size={6} />
+            </button>
+          ))}
+        </div>
+        {SUBS[f.pos] && (
+          <div style={{ display: "flex", gap: 4, padding: "0 10px 6px", alignItems: "center" }}>
+            {SUBS[f.pos].map(([k, label]) => <button key={k || "all"} type="button" style={{ ...pillBtn(f.sub === k), padding: "4px 9px", fontSize: 11 }} onClick={() => f.setSub(k)}>{label}</button>)}
+          </div>
+        )}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 5, padding: "0 10px 8px", alignItems: "center" }}>
+          <select value={f.minStars} onChange={(e) => f.setMinStars(Number(e.target.value))} aria-label="Stars" style={{ background: "#111a2b", color: INK, border: `1px solid ${LINE}`, borderRadius: 999, padding: "5px 8px", fontWeight: 800, fontSize: 12, maxWidth: 120 }}>
+            {[2, 3, 4, 5, 6].map((n) => <option key={n} value={n}>{n === 2 ? "All stars" : `${n}★${n < 6 ? "+" : ""}`}</option>)}
+          </select>
+          <button type="button" style={{ ...pillBtn(f.needsOnly, GOLD), padding: "5px 10px", fontSize: 11 }} onClick={() => f.setNeedsOnly((v) => !v)}>My needs</button>
+          {extra}
+          <input value={f.q} onChange={(e) => f.setQ(e.target.value)} placeholder="Search…" style={{ flex: "1 1 110px", minWidth: 0, background: "#111a2b", color: INK, border: `1px solid ${LINE}`, borderRadius: 999, padding: "6px 12px", fontWeight: 700, fontSize: 16, outline: "none" }} />
+        </div>
+      </div>
+    );
+  }
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 6, padding: "10px 12px", borderBottom: `1px solid ${LINE}` }}>
       <button type="button" style={pillBtn(!f.pos)} onClick={() => f.setPos("")}>All</button>
@@ -914,7 +1105,12 @@ function boardStanding(state, p, team, evalPeriod = false) {
   return competitive(state, ties, team) ? [`#${rank} of ${n} · in it`, GOLD, rank] : [`#${rank} of ${n} · long shot`, "#ff8a7a", rank];
 }
 // The evaluation period, explained (Portal and My Board, window 1).
-const EvalBanner = ({ sim }) => (!sim.board.evalPeriod ? null : (
+const EvalBanner = ({ sim, isMobile }) => (!sim.board.evalPeriod ? null : isMobile ? (
+  // Phones: the short version.
+  <div style={{ margin: "8px 10px 0", padding: "8px 11px", borderRadius: 10, background: "rgba(246,162,29,0.1)", border: "1px solid rgba(246,162,29,0.45)", fontSize: 12, fontWeight: 700, lineHeight: 1.4 }}>
+    <b style={{ color: GOLD, letterSpacing: "0.06em" }}>EVALUATION PERIOD</b> · No offers yet — contact players and interest starts building. <span style={{ color: SUB }}>{sim.board.count}/{sim.board.limit} contacts</span>
+  </div>
+) : (
   <div style={{ margin: "10px 12px 0", padding: "12px 14px", borderRadius: 12, background: "rgba(246,162,29,0.1)", border: "1px solid rgba(246,162,29,0.45)", fontSize: 13, fontWeight: 700, lineHeight: 1.45 }}>
     <b style={{ color: GOLD, letterSpacing: "0.08em" }}>EVALUATION PERIOD</b> · No offers this window. Contact up to {sim.board.limit} players — interest builds from today, so your offers start ahead. Every school is doing the same; the ones that fall behind move on. Contacts grow as the portal goes on ({(sim.state.cfg.board?.sizes || []).join(" → ")}).
     <span style={{ color: SUB }}> Contacts: {sim.board.count}/{sim.board.limit}</span>
@@ -1061,7 +1257,7 @@ function BoardTab({ sim, team, brand, isMobile }) {
           </div>
         ) : null}
       </DragOverlay>
-      <EvalBanner sim={sim} />
+      <EvalBanner sim={sim} isMobile={isMobile} />
       {/* Needs by position — on board, signed. */}
       <div style={{ display: "flex", gap: 6, padding: "10px 12px", borderBottom: `1px solid ${LINE}`, overflowX: "auto" }}>
         {strip.map(({ x, v, on, signed }) => {
@@ -1076,8 +1272,23 @@ function BoardTab({ sim, team, brand, isMobile }) {
         })}
       </div>
       <StaffStrip sim={sim} onOpen={sim.openCard} isMobile={isMobile} armed={armed} setArmed={setArmed} />
-      <Section title={`My board (${board.length}/${sim.board.limit}) · drag ⋮⋮ to reorder`}>
-        {board.length === 0 ? <Empty>{evalPeriod ? `Contact players from the Portal tab — up to ${sim.board.limit}.` : "Your board is empty. Contact players from the Portal tab."}</Empty> : (
+      <Section title={`My board (${board.length}/${sim.board.limit}) · ${isMobile ? "▲▼ to reorder" : "drag ⋮⋮ to reorder"}`}>
+        {board.length === 0 ? <Empty>{evalPeriod ? `Contact players from the Portal tab — up to ${sim.board.limit}.` : "Your board is empty. Contact players from the Portal tab."}</Empty> : isMobile ? (
+          // Phones (user, 2026-11-18): no dragging — arrows move a player up
+          // or down one spot; the rank sits between them.
+          board.map((p, i) => (
+            <div key={p.id} style={{ display: "flex", alignItems: "stretch", borderBottom: `1px solid ${LINE}` }}>
+              <div style={{ width: 34, flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, borderRight: `1px solid ${LINE}`, background: "#0b1322" }}>
+                <button type="button" aria-label={`Move ${p.name} up`} disabled={i === 0} onClick={() => sim.move(p.id, i - 1)} style={{ all: "unset", cursor: i === 0 ? "default" : "pointer", color: i === 0 ? "#2a3a58" : INK, fontSize: 13, padding: "4px 8px", lineHeight: 1 }}>▲</button>
+                <span style={{ fontSize: 12, fontWeight: 900, color: i < 3 ? GOLD : SUB }}>{i + 1}</span>
+                <button type="button" aria-label={`Move ${p.name} down`} disabled={i === board.length - 1} onClick={() => sim.move(p.id, i + 1)} style={{ all: "unset", cursor: i === board.length - 1 ? "default" : "pointer", color: i === board.length - 1 ? "#2a3a58" : INK, fontSize: 13, padding: "4px 8px", lineHeight: 1 }}>▼</button>
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <PlayerLine p={p} brand={brand} isMobile onOpen={sim.openCard} flush right={standingLine(p, i)} />
+              </div>
+            </div>
+          ))
+        ) : (
           <SortableContext items={board.map((p) => p.id)} strategy={verticalListSortingStrategy}>
             {board.map((p, i) => (
               <SortRow key={p.id} id={p.id}>
@@ -1147,6 +1358,7 @@ function NeedsTab({ sim, team: myTeam, brand, isMobile }) {
   // Any FBS roster (user, 2026-11-14) — yours by default.
   const [team, setTeam] = useState(myTeam);
   const [releasing, setReleasing] = useState(null); // pid awaiting confirm
+  useScrollLock(!!releasing);
   const needs = useMemo(() => (team === myTeam ? view.needs : teamNeeds(state, team)), [team, myTeam, view.needs, state]);
   const schools = useMemo(() => Object.values(state.teams).filter((t) => !t.fcs).sort((a, b) => a.school.localeCompare(b.school)), [state.teams]);
   const all = useMemo(() => Object.values(state.players), [state.players]);
@@ -1186,7 +1398,7 @@ function NeedsTab({ sim, team: myTeam, brand, isMobile }) {
   const releasingP = releasing ? state.players[releasing] : null;
   const releaseDialog = releasingP && (
     <div role="dialog" aria-modal="true" aria-label={`Release ${releasingP.name}`} onClick={() => setReleasing(null)}
-      style={{ position: "fixed", inset: 0, zIndex: 19000, background: "rgba(3,7,14,0.75)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      style={{ position: "fixed", inset: 0, zIndex: 19000, background: "rgba(3,7,14,0.75)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, overscrollBehavior: "contain", touchAction: "none" }}>
       <div onClick={(e) => e.stopPropagation()} className="wd-sim-pop" style={{ ...PANEL, width: "100%", maxWidth: 440, boxShadow: "0 24px 60px rgba(0,0,0,0.6)" }}>
         <div style={{ padding: "12px 16px", background: "#2a1016", borderBottom: "1px solid #5c1f28", fontSize: 12, fontWeight: 900, letterSpacing: "0.14em", color: "#ff8a7a" }}>RELEASE TO THE PORTAL</div>
         <div style={{ padding: "16px 18px", fontSize: 14, fontWeight: 700, lineHeight: 1.55 }}>
@@ -1696,7 +1908,7 @@ function CountryResults({ sim, team, brand, isMobile }) {
   useEffect(() => { setShown(60); }, [kind, f]);
   return (
     <>
-      <FilterBar f={f} view={view} />
+      <FilterBar f={f} view={view} isMobile={isMobile} />
       {kinds.length > 1 && (
         <div style={{ display: "flex", gap: 6, padding: "8px 12px", borderBottom: `1px solid ${LINE}`, flexWrap: "wrap" }}>
           <button type="button" style={pillBtn(!kind)} onClick={() => setKind("")}>All moves ({moves.length})</button>
