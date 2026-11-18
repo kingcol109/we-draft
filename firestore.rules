@@ -470,6 +470,35 @@ service cloud.firestore {
       allow delete: if resource == null
         || (request.auth != null && resource.data.uid == request.auth.uid) || isAdmin();
     }
+    // Every closed Transfer Portal Sim run (utils/portalSim/publicSims.js
+    // recordPortalResult), saved or not — Community → Insights counts them.
+    // No user on them. Anyone (signed in or not) adds one, well-formed;
+    // no edits; only admins delete. Public read (the page's totals and lists).
+    match /portalSimResults/{id} {
+      allow read: if true;
+      allow create: if request.resource.data.keys().hasOnly(['season', 'team', 'school', 'live', 'frequency', 'grade', 'verdict', 'pct', 'n', 'spent', 'signings', 'createdAt'])
+        && request.resource.data.team is string && request.resource.data.team.size() < 64
+        && request.resource.data.n is int && request.resource.data.n >= 0 && request.resource.data.n <= 80
+        && request.resource.data.spent is int && request.resource.data.spent >= 0 && request.resource.data.spent < 100000000
+        && request.resource.data.signings is list && request.resource.data.signings.size() == request.resource.data.n
+        && request.resource.data.createdAt == request.time;
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+    // Public copies of saved Transfer Portal Sim classes
+    // (utils/portalSim/publicSims.js), listed on /portalsim/recent and
+    // summed up on /portalsim/community: anyone reads; the owner writes one
+    // only alongside their own saved class of the same id, and takes it down
+    // (making it private, or deleting); admins can take any down.
+    match /publicPortalSims/{simId} {
+      allow read: if true;
+      allow create: if request.auth != null && request.resource.data.uid == request.auth.uid
+        && existsAfter(/databases/$(database)/documents/users/$(request.auth.uid)/portalSims/$(simId));
+      allow update: if request.auth != null && resource.data.uid == request.auth.uid
+        && request.resource.data.uid == request.auth.uid;
+      allow delete: if resource == null
+        || (request.auth != null && resource.data.uid == request.auth.uid) || isAdmin();
+    }
     // Draft Sim badges (utils/draftSim/badges.js), written in Admin → Mock
     // Draft → Badges. Admins see them all; everyone else only active ones
     // (none until badges go live).
@@ -1062,6 +1091,11 @@ service cloud.firestore {
       // Draft Sim results saved from the end screen (SimResults.jsx) —
       // only the user's own teams' picks. Listed on their profile.
       match /draftSims/{simId} {
+        allow read, write: if request.auth != null && request.auth.uid == uid;
+      }
+      // Transfer Portal Sim classes saved from the Final screen
+      // (utils/portalSim/publicSims.js). Listed on /portalsim/classes.
+      match /portalSims/{simId} {
         allow read, write: if request.auth != null && request.auth.uid == uid;
       }
       // Whiteboard graphics saved to the account from the share dialog

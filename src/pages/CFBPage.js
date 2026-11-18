@@ -615,11 +615,13 @@ export default function CFBPage() {
       </div>
 
       {/* ===== Tab toggle ===== */}
-      <div style={{ display: "flex", gap: "10px", marginBottom: isMobile ? "20px" : "28px" }}>
+      <div style={{ display: "flex", gap: isMobile ? "6px" : "10px", marginBottom: isMobile ? "20px" : "28px", overflowX: isMobile ? "auto" : "visible" }}>
         {[
           { key: "teams", label: "Teams", to: "/cfb" },
-          { key: "schedule", label: "Full Schedule", to: "/cfb/schedule" },
+          { key: "schedule", label: isMobile ? "Schedule" : "Full Schedule", to: "/cfb/schedule" },
           { key: "stats", label: "Stats", to: "/cfb/stats" },
+          // The Transfer Portal lives at /portal — this tab just goes there.
+          { key: "portal", label: isMobile ? "Portal" : "Transfer Portal", to: "/portal" },
         ].map((tab) => (
           <Link
             key={tab.key}

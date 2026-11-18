@@ -29,6 +29,11 @@
 //                           live portal row can show them }, chunked as
 //                           _portal_board, _portal_board_1… when
 //                           big (parts)
+//   compSnapshots/_portal_stats  { season (the stats' season), rows: { [poolId]:
+//                           packed season stats } } for every player in the
+//                           portal — the board's position Stats view
+//                           (utils/portalStats.js packStats), read only when
+//                           that view opens; chunked like the board
 //
 // Real moves first: We-Draft's own portal flags (players InPortal /
 // PortalCycle / PortalCommittedAt / PortalWithdrawnAt) and the CFBD portal
@@ -85,9 +90,9 @@ const heightIn = (h) => {
 
 async function buildPortalPages(db, { seeds = SEEDS, dry = false, log = () => {} } = {}) {
   const startedAt = Date.now();
-  const [E, M, { expandPool }, { buildFactors }, { mergeConfig }, { attachDraftGrades, attachLocks }, { portalTeamSlug }, { STATE_ABBR }] = await Promise.all([
+  const [E, M, { expandPool }, { buildFactors }, { mergeConfig }, { attachDraftGrades, attachLocks }, { portalTeamSlug }, { STATE_ABBR }, { packStats }] = await Promise.all([
     load("portalSim/engine.js"), load("portalSim/models.js"), load("portalSim/pool.js"), load("portalSim/factors.js"),
-    load("portalSim/config.js"), load("portalSim/attach.js"), load("portalTeams.js"), load("highSchoolMatch.js"),
+    load("portalSim/config.js"), load("portalSim/attach.js"), load("portalTeams.js"), load("highSchoolMatch.js"), load("portalStats.js"),
   ]);
   const records = require(path.join(SRC, "portalSim/teamRecords.json"));
   const draft = require(path.join(SRC, "draftSim/draftHistory.json"));
@@ -392,18 +397,40 @@ async function buildPortalPages(db, { seeds = SEEDS, dry = false, log = () => {}
     data: { season, part: i, parts, builtAt: FieldValue.serverTimestamp(), entries: boardEntries.slice(i * BOARD_CHUNK, (i + 1) * BOARD_CHUNK), ...(i ? {} : { stars }) },
   }));
 
+  // Season stats for everyone in the portal (the Stats view), by pool id.
+  const inPortal = new Set(moves.map((m) => m.pid).filter(Boolean).map(String));
+  const statRows = {};
+  let statSeason = null;
+  rosterSnap.docs.forEach((d) => {
+    const t = d.data();
+    if (t.season && (!statSeason || t.season > statSeason)) statSeason = t.season;
+    (t.players || []).forEach((r) => {
+      const id = String(r.id);
+      if (!inPortal.has(id) || statRows[id]) return;
+      const packed = packStats(r.s);
+      if (packed) statRows[id] = packed;
+    });
+  });
+  const statIds = Object.keys(statRows);
+  const statParts = Math.max(1, Math.ceil(statIds.length / BOARD_CHUNK));
+  const statDocs = Array.from({ length: statParts }, (_, i) => ({
+    id: i ? `_portal_stats_${i}` : "_portal_stats",
+    data: { season: statSeason, part: i, parts: statParts, builtAt: FieldValue.serverTimestamp(), rows: Object.fromEntries(statIds.slice(i * BOARD_CHUNK, (i + 1) * BOARD_CHUNK).map((id) => [id, statRows[id]])) },
+  }));
+
   const sizes = teamDocs.map((t) => JSON.stringify(t.data).length);
   const out = {
     season, teams: teamDocs.length, moves: moves.length, cfbdOnly: boardEntries.length, signees: Object.values(signees).reduce((a, l) => a + l.length, 0),
     projectedEntrants: Object.values(entered).filter((n) => n >= seeds / 2).length, maxTeamDocKB: Math.round(Math.max(0, ...sizes) / 1024),
-    boardKB: Math.round(JSON.stringify(boardDocs[0].data).length / 1024), durationMs: Date.now() - startedAt, dry,
+    boardKB: Math.round(JSON.stringify(boardDocs[0].data).length / 1024), statPlayers: statIds.length, statsKB: Math.round(JSON.stringify(statDocs[0].data).length / 1024), durationMs: Date.now() - startedAt, dry,
   };
   if (dry) return { ...out, sample: { ...teamDocs.find((t) => t.slug === "ohio-state")?.data, targets: simTargets["ohio-state"] } };
 
+  const prevStats = (await db.collection("compSnapshots").doc("_portal_stats").get()).data();
   // The sim's suggestions, projected entrants included: admin only
   // (offseason is admin-read — the Targets tab reads it).
   await db.collection("offseason").doc("portalSimTargets").set({ season, builtAt: FieldValue.serverTimestamp(), teams: simTargets });
-  const writes = [...teamDocs.map((t) => [`_portal_${t.slug}`, t.data]), ...boardDocs.map((b) => [b.id, b.data])];
+  const writes = [...teamDocs.map((t) => [`_portal_${t.slug}`, t.data]), ...boardDocs.map((b) => [b.id, b.data]), ...statDocs.map((b) => [b.id, b.data])];
   for (let i = 0; i < writes.length; i += 100) {
     const batch = db.batch();
     writes.slice(i, i + 100).forEach(([id, data]) => batch.set(db.collection("compSnapshots").doc(id), data));
@@ -416,10 +443,16 @@ async function buildPortalPages(db, { seeds = SEEDS, dry = false, log = () => {}
     for (let i = parts; i < prevParts; i += 1) b.delete(db.collection("compSnapshots").doc(`_portal_board_${i}`));
     await b.commit();
   }
+  const prevStatParts = (prevStats?.parts) || 0;
+  if (prevStatParts > statParts) {
+    const b = db.batch();
+    for (let i = statParts; i < prevStatParts; i += 1) b.delete(db.collection("compSnapshots").doc(`_portal_stats_${i}`));
+    await b.commit();
+  }
   return { ...out, durationMs: Date.now() - startedAt };
 }
 
-const KIND_ORDER = { hole: 0, upgrade: 1, depth: 2, body: 3 };
+const KIND_ORDER = { hole: 0, upgrade: 1, talent: 2, depth: 3, body: 4 };
 
 // One run's needs and targets, added to the running sums.
 // Needs: engine needsOf. Wants: hole / upgrade / depth (bodies are filler —

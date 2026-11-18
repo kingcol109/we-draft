@@ -10,6 +10,7 @@ import AuthModal from "./components/AuthModal";
 import AdminRoute from "./components/AdminRoute";
 import SimRoute from "./components/SimRoute";
 import DraftSimMeta from "./components/draftSim/DraftSimMeta";
+import PortalSimMeta from "./components/portalSim/PortalSimMeta";
 import { useStuckSpinnerWatchdog } from "./hooks/useStuckSpinnerWatchdog";
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
@@ -58,7 +59,7 @@ const StaffPage = lazy(() => import("./pages/StaffPage"));
 // file's own top comment): noindexed and never linked from anywhere else
 // on the site, reachable only via a direct URL.
 const HighSchoolTeamPage = lazy(() => import("./pages/HighSchoolTeamPage"));
-// /portalsim (/portalsim/:team) — the Portal Sim (admin-only for now: AdminRoute).
+// /portalsim (/portalsim/:team) — the Transfer Portal Sim. Public (user, 2026-11-18: out of beta).
 const PortalSim = lazy(() => import("./pages/PortalSim"));
 // /portal, /portal/:position, /portal/updates, /portal/:team(/:tab) — the Transfer Portal.
 const TransferPortal = lazy(() => import("./pages/TransferPortal"));
@@ -223,8 +224,13 @@ function MainLayout() {
             {/* Redirect old /player2 URLs to canonical /player URLs */}
             <Route path="/player2/:slug" element={<RedirectPlayer2 />} />
             <Route path="/team/:teamId" element={<TeamPage />} />
-            <Route path="/portalsim" element={<SimRoute signInPrompt><PortalSim /></SimRoute>} />
-            <Route path="/portalsim/:team" element={<SimRoute signInPrompt><PortalSim /></SimRoute>} />
+            {/* SEO tags: components/portalSim/PortalSimMeta.jsx. My Classes and
+                Community (Insights, Recent Classes) set their own. */}
+            <Route path="/portalsim" element={<><PortalSimMeta /><PortalSim /></>} />
+            <Route path="/portalsim/classes" element={<PortalSim page="classes" />} />
+            <Route path="/portalsim/community" element={<PortalSim page="community" />} />
+            <Route path="/portalsim/recent" element={<PortalSim page="recent" />} />
+            <Route path="/portalsim/:team" element={<><PortalSimMeta /><PortalSim /></>} />
             <Route path="/portal" element={<TransferPortal />} />
             <Route path="/portal/updates" element={<TransferPortal view="updates" />} />
             <Route path="/portal/:position" element={<TransferPortal />} />

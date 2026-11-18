@@ -30,6 +30,7 @@ import { Avatar, Verified } from "./SimFeed";
 import { saveSim, setSimVisibility, listable, RECENT_PATH } from "../../utils/draftSim/publicSims";
 import { SimSnapshot } from "./SimProfile";
 import { EndBadges, SignUpPanel } from "./SimBadges";
+import PortalSimAd from "../portalSim/PortalSimAd";
 import MockExport from "./MockExport";
 import { PlayerName } from "./FitName";
 import { ProspectCardProvider, PlayerLink } from "./ProspectCard";
@@ -131,8 +132,15 @@ function ResultsBody({ sim, data, ctx, speed, isMobile, onRerun, onNew, mock = f
           <div style={{ display: "grid", gap: 12, minWidth: 0 }}>
             <SimSnapshot branding={data.branding} names={teamNamer(data.branding).teamName} year={data.year} counted={counted} />
             <EndBadges badges={badges} max={isMobile ? 3 : 4} />
+            {/* The Transfer Portal Sim, under the badges. */}
+            <PortalSimAd />
           </div>
-        ) : <SignUpPanel badges={badges} total={badgeTotal} login={login} signup={signup} />}
+        ) : (
+          <div style={{ display: "grid", gap: 12, minWidth: 0, alignContent: "start" }}>
+            <SignUpPanel badges={badges} total={badgeTotal} login={login} signup={signup} />
+            <PortalSimAd />
+          </div>
+        )}
       </div>
 
       {userHauls.length > 0 && <FullDraft sim={sim} data={data} isMobile={isMobile} cols={isMobile ? 1 : 4} />}

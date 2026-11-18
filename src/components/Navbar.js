@@ -544,7 +544,7 @@ export default function Navbar() {
               onMouseEnter={() => { if (cfbTimeout) clearTimeout(cfbTimeout); setCfbOpen(true); }}
               onMouseLeave={() => { const t = setTimeout(() => setCfbOpen(false), 150); setCfbTimeout(t); }}
             >
-              <Link to="/cfb" className="wd-nav-link" style={navLink(onSection("/cfb"))}>CFB</Link>
+              <Link to="/cfb" className="wd-nav-link" style={navLink(onSection("/cfb", "/portal", "/portalsim"))}>CFB</Link>
 
               {cfbOpen && (
                 <div
@@ -569,10 +569,17 @@ export default function Navbar() {
                 >
                   <div style={{ backgroundColor: "#0055a5", padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
                     <div style={{ color: "#f6a21d", fontWeight: 900, fontSize: "13px", letterSpacing: "0.1em", textTransform: "uppercase" }}>College Football</div>
-                    <Link to="/cfb" onClick={() => setCfbOpen(false)}
-                      style={{ color: "rgba(255,255,255,0.8)", fontSize: "11px", fontWeight: 800, letterSpacing: "0.06em", textDecoration: "underline", whiteSpace: "nowrap" }}>
-                      View All →
-                    </Link>
+                    <span style={{ display: "flex", gap: "14px" }}>
+                      {/* The Transfer Portal (/portal), as NFL's Draft Order. */}
+                      <Link to="/portal" onClick={() => setCfbOpen(false)}
+                        style={{ color: "#fff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.06em", textDecoration: "underline", whiteSpace: "nowrap" }}>
+                        Transfer Portal →
+                      </Link>
+                      <Link to="/cfb" onClick={() => setCfbOpen(false)}
+                        style={{ color: "rgba(255,255,255,0.8)", fontSize: "11px", fontWeight: 800, letterSpacing: "0.06em", textDecoration: "underline", whiteSpace: "nowrap" }}>
+                        View All →
+                      </Link>
+                    </span>
                   </div>
                   <div style={{ height: "3px", backgroundColor: "#f6a21d", flexShrink: 0 }} />
 
@@ -750,6 +757,7 @@ export default function Navbar() {
               { path: "/community", label: "Community Board" },
               { path: wePickHref(), label: "We-Pick" },
               { path: "/cfb", label: "CFB Teams" },
+              { path: "/portal", label: "Transfer Portal" },
               { path: "/nfl", label: "NFL Teams" },
               { path: "/mocks", label: "Mock Drafts" },
             ].map((l) => (

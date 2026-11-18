@@ -19,9 +19,19 @@
 //             where he'd fit in that room, and how interested he is — his grade
 //             of the offer plus what it's built by standing (offering early
 //             helps), the leader marked, the bar he needs to commit
-//   sent      sending an offer (portal or retention) plays a short animation
-//             (user, 2026-11-15): a band in YOUR colors sweeps the header,
-//             your logo pops, OFFER SENT stamps with the amount.
+//   sent      sending an offer (portal or retention) pops a small toast
+//             (user, 2026-11-18 — the old full-header sweep read like a
+//             commitment): your logo, "Offer sent", the amount.
+//   career    his career path (user, 2026-11-18), the player page's
+//             (PlayerEligibilityInfo useCareerPath) — high school, college
+//             stops (his team-page row: utils/portalData.js), then where the
+//             sim has taken him: the portal, his new school, the NFL.
+//   staff     (user, 2026-11-18) your staff's recommendation (who said it,
+//             why) up top (until he's on your board — then just the chip); your
+//             coaches on him (assigned by dragging on My Board) and the interest they've built; each school's coaches
+//             on him in the interest list.
+//   NFL       a player gone to the draft wears an NFL header — navy and red,
+//             the shield behind him.
 //   offer     NIL only — players judge the room, not promised roles (user,
 //             2026-11-14): where he'd fit in yours and how he sees your offer
 //             — each factor with his interest letter (A's first, F last) and
@@ -38,7 +48,11 @@
 // the header; an on-the-spot commit plays a celebration (the new colors
 // wipe in, the logo pops with a COMMITTED stamp, confetti).
 import { useEffect, useMemo, useRef, useState } from "react";
-import DepartureIcon from "../DepartureIcon";
+import DepartureIcon, { GRAD_ICON, NFL_ICON } from "../DepartureIcon";
+import { CareerStop, useCareerPath } from "../PlayerEligibilityInfo";
+import { CoachTags, RecQuote, RecChip } from "./StaffParts";
+import { fetchPortalTeamPage } from "../../utils/portalData";
+import { currentDraftClass } from "../../utils/eligibility";
 import { collection, getDocs, limit, query, where } from "firebase/firestore";
 import { db } from "../../firebase";
 import TransferStars from "../TransferStars";
@@ -67,10 +81,13 @@ const CELEBRATE_CSS = `
   @keyframes wdcMark { 0% { transform: scale(0) rotate(-12deg); opacity: 0; } 12% { transform: scale(1.2) rotate(4deg); opacity: 0.9; } 18% { transform: scale(1) rotate(0); opacity: 0.9; } 55% { opacity: 0.9; } 100% { transform: scale(1); opacity: 0.12; } }
   @keyframes wdcBand { 0% { transform: translateX(-105%); } 18%, 82% { transform: translateX(0); } 100% { transform: translateX(105%); } }
   @keyframes wdcShine { from { transform: translateX(-120%) skewX(-20deg); } to { transform: translateX(380%) skewX(-20deg); } }
+  @keyframes wdcToast { 0% { opacity: 0; transform: translate(-50%, 12px) scale(.96); } 12%, 82% { opacity: 1; transform: translate(-50%, 0) scale(1); } 100% { opacity: 0; transform: translate(-50%, -4px) scale(.98); } }
   @media (prefers-reduced-motion: reduce) { .wdc-anim { animation-duration: 1ms !important; animation-delay: 0s !important; } }
 `;
 const VALUE_LABEL = { tier: "Program", nil: "NIL", loc: "Close to home", pt: "Playing time", success: "Winning", dev: "Development" };
-const WANTS_LABEL = { level: "Wants a bigger stage", snaps: "Wants snaps", money: "Wants a bigger NIL deal", home: "Wants to be closer to home", winning: "Wants to win", development: "Wants to develop", roster: "Cut for roster space" };
+const WANTS_LABEL = { level: "Wants a bigger stage", snaps: "Wants snaps", money: "Wants a bigger NIL deal", home: "Wants to be closer to home", winning: "Wants to win", development: "Wants to develop", roster: "Cut for roster space", released: "Released" };
+// The NFL header (a player gone to the draft).
+const NFL_BRAND = { Color1: "#013369", Color2: "#D50A0A", School: "NFL" };
 const pctOf = (x) => `${Math.round((x || 0) * 100)}%`;
 // His interest letters (how much a factor matters to him).
 export const LETTER_COLOR = { A: "#7ee2a8", B: "#9fc3ff", C: "#f6a21d", F: "#ff8a7a" };
@@ -146,7 +163,7 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
   // One of yours deciding (opening windows): his retention offer starts at
   // what's out there, or what it takes to keep him.
   const keeping = p?.status === "considering";
-  const [nil, setNil] = useState(() => (keeping ? p.retain?.nil ?? Math.round(retainOdds(state, p, null).ask / 1000) * 1000 : mine?.nil ?? p?.ask ?? 0));
+  const [nil, setNil] = useState(() => (keeping ? p.retain?.nil ?? (p.considering === "demand" ? p.demand.nil : Math.round(retainOdds(state, p, null).ask / 1000) * 1000) : mine?.nil ?? p?.ask ?? 0));
   const [shot, setShot] = useState(true);
   // Commit celebration: plays when he goes portal → committed while open.
   const [celebrate, setCelebrate] = useState(0);
@@ -180,6 +197,32 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
 
   const home = state.teams[p?.team];
   useEffect(() => { if (home) rosterRow(home.school, pid).then(setRow); }, [home, pid]);
+  // His team-page row (college stops, high school, recruiting) — for the
+  // career path. undefined while loading.
+  const [tp, setTp] = useState(undefined);
+  useEffect(() => {
+    let c = false;
+    setTp(undefined);
+    if (!p?.team) return undefined;
+    fetchPortalTeamPage(p.team).then((d) => { if (!c) setTp((d?.roster || []).find((r) => String(r.id) === String(pid)) || null); }).catch(() => { if (!c) setTp(null); });
+    return () => { c = true; };
+  }, [p?.team, pid]);
+  // His career, moved along by the sim: a new school once he's committed,
+  // the portal while he's in it, the draft once he's gone.
+  const newSchool = p?.status === "committed" && p.to !== p.team ? state.teams[p.to]?.school || "" : "";
+  const careerPlayer = useMemo(() => {
+    if (!p || tp === undefined || row === undefined) return null;
+    const cp = tp?.cp || [];
+    return {
+      id: p.wdId || undefined, School: newSchool || home?.school || "",
+      CareerStops: cp.map(([From, To, School]) => ({ School, From, To })),
+      HighSchool: tp?.hs?.[0] || row?.hs || "", State: tp?.hs?.[2] || row?.hss || "",
+      RecruitStars: tp?.rs ?? row?.stars, RecruitRank: tp?.rr ?? row?.rank,
+      RecruitYear: cp[0]?.[0] ? String(cp[0][0]) : "", InPortal: p.status === "portal",
+      Eligible: String(Number(currentDraftClass()) + (p.status === "declared" ? -1 : 1)),
+    };
+  }, [p, tp, row, newSchool, home]);
+  const career = useCareerPath(careerPlayer, p ? String(p.id) : "", null);
   // Esc closes; the page behind doesn't scroll.
   useEffect(() => {
     const k = (e) => { if (e.key === "Escape") onClose(); };
@@ -194,7 +237,19 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
   // The evaluation period (portal window 1): boards only, no offers.
   const evalPeriod = sim.board.evalPeriod;
   const onBoard = sim.starred.has(pid);
-  const canOffer = sim.phase === "window" && p?.status === "portal" && !cutYou && !evalPeriod;
+  // Market Watch: only your own players leaving the roster can get an offer
+  // (user, 2026-11-18) — engine userOffer.
+  const market = sim.stage === "market";
+  const canOffer = sim.phase === "window" && p?.status === "portal" && !cutYou && !evalPeriod && (!market || p?.team === team);
+  // The NIL area stays up for anyone in the portal (user, 2026-11-18) —
+  // locked, with when it opens, while an offer isn't possible.
+  const showOffer = sim.phase === "window" && p?.status === "portal";
+  const split = state.cfg.split?.at ?? 0;
+  const lockNote = canOffer ? null
+    : cutYou ? "He cut you from his list — you can't offer him again."
+      : evalPeriod ? `Evaluation period: offers open in portal window ${(state.cfg.board?.evalWindow ?? 1) + 1}. Contact him now and interest starts building.`
+        : market ? `Market Watch: offers reopen when portal window ${split + 1} opens. Only your own players leaving the roster can get an offer right now.`
+          : "Offers open when the portal opens.";
   const canRetain = sim.phase === "window" && keeping && p?.team === team;
   // His interest in every offer — yours as you're building it (it keeps the
   // interest it's built if you're raising an offer that's out there).
@@ -217,9 +272,11 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
 
   const max = view.available + (mine?.nil || 0);
   const b = brand(p.team) || {};
-  // The header wears his new school once he's committed / transferred.
+  // The header wears his new school once he's committed / transferred —
+  // or the NFL once he's gone to the draft.
+  const drafted = p.status === "declared" && p.reason !== "exhausted";
   const nb = p.status === "committed" ? brand(p.to) || b : null;
-  const hb = nb || b;
+  const hb = drafted ? NFL_BRAND : nb || b;
   const c1 = hb.Color1 || BLUE;
   const c2 = hb.Color2 || GOLD;
   const o1 = b.Color1 || BLUE;
@@ -247,12 +304,12 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
   // Gone to the NFL, or out of eligibility: the shield / the cap (white —
   // team-color header) where a new school would go.
   const gone = p.status === "declared" ? (p.reason === "exhausted" ? "grad" : "nfl") : null;
-  const status = keeping ? (p.considering === "nfl" ? ["Deciding on the NFL", GOLD] : [WANTS_LABEL[p.reason] || "Wants to leave", RED])
+  const status = keeping ? (p.considering === "nfl" ? ["Deciding on the NFL", GOLD] : p.considering === "demand" ? [`Wants ${money(p.demand.nil)}`, GOLD] : [WANTS_LABEL[p.reason] || "Wants to leave", RED])
     : p.status === "portal" ? ["In the portal", GOLD] : p.status === "committed" ? [`Committed to ${state.teams[p.to]?.school}`, GREEN] : p.status === "unsigned" ? ["Unsigned", SUB] : ["", SUB];
   const bio = [
     row?.ht || row?.wt ? ["Height / Weight", [ft(row?.ht), row?.wt ? `${row.wt} lbs` : null].filter(Boolean).join(" · ")] : null,
-    row?.home ? ["Hometown", row.home] : null,
     row?.hs ? ["High school", [row.hs, row.hss].filter(Boolean).join(", ")] : null,
+    row?.home ? ["Hometown", row.home] : null,
     row?.stars ? ["Recruit", `${row.stars}★${row.rank ? ` · #${row.rank} nationally` : ""}${row.rc ? ` · ${row.rc} class` : ""}`] : null,
     ["Eligibility", `${p.elig} season${p.elig === 1 ? "" : "s"} left`],
     ["Last season", ROLE_LABEL[p.role] || "—"],
@@ -271,8 +328,8 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
           {/* On a commit: the new school's colors wipe in over the old. */}
           {celebrate ? <div key={celebrate} className="wdc-anim" style={{ position: "absolute", inset: 0, background: `linear-gradient(115deg, ${c1} 0%, ${c1} 50%, color-mix(in srgb, ${c2} 70%, ${c1}) 100%)`, animation: "wdcWipe .9s cubic-bezier(.6,0,.2,1) both" }} /> : null}
           <div style={{ position: "absolute", inset: 0, background: "radial-gradient(circle at 85% 120%, rgba(0,0,0,0.05), rgba(0,0,0,0.55) 70%)" }} />
-          {/* A big faint logo behind it all — his new school's once committed. */}
-          {(hb.LogoDark || hb.Logo1) && <img key={hb.School} src={hb.LogoDark || hb.Logo1} alt="" aria-hidden="true" className="wdc-anim" style={{ position: "absolute", right: -30, top: -40, width: isMobile ? 190 : 280, opacity: 0.12, pointerEvents: "none", animation: celebrate ? "wdcMark 3.2s .4s ease-out both" : undefined }} />}
+          {/* No headshot: the faint logo sits on the right on its own. */}
+          {!shot && (drafted ? NFL_ICON : hb.LogoDark || hb.Logo1) && <img key={hb.School} src={drafted ? NFL_ICON : hb.LogoDark || hb.Logo1} alt="" aria-hidden="true" className="wdc-anim" style={{ position: "absolute", right: isMobile ? 10 : 24, top: "50%", marginTop: isMobile ? -55 : -75, height: isMobile ? 110 : 150, width: "auto", opacity: 0.16, pointerEvents: "none", animation: celebrate ? "wdcMark 3.2s .4s ease-out both" : undefined }} />}
           {celebrate ? <div key={`s${celebrate}`} className="wdc-anim" style={{ position: "absolute", top: 0, bottom: 0, left: 0, width: "30%", background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent)", animation: "wdcShine 1.1s .5s ease-out both", pointerEvents: "none" }} /> : null}
           <div style={{ position: "relative", display: "flex", alignItems: "flex-end", gap: isMobile ? 10 : 18, padding: isMobile ? "14px 14px 0" : "18px 22px 0" }}>
             <div style={{ flex: 1, minWidth: 0, paddingBottom: isMobile ? 14 : 18 }}>
@@ -290,29 +347,36 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
                     <span style={{ fontSize: 11, fontWeight: 900, background: "rgba(0,0,0,0.35)", borderRadius: 6, padding: "3px 7px" }}>{p.pos}</span>
                     {status[0] && <span style={{ fontSize: 11, fontWeight: 900, color: status[1] }}>{status[0]}</span>}
                     {p.team === team && <span style={{ fontSize: 11, fontWeight: 900, color: RED }}>Your player</span>}
+                    {sim.recs?.[p.id] && p.status === "portal" && <RecChip state={state} pid={p.id} rec={sim.recs[p.id]} />}
                   </div>
                 </div>
               </div>
             </div>
-            {shot && <img src={`https://a.espncdn.com/i/headshots/college-football/players/full/${p.id}.png`} alt="" onError={() => setShot(false)}
-              style={{ flexShrink: 0, height: isMobile ? 110 : 160, width: "auto", objectFit: "contain", alignSelf: "flex-end", filter: "drop-shadow(0 4px 10px rgba(0,0,0,0.45))" }} />}
-          </div>
-          {/* Offer sent: your colors sweep across, your logo, the stamp. */}
-          {sent && !celebrate ? (() => {
-            const yb = brand(team) || {};
-            const y1 = yb.Color1 || BLUE;
-            const y2 = yb.Color2 || GOLD;
-            return (
-              <div key={`s${sent.at}`} aria-live="polite" className="wdc-anim" style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 4, animation: "wdcBand 2.3s cubic-bezier(.7,0,.3,1) both", background: `linear-gradient(115deg, ${y1} 0%, ${y1} 55%, color-mix(in srgb, ${y2} 70%, ${y1}) 100%)`, display: "flex", alignItems: "center", justifyContent: "center", gap: isMobile ? 12 : 20, overflow: "hidden" }}>
-                <div className="wdc-anim" style={{ position: "absolute", top: 0, bottom: 0, left: 0, width: "30%", background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent)", animation: "wdcShine 1s .35s ease-out both" }} />
-                <span className="wdc-anim" style={{ display: "inline-flex", animation: "wdcPop .6s .3s cubic-bezier(.2,.8,.2,1) both" }}><Logo onColor b={yb} size={isMobile ? 72 : 112} /></span>
-                <div className="wdc-anim" style={{ animation: "wdcStamp .5s .45s cubic-bezier(.2,.8,.2,1) both", border: "3px solid #fff", borderRadius: 12, padding: isMobile ? "6px 12px" : "8px 18px", background: "rgba(0,0,0,0.35)" }}>
-                  <div style={{ fontSize: isMobile ? 20 : 30, fontWeight: 900, letterSpacing: "0.08em", lineHeight: 1 }}>{sent.keep ? "OFFER TO STAY" : "OFFER SENT"}</div>
-                  <div style={{ fontSize: isMobile ? 13 : 16, fontWeight: 900, letterSpacing: "0.1em", marginTop: 4, color: GOLD }}>{money(sent.nil)} NIL</div>
-                </div>
+            {/* The headshot over his school's faint logo, centered behind
+                him (the NFL shield once he's gone to the draft). */}
+            {shot && (
+              <div style={{ position: "relative", flexShrink: 0, alignSelf: "flex-end", display: "flex" }}>
+                {(drafted ? NFL_ICON : hb.LogoDark || hb.Logo1) && (
+                  <div aria-hidden="true" style={{ position: "absolute", left: "50%", top: "46%", transform: "translate(-50%, -50%)", width: isMobile ? 140 : 200, height: isMobile ? 140 : 200, pointerEvents: "none" }}>
+                    <img key={hb.School} src={drafted ? NFL_ICON : hb.LogoDark || hb.Logo1} alt="" className="wdc-anim" style={{ width: "100%", height: "100%", objectFit: "contain", opacity: 0.18, animation: celebrate ? "wdcMark 3.2s .4s ease-out both" : undefined }} />
+                  </div>
+                )}
+                <img src={`https://a.espncdn.com/i/headshots/college-football/players/full/${p.id}.png`} alt="" onError={() => setShot(false)}
+                  style={{ position: "relative", height: isMobile ? 110 : 160, width: "auto", objectFit: "contain", filter: "drop-shadow(0 4px 10px rgba(0,0,0,0.45))" }} />
               </div>
-            );
-          })() : null}
+            )}
+          </div>
+          {/* Offer sent: a small toast — never mistaken for a commitment. */}
+          {sent && !celebrate ? (
+            <div key={`s${sent.at}`} role="status" aria-live="polite" className="wdc-anim" style={{
+              position: "absolute", left: "50%", bottom: 12, zIndex: 4, pointerEvents: "none", animation: "wdcToast 2.3s ease both",
+              display: "flex", alignItems: "center", gap: 10, padding: "8px 14px 8px 10px", borderRadius: 999, background: "rgba(8,14,26,0.92)", border: `1px solid ${LINE}`, boxShadow: "0 8px 24px rgba(0,0,0,0.45)", whiteSpace: "nowrap",
+            }}>
+              <Logo b={brand(team)} size={22} />
+              <span style={{ fontSize: 13, fontWeight: 900 }}>{sent.keep ? "Offer to stay sent" : "Offer sent"}</span>
+              <span style={{ fontSize: 13, fontWeight: 900, color: GOLD }}>{money(sent.nil)}</span>
+            </div>
+          ) : null}
           {celebrate ? (
             <div key={`c${celebrate}`} aria-live="polite" style={{ position: "absolute", inset: 0, pointerEvents: "none", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <div className="wdc-anim" style={{ animation: "wdcOut 3.6s both" }}>
@@ -344,6 +408,9 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
           </div>
         ) : null}
         <div style={{ padding: isMobile ? "4px 14px 20px" : "6px 22px 22px" }}>
+          {/* Your staff's word on him. */}
+          {/* (Not once he's on your board — the chip in the header says it.) */}
+          {sim.recs?.[p.id] && p.status === "portal" && !onBoard && <div style={{ marginTop: 14 }}><RecQuote state={state} pid={p.id} rec={sim.recs[p.id]} /></div>}
           {/* Bio. */}
           <div style={{ display: "grid", gridTemplateColumns: `repeat(${isMobile ? 2 : 3}, minmax(0, 1fr))`, gap: 8, marginTop: 14 }}>
             {bio.map(([k, v]) => <Box key={k} label={k}>{v}</Box>)}
@@ -354,8 +421,8 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
           {look && (
             <>
               <H right={<span style={{ fontSize: 11, fontWeight: 800, color: SUB }}>Community grade on We-Draft.com</span>}>We-Draft draft grade</H>
-              <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "stretch" }}>
-                <div style={{ flex: "0 0 auto", minWidth: 150, background: "#111a2b", border: `1px solid ${LINE}`, borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ alignSelf: "flex-start", minWidth: 150, background: "#111a2b", border: `1px solid ${LINE}`, borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", gap: 12 }}>
                   <div style={{ background: look.bg, border: `2px solid ${look.border}`, borderRadius: 10, padding: "6px 12px", fontWeight: 900, fontSize: 22, lineHeight: 1, textAlign: "center" }}>
                     {look.qualifier && <div style={{ fontSize: 9, letterSpacing: "0.12em", marginBottom: 3 }}>{look.qualifier}</div>}{look.short}
                   </div>
@@ -365,7 +432,7 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
                   </div>
                 </div>
                 {[["Strengths", p.str, GREEN], ["Weaknesses", p.weak, RED]].map(([k, list, color]) => list?.length ? (
-                  <div key={k} style={{ flex: "1 1 200px", background: "#111a2b", border: `1px solid ${LINE}`, borderRadius: 10, padding: "8px 12px" }}>
+                  <div key={k} style={{ background: "#111a2b", border: `1px solid ${LINE}`, borderRadius: 10, padding: "8px 12px" }}>
                     <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.12em", color, textTransform: "uppercase" }}>{k}</div>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
                       {list.map((x) => <span key={x} style={{ fontSize: 12, fontWeight: 900, borderRadius: 999, padding: "4px 10px", border: `1px solid ${color}55`, color }}>{x}</span>)}
@@ -430,6 +497,7 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
                     {x.happy < 100 ? <span style={{ color: happyColor(x.happy) }}> · happiness {x.happy}</span> : null}
                     {/* He sees them chasing others at his position. */}
                     {x.snub > 0 ? <span style={{ color: RED }} title={`They're chasing other ${p.pos}s`}> · {pts(-x.snub)} chasing others</span> : null}
+                    {x.coach > 0 ? <span style={{ color: GOLD }} title="Interest their coaches have built"> · {pts(x.coach)} coaches</span> : null}
                   </>
                 );
                 return (
@@ -441,6 +509,7 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
                         <span style={{ fontWeight: 900, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{state.teams[x.slug]?.school}</span>
                                 {x.yours && <Tag color={GOLD}>{i >= TOP_OFFERS ? `You · #${i + 1}` : "You"}</Tag>}
                         {i === 0 && <Tag color={GREEN}>Leader</Tag>}
+                        <CoachTags state={state} slug={x.slug} pid={p.id} />
                       </div>
                       {isMobile && <div style={{ fontSize: 11, fontWeight: 800, color: SUB }}>{meta}</div>}
                       {isMobile && <div style={{ height: 6, borderRadius: 3, background: "#1a2438", marginTop: 4, overflow: "hidden" }}><div style={{ width: `${Math.min(100, g)}%`, height: "100%", background: color }} /></div>}
@@ -482,7 +551,15 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
                   : evalPeriod ? <><b style={{ color: GOLD }}>Evaluation period:</b> no offers yet. Contact him and interest starts building now.</>
                     : <>Not contacted. An offer counts as a contact — or contact him first to start building interest.</>}
                 <span> Contacts {sim.board.count}/{sim.board.limit}.</span>
+                {onBoard && (p.coach?.[team] || 0) > 0 && <span style={{ color: GOLD }}> Your coaches have built +{Math.round(p.coach[team] * 100)}.</span>}
               </div>
+              {onBoard && (
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.12em", color: SUB }}>COACHES ON HIM</span>
+                  <CoachTags state={state} slug={team} pid={p.id} />
+                  {!sim.staff || !Object.values(sim.staff).includes(p.id) ? <span style={{ fontSize: 11, fontWeight: 800, color: SUB }}>None — drag a coach onto him on My Board</span> : null}
+                </div>
+              )}
               {!onBoard && (
                 <button type="button" disabled={sim.board.full} onClick={() => sim.toggleStar(p.id)} style={{ ...pill(true, GOLD), opacity: sim.board.full ? 0.5 : 1 }}>
                   {sim.board.full ? "No contacts left" : "Contact"}
@@ -497,12 +574,20 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
             </div>
           )}
           {/* Keep him: a retention offer (opening windows). */}
-          {canRetain && <Retain p={p} sim={sim} team={team} nil={nil} setNil={setNil} isMobile={isMobile} />}
+          {canRetain && (p.considering === "demand" ? <Demand p={p} sim={sim} /> : <Retain p={p} sim={sim} team={team} nil={nil} setNil={setNil} isMobile={isMobile} />)}
 
-          {/* The offer: NIL. He judges your room himself. */}
-          {canOffer && (
+          {/* The offer: NIL. He judges your room himself. Locked (dimmed, with
+              when it opens) while an offer isn't possible. */}
+          {showOffer && (
             <>
-              <H right={<span style={{ fontSize: 11, fontWeight: 800, color: SUB }}>{money(max)} available</span>}>{mine ? "Your offer" : "Make an offer"}</H>
+              <H right={<span style={{ fontSize: 11, fontWeight: 800, color: SUB }}>{money(max)} available</span>}>{mine ? "Your offer" : market && p.team === team ? "Offer to bring him back" : "Make an offer"}</H>
+              {lockNote && (
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, padding: "10px 14px", borderRadius: 10, background: "rgba(246,162,29,0.1)", border: "1px solid rgba(246,162,29,0.45)", fontSize: 13, fontWeight: 800, lineHeight: 1.45 }}>
+                  <span aria-hidden="true" style={{ fontSize: 16 }}>🔒</span>
+                  <span>{lockNote}</span>
+                </div>
+              )}
+              <div aria-disabled={!canOffer || undefined} style={canOffer ? undefined : { opacity: 0.45, pointerEvents: "none", userSelect: "none" }}>
               <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0,1.1fr) minmax(0,1fr)", gap: 14 }}>
                 <div style={{ background: "#111a2b", border: `1px solid ${LINE}`, borderRadius: 12, padding: 14 }}>
                   <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
@@ -567,15 +652,58 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
               {sim.error && <div style={{ marginTop: 10, padding: "8px 12px", background: "#3a1219", color: "#ffb3a8", fontWeight: 800, fontSize: 13, borderRadius: 8 }}>{sim.error}</div>}
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12, flexWrap: "wrap" }}>
                 {/* Drop: off your board — pulling your offer too, if one's out. */}
-                {onBoard && <button type="button" title={mine ? "Drop him — pulls your offer" : "Drop him from your board"} style={{ ...pill(false), color: RED }} onClick={() => sim.toggleStar(p.id)}>Drop</button>}
+                {onBoard && canOffer && <button type="button" title={mine ? "Drop him — pulls your offer" : "Drop him from your board"} style={{ ...pill(false), color: RED }} onClick={() => sim.toggleStar(p.id)}>Drop</button>}
                 {mine && !moved && <button type="button" style={pill(false)} onClick={() => sim.retract(p.id)}>Pull Offer</button>}
-                <button type="button" disabled={nil > max || moved} style={{ ...pill(true, "#2e7d32"), padding: "11px 22px", fontSize: 14, opacity: nil > max || moved ? 0.5 : 1 }} onClick={() => sim.offer(p.id, { nil })}>{mine ? "New Offer" : "Make Offer"}</button>
+                <button type="button" disabled={!canOffer || nil > max || moved} style={{ ...pill(true, "#2e7d32"), padding: "11px 22px", fontSize: 14, opacity: nil > max || moved ? 0.5 : 1 }} onClick={() => sim.offer(p.id, { nil })}>{mine ? "New Offer" : "Make Offer"}</button>
+              </div>
               </div>
             </>
           )}
+          {/* Career path — moved along by the sim; at the very bottom, dark
+              (only the high school keeps a light circle). */}
+          {careerPlayer && (() => {
+            const statusRows = drafted ? [{ key: "nfl", name: `${(state.season || 0) + 1} NFL Draft`, brand: { Logo1: NFL_ICON }, span: "Declared", accolades: [] }]
+              : p.status === "declared" ? [{ key: "grad", name: "Out of Eligibility", brand: { Logo1: GRAD_ICON.light }, span: `Final season ${state.season || ""}`, accolades: [] }] : [];
+            const rows = [...statusRows, ...career.rows];
+            if (!rows.length) return null;
+            return (
+              <>
+                <H>Career path</H>
+                <div style={{ background: "#111a2b", border: `1px solid ${LINE}`, borderRadius: 12, padding: isMobile ? "12px" : "14px 16px" }}>
+                  {rows.map(({ key, ...x }, i) => <CareerStop key={key} {...x} to={undefined} dark isMobile last={i === rows.length - 1} />)}
+                </div>
+              </>
+            );
+          })()}
+
         </div>
       </div>
     </div>
+  );
+}
+
+// ── Market Watch: one of yours wants the market rate ──
+// Pay what he's asking (nothing less), or let him enter the portal.
+function Demand({ p, sim }) {
+  const { state, view } = sim;
+  const comp = state.players[p.demand.comp];
+  const paying = p.retain && p.retain.nil >= p.demand.nil;
+  const short = !paying && view.available < p.demand.nil;
+  return (
+    <>
+      <H right={<span style={{ fontSize: 11, fontWeight: 800, color: SUB }}>{money(view.available)} available</span>}>He wants the market rate</H>
+      <div style={{ background: "#111a2b", border: `1px solid ${LINE}`, borderRadius: 12, padding: 14 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: SUB, lineHeight: 1.5 }}>
+          {comp ? <>He watched <b style={{ color: INK }}>{comp.name}</b> ({comp.stars}★ {comp.pos}) sign with {state.teams[comp.to]?.school} for <b style={{ color: INK }}>{money(comp.deal?.nil || 0)}</b>. </> : null}
+          Now he wants <b style={{ color: GOLD }}>{money(p.demand.nil)}</b> — or he enters the portal.
+        </div>
+        {sim.error && <div style={{ marginTop: 10, padding: "8px 12px", background: "#3a1219", color: "#ffb3a8", fontWeight: 800, fontSize: 13, borderRadius: 8 }}>{sim.error}</div>}
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12, flexWrap: "wrap" }}>
+          <button type="button" style={{ ...pill(!paying, "#c0392b") }} onClick={() => sim.unretain(p.id)}>{paying ? "Let him go" : "Letting him go"}</button>
+          <button type="button" disabled={short} style={{ ...pill(paying, "#2e7d32"), padding: "11px 22px", fontSize: 14, opacity: short ? 0.5 : 1 }} onClick={() => sim.retain(p.id, { nil: p.demand.nil })}>{paying ? `Paying ${money(p.demand.nil)} ✓` : `Pay ${money(p.demand.nil)}`}</button>
+        </div>
+      </div>
+    </>
   );
 }
 

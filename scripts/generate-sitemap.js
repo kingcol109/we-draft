@@ -147,6 +147,8 @@ async function getAllGames() {
 }
 async function generateSitemap() {
   const { CFB_STAT_PATHS: cfbStatPaths } = await import("../src/utils/cfbSeo.mjs");
+  // The Transfer Portal Sim's FBS schools (/portalsim/{slug}).
+  const { default: portalSimTeams } = await import("../src/utils/portalSim/simTeams.js");
   const baseUrl = "https://we-draft.com";
   const today = new Date().toISOString().split("T")[0];
 
@@ -322,6 +324,10 @@ for (const doc of allTeams) {
     // Draft Sim, both classes (the team pages are with each team below).
     { path: "/draftsim", priority: 0.8, lastmod: today },
     { path: "/draftsim/2028", priority: 0.65, lastmod: today },
+    // Transfer Portal Sim (each school's page is with portalSimPages below).
+    { path: "/portalsim", priority: 0.8, lastmod: today },
+    { path: "/portalsim/community", priority: 0.55, lastmod: today },
+    { path: "/portalsim/recent", priority: 0.5, lastmod: today },
     { path: "/mocks", priority: 0.7, lastmod: today },
     { path: "/profile", priority: 0.6, lastmod: today },
     // We-Pick lives inside We-Draft Live now (/live/we-pick…); the old
@@ -462,7 +468,8 @@ for (const doc of allTeams) {
   const chunkSize = 1000;
   // Everything — the NFL team, staff and Weekly Mock pages too (they were
   // built but left out of this list until 2026-10-26).
-  const allUrls = [...staticPages, ...communityBoardPages, ...teamPages, ...nflPages, ...weeklyMockPages, ...staffPages, ...playerPages, ...comparisonPages, ...newsPages, ...gamePages];
+  const portalSimPages = Object.keys(portalSimTeams).map((slug) => ({ path: `/portalsim/${slug}`, priority: 0.6, lastmod: today }));
+  const allUrls = [...staticPages, ...communityBoardPages, ...teamPages, ...nflPages, ...portalSimPages, ...weeklyMockPages, ...staffPages, ...playerPages, ...comparisonPages, ...newsPages, ...gamePages];
   const chunks = [];
   
   for (let i = 0; i < allUrls.length; i += chunkSize) {
@@ -501,6 +508,7 @@ console.log(
   - ${communityBoardPages.length} community board pages
   - ${teamPages.length} team pages
   - ${nflPages.length} NFL team pages
+  - ${portalSimPages.length} Transfer Portal Sim team pages
   - ${weeklyMockPages.length} Weekly Mock pages
   - ${staffPages.length} staff pages
   - ${playerPages.length} player pages

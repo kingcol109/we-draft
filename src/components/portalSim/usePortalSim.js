@@ -18,7 +18,7 @@ import { deskPosts } from "../../utils/portalSim/desk";
 import {
   initPortalSim, openNflWindow, endNflWindow, endRetainWindow, endWindow,
   userOffer, retractOffer, userRetain, clearRetain, teamView, portalPlayers,
-  toggleEval, boardOf, boardLimit, isEvalWindow,
+  toggleEval, boardCount, boardLimit, isEvalWindow, userRelease, openLivePortal, assignCoach, repeatStaff, moveOnBoard, boardInOrder, endMarket, staffSuggestions,
 } from "../../utils/portalSim/engine";
 
 // The desk stays on screen but quiet for now (user, 2026-11-14: "keep it
@@ -26,7 +26,7 @@ import {
 const DESK_LIVE = false;
 
 export default function usePortalSim({ data, team, seed, live = false, frequency = "default", windows = 7 }) {
-  const [state, setState] = useState(() => initPortalSim(data.pool, { config: data.config, tiers: data.tiers, factors: data.factors, userTeams: [team], seed, live, frequency, windows }));
+  const [state, setState] = useState(() => initPortalSim(data.pool, { config: data.config, tiers: data.tiers, factors: data.factors, targets: data.targets, userTeams: [team], seed, live, frequency, windows }));
   const [phase, setPhase] = useState("ready");
   const [recap, setRecap] = useState(null);
   const [error, setError] = useState("");
@@ -39,13 +39,23 @@ export default function usePortalSim({ data, team, seed, live = false, frequency
   }, []);
 
   // Start: opening window 1 opens and the user can negotiate right away.
+  // The real portal (user, 2026-11-18) skips both opening windows — the
+  // real decisions are made — and opens on a recap of who left and why.
   const start = useCallback(() => {
+    if (live) {
+      const r = openLivePortal(state);
+      post(r.state, r.summary.events);
+      setState(r.state);
+      setRecap(r.summary);
+      setPhase("window");
+      return;
+    }
     const next = openNflWindow(state);
     setState(next);
     post(next, next.log.slice(state.log.length));
     setRecap(null);
     setPhase("window");
-  }, [state, post]);
+  }, [state, post, live]);
   const apply = useCallback((r) => {
     if (r.error) { setError(r.error); return false; }
     setError("");
@@ -62,18 +72,43 @@ export default function usePortalSim({ data, team, seed, live = false, frequency
   const toggleStar = useCallback((pid) => apply(toggleEval(state, team, pid)), [state, team, apply]);
   const starred = useMemo(() => new Set(Object.values(state.players).filter((p) => p.evals?.[team] != null).map((p) => p.id)), [state.players, team]);
   const board = useMemo(() => {
-    const count = boardOf(state, team).length;
+    // Signed board players keep their spot (engine boardCount).
+    const count = boardCount(state, team);
     const max = boardLimit(state);
     return { count, limit: max, full: count >= max, evalPeriod: isEvalWindow(state) };
   }, [state, team]);
   const retain = useCallback((pid, terms) => apply(userRetain(state, team, pid, terms)), [state, team, apply]);
+  // Your coaches (user, 2026-11-18): put one on a board player (null: off
+  // him) — engine assignCoach. staff: { role: pid }; recs: your staff's
+  // recommendations { pid: rec }.
+  const assign = useCallback((role, pid) => apply(assignCoach(state, team, role, pid)), [state, team, apply]);
+  const staff = state.teams[team]?.staff || {};
+  const lastStaff = state.teams[team]?.lastStaff || null;
+  const recs = state.recs?.[team] || {};
+  // Coaches come home every window; this puts them back on last window's
+  // players (still on your board).
+  const repeat = useCallback(() => setState((s) => repeatStaff(s, team)), [team]);
+  // Your board, in your order (a new contact goes last); move(pid, index).
+  const boardList = useMemo(() => boardInOrder(state, team), [state, team]);
+  const move = useCallback((pid, to) => setState((s) => moveOnBoard(s, team, pid, to)), [team]);
+  // Where you stood with each board player as you ended the last window.
+  const rankWas = state.rankWas?.[team] || {};
+  // Your staff's full list: a few names at every position, always (engine
+  // staffSuggestions) — { pos: [pid] }.
+  const suggestions = useMemo(() => staffSuggestions(state, team), [state, team]);
+  // Recommendations you passed on (the pick stays with him — just moved
+  // to the bottom).
+  const [passed, setPassed] = useState(() => new Set());
+  const pass = useCallback((pid) => setPassed((prev) => { const n = new Set(prev); if (n.has(pid)) n.delete(pid); else n.add(pid); return n; }), []);
+  // Release one of yours into the portal (engine userRelease).
+  const release = useCallback((pid) => apply(userRelease(state, team, pid)), [state, team, apply]);
   const unretain = useCallback((pid) => setState((s) => clearRetain(s, team, pid)), [team]);
   // End the window: "Simming" for a beat, then straight into the next window
   // with what changed in this one.
   const end = useCallback(() => {
     setPhase("simming");
     setTimeout(() => {
-      const run = state.phase === "nfl" ? endNflWindow : state.phase === "retain" ? endRetainWindow : endWindow;
+      const run = state.phase === "nfl" ? endNflWindow : state.phase === "retain" ? endRetainWindow : state.phase === "market" ? endMarket : endWindow;
       const r = run(state);
       const events = r.state.log.slice(state.log.length);
       if (run === endWindow) {
@@ -93,5 +128,5 @@ export default function usePortalSim({ data, team, seed, live = false, frequency
 
   const view = useMemo(() => teamView(state, team), [state, team]);
   const portal = useMemo(() => portalPlayers(state), [state]);
-  return { state, stage: state.phase, phase, recap, error, view, portal, feed, start, offer, retract, retain, unretain, end, dismissRecap, starred, toggleStar, board, card, openCard, closeCard, clearError: () => setError("") };
+  return { state, stage: state.phase, phase, recap, error, view, portal, feed, start, offer, retract, retain, unretain, release, assign, staff, lastStaff, repeat, recs, suggestions, passed, pass, boardList, move, rankWas, end, dismissRecap, starred, toggleStar, board, card, openCard, closeCard, clearError: () => setError("") };
 }

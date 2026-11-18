@@ -44,7 +44,7 @@ const HUB_TABS = [
 // The Beta tab's entries — shown to Sim Beta users and admins.
 const BETA_ITEMS = [
   { to: "/sim", icon: "🎮", title: "Football Sim", blurb: "Call plays against live defenses and run full drives in the Football Simulation Lab." },
-  { to: "/portalsim", icon: "🔁", title: "Portal Sim", blurb: "Run a transfer portal cycle — entries, offers, and commitments across every window." },
+  { to: "/portalsim", icon: "🔁", title: "Transfer Portal Sim", blurb: "Run a transfer portal cycle — entries, offers, and commitments across every window." },
 ];
 const SIM_VIEWS = [["profile", "Profile"], ["drafts", "My Drafts"]];
 

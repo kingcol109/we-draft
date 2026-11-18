@@ -15,16 +15,50 @@ export const DEFAULT_CONFIG = {
   // Then `windows` portal windows. Players enter the portal only in opening
   // window 2 (user, 2026-11-14) — lateEntryWindows (portal windows that add
   // late entries) stays empty.
-  // 7 by default (user, 2026-11-15: "draw out recruiting more").
-  windows: 7,
+  // 6 (user, 2026-11-18): two halves of 3 — see `split`.
+  windows: 6,
   // The run's choices at the start (user, 2026-11-15): portal length (5, 7
   // — the default — or 10 windows; each has its own list narrowing) and
   // transfer frequency — × each player's modeled chance of wanting out
   // (capped at entryCap). Default = the tuned model. Admin likeliness
   // (0–3) isn't scaled — those chances are set by hand.
-  windowOptions: [5, 7, 10],
-  listSizeByWindows: { 5: [null, null, 8, 5, 3, 3], 7: [null, null, 10, 8, 6, 4, 3, 3], 10: [null, null, 10, 8, 6, 5, 4, 3, 3, 3, 3] },
-  frequency: { less: 0.6, default: 1, more: 1.6, crazy: 2.6 },
+  windowOptions: [6],
+  listSizeByWindows: { 6: [null, null, 10, 7, 5, 4, 3] },
+  // The portal's shape (user, 2026-11-18): the two opening windows, then
+  // `at` portal windows — the big signing wave (the evaluation period
+  // first); the players pursued hardest resolve around window `at` (push:
+  // off his commit bar there for a player with 2+ offers, patience 1) — then
+  // Market Watch (engine openMarket / endMarket), then `after` more. Past
+  // the split it's easier to come in late: interest built before it counts
+  // lateHeld ×.
+  // newWait: a Market Watch entrant can't commit before this many windows
+  // in — his recruitment runs (user, 2026-11-18).
+  // The setup's Real Portal mode opens once this many real entries are in
+  // (January) — a handful of early ones don't open it.
+  liveOpens: 150,
+  // Releasing a player frees this share of his ask, by last season's role
+  // (user, 2026-11-18 — a 2★ backup QB's ask is mostly his position; it
+  // shouldn't buy a starter).
+  release: { starter: 0.6, rotation: 0.35, reserve: 0.15, none: 0.08 },
+  split: { at: 3, after: 3, push: 0.15, lateHeld: 0.5, newWait: 2 },
+  // Market Watch, between the halves (user, 2026-11-18):
+  //  reshuffle  players whose spot on the depth chart fell because their
+  //             school signed someone may enter — by how far they fell
+  //             (fall: starter → rotation / → depth, rotation → depth), × by
+  //             stars (a 6★ never goes because of a signing); modest numbers.
+  //  demand     a top player staying put (minStars+, a starter) sees one at
+  //             his position and level sign for `gap`× or more what he
+  //             makes (his retention deal, else ask × homeNil): `chance` by
+  //             stars he wants that much or he enters. A CPU school pays when
+  //             it can (cpuPay of the time); yours decide in Market Watch.
+  reshuffle: { fall: { starterRotation: 0.18, starterDepth: 0.4, rotationDepth: 0.12 }, stars: { 6: 0, 5: 0.25, 4: 1, 3: 1, 2: 0.7 } },
+  // cpuChance: CPU schools' stars ask more often (user, 2026-11-18 — your
+  // own players keep `chance`). A school that loses one gets his normal
+  // ask back (engine freed).
+  market: { minStars: 5, gap: 1.5, chance: { 6: 0.3, 5: 0.15 }, cpuChance: { 6: 0.5, 5: 0.3 }, cpuPay: 0.7 },
+  // Crazy (user, 2026-11-18): truly crazy — also lets players marked as
+  // staying (likeliness 0 / 1) and academy players go (engine transferLeave).
+  frequency: { less: 0.6, default: 1, more: 1.6, crazy: 4 },
   entryCap: 0.97,
   lateEntryWindows: [],
   lateEntryFactor: 0.15,
@@ -136,7 +170,7 @@ export const DEFAULT_CONFIG = {
   // Narrowing his list: the schools he's still listening to after each
   // portal window (index = window; null = all). The rest are cut — and can't
   // offer him again.
-  listSize: [null, null, 10, 8, 6, 4, 3, 3],
+  listSize: [null, null, 10, 7, 5, 4, 3],
   ambition: { perTier: 0.15, role: { starter: 1, rotation: 0.6, reserve: 0.15, none: 0 }, stars: { 6: 1.3, 5: 1.2, 4: 1.1, 3: 1, 2: 0.4 } },
   // Transfer likeliness (user, 2026-11-14), set per player on the admin's
   // Grades tab: his chance of entering, replacing the model's — 3 every time
@@ -212,7 +246,18 @@ export const DEFAULT_CONFIG = {
   // Windows an offer must stand before he can take it, by stars — top
   // players' recruitments run longer (user, 2026-11-15). The last window he
   // takes his best offer regardless.
-  patience: { 6: 3, 5: 2, 4: 2, 3: 1, 2: 1 },
+  // (user, 2026-11-18: reversed — the early portal is about top talent;
+  // the best resolve first, everyone else after.)
+  patience: { 6: 1, 5: 1, 4: 1, 3: 2, 2: 2 },
+  // Resolving recruitments (user, 2026-11-18 — engine decisions): early:
+  // share off the commit bar by stars (top players take a good offer
+  // early); runaway: off the bar when one school has him to itself (no one
+  // else on him, or the leader `margin` clear of the next) — patience 1.
+  resolve: { early: { 6: 0.12, 5: 0.1, 4: 0.06 }, runaway: 0.08, margin: 0.08 },
+  // Making up ground late (engine catchUpOf): a school above everyone else
+  // on him by tiers gets up to `max` grade, growing as the portal goes on
+  // (full at a `tiers` gap).
+  catchUp: { max: 0.06, tiers: 2 },
 
 
   // Boards (contacts) & the evaluation period (user, 2026-11-15). Portal
@@ -227,7 +272,37 @@ export const DEFAULT_CONFIG = {
   // grade points a school loses with a player while it chases others at his
   // position (× others offered ÷ its wants there, capped at 1) — all of it
   // if it hasn't offered him, half if it has.
-  board: { sizes: [10, 15, 25], evalWindow: 1, gap: 0.12, maxRank: 6, perSpot: 2, snub: 0.12 },
+  // (user, 2026-11-18: 15 through the first half; 25 once the second
+  // half opens.)
+  board: { sizes: [10, 15, 15, 25], evalWindow: 1, gap: 0.12, maxRank: 6, perSpot: 2, snub: 0.12 },
+
+  // Coaching staffs (user, 2026-11-18 — engine "Coaching staffs"). gain:
+  // grade a coach builds per window on a board player (offSide × on the
+  // other side of the ball, special × on a K / P; the HC recruits
+  // everyone), up to cap per player and school. recBoost: chasing a player
+  // your staff recommended. near: a school within `full` miles of his
+  // hometown gets `max`, fading to 0 at `zero` (on top of his "close to
+  // home" interest). recs: how your staff recommends — perWant per want,
+  // max a window, `look` best fits checked per want, within `reach` of his
+  // favorite, asks up to budgetShare of what you have left, localMiles
+  // counts as "close to home"; keep: the most standing at once.
+  staff: {
+    // (user, 2026-11-18): the head coach pushes hardest, the same at every
+    // position; coordinators less, on their side (offSide × the other);
+    // assistants less again.
+    gain: { HC: 0.035, OC: 0.024, DC: 0.024, OA: 0.015, DA: 0.015 },
+    offSide: 0.45,
+    special: 0.6,
+    // A school's own read of its admin targets (config/portalTargets): this
+    // much better than his stars — it chases them.
+    targetLike: 0.5,
+    cap: 0.09,
+    recBoost: 0.015,
+    // Names per position on the staff's full list (engine staffSuggestions).
+    suggest: 6,
+    near: { full: 75, zero: 450, max: 0.035 },
+    recs: { perWant: 2, max: 12, keep: 20, look: 30, reach: 0.1, lateReach: 0.08, headStart: 0.5, lateDrop: 1, longReach: 0.22, longshots: 2, longshotUntil: 3, tierPenalty: 0.08, budgetShare: 0.6, localMiles: 200 },
+  },
 
   // CPU schools' offers (user, 2026-11-14). An open offer counts as a
   // signing (one QB spot → one QB chased at a time).
@@ -256,6 +331,13 @@ export const DEFAULT_CONFIG = {
     // works on a handful of spots, not every starter under its standard.
     // Kickers / punters are never upgrades (only holes).
     maxUpgrades: { 1: 5, 2: 5, 3: 4, 4: 4, 5: 3 },
+    // Talent wants (user, 2026-11-18): a starter under its standard +
+    // talentAbove is "just OK" — a school looks for a clear step up there
+    // too, at talentPri × how far short (below an upgrade), up to maxTalent
+    // of them (its weakest rooms first).
+    talentAbove: 0.4,
+    talentPri: 0.55,
+    maxTalent: { 1: 4, 2: 3, 3: 3, 4: 2, 5: 2 },
     // Paying to get in (audit 2026-11-15: money couldn't buy standing): for
     // a want of payUpPri or more, a school counts itself in for a player if
     // an offer up to its most (bid cap, and payShare of what it has left —

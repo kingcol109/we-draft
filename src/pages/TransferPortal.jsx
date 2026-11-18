@@ -58,19 +58,21 @@ import {
   BOARD_MODERN_STYLE, POS_COL_W, LOGO_COL_W, DropdownChecklist, formatHeight, parseHeight,
 } from "../components/boardKit";
 import TransferStars from "../components/TransferStars";
+import PortalSimButton from "../components/portalSim/PortalSimButton";
 import DepartureIcon, { GRAD_ICON, NFL_ICON } from "../components/DepartureIcon";
 import { CareerStop, useCareerPath } from "../components/PlayerEligibilityInfo";
 import { useHeadshot } from "../components/draftSim/simHeadshots";
 import { activePortalSeason, currentDraftClass, seasonsLeft } from "../utils/eligibility";
 import { isUnreleasedSlug, isUnreleasedYear, useIsAdmin } from "../utils/prospectYears";
 import {
-  DEPARTURES, ROSTER_GROUPS, WANT_LABEL, fetchPortalBoard, fetchPortalLocks, fetchPortalManual, fetchPortalTargets, fetchPortalTeamPage,
+  DEPARTURES, ROSTER_GROUPS, WANT_LABEL, fetchPortalBoard, fetchPortalLocks, fetchPortalManual, fetchPortalStats, fetchPortalTargets, fetchPortalTeamPage,
   manualStands, sortRecommendations, starsWithLocks, teamRecommendations,
 } from "../utils/portalData";
 import { SUB_TABS, inSubTab } from "../utils/subPositions";
 import { STATE_ABBR } from "../utils/highSchoolMatch";
 import { FBS_CONFERENCES, buildPortalTeams, portalTeamSlug } from "../utils/portalTeams";
 import { getSiteSnapshot } from "../utils/siteSnapshots";
+import { STAT_COLUMNS } from "../utils/portalStats";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -83,6 +85,13 @@ const POSITION_PLURAL = {
   EDGE: "Edge Rusher", DL: "Defensive Line", LB: "Linebacker", DB: "Defensive Back", K: "Kicker", P: "Punter",
 };
 const STAR_OPTIONS = ["6★", "5★", "4★", "3★", "2★"];
+// Text on a fill: ink on a light one (a white or gold Color2), else white.
+function inkOn(hex) {
+  const m = String(hex || "").replace("#", "").match(/^([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+  if (!m) return "#fff";
+  const [r, g, b] = m.slice(1).map((x) => parseInt(x, 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.45 ? INK : "#fff";
+}
 const eligLabel = (n) => (n === 1 ? "1 Season Left" : `${n} Seasons Left`);
 
 // Seasons-left chip colors: plenty left is green, one left is gold.
@@ -308,6 +317,21 @@ export default function TransferPortal({ view = "board" }) {
   const [sortKey, setSortKey] = useState("Stars");
   const [sortOrder, setSortOrder] = useState("desc");
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [railConf, setRailConf] = useState(""); // the side rail's conference ("" = all FBS)
+  // A position board's Stats view (user, 2026-11-18): ?view=stats, on the
+  // main portal's position pages only, where the position keeps stats (no
+  // OL). The stats doc is read only once it opens.
+  const statCols = position && !teamSlug && !isUpdates ? STAT_COLUMNS[position] || null : null;
+  const statsView = !!statCols && params.get("view") === "stats";
+  const [stats, setStats] = useState(null); // null = not loaded
+  const [statSort, setStatSort] = useState({ i: -1, dir: "desc" }); // -1 = the position's default
+  useEffect(() => {
+    if (!statsView || stats) return undefined;
+    let c = false;
+    fetchPortalStats().then((d) => { if (!c) setStats(d); }).catch(() => { if (!c) setStats({ season: null, rows: {} }); });
+    return () => { c = true; };
+  }, [statsView, stats]);
+  useEffect(() => { setStatSort({ i: -1, dir: "desc" }); }, [position]);
   const move = MOVES.some(([k]) => k && k === params.get("move")) ? params.get("move") : "";
 
   // This cycle's portal — everyone tagged with it, plus anyone still in the
@@ -486,87 +510,62 @@ export default function TransferPortal({ view = "board" }) {
   const statusLabel = STATUSES.find(([k]) => k === status)?.[1];
   const title = `${SEASON} ${posLabel ? `${posLabel} ` : ""}Transfer Portal${status ? ` · ${statusLabel}` : ""}`;
 
-  // Pulse numbers (everyone in the portal, no filters).
-  const weekAgo = Date.now() - 7 * 86400000;
-  const pulse = {
-    total: all.length,
-    open: all.filter((p) => p.status === "uncommitted").length,
-    committed: all.filter((p) => p.committed).length,
-    withdrawn: all.filter((p) => p.withdrawn).length,
-  };
-
   // Every move this cycle, newest first — the updates feed and Latest Moves.
   const moves = useMemo(() => all.flatMap((p) => [
     p.enteredMs && { kind: "entered", ms: p.enteredMs, p },
     p.committed && p.committedMs && { kind: "committed", ms: p.committedMs, p },
     p.withdrawn && p.withdrawnMs && { kind: "withdrew", ms: p.withdrawnMs, p },
   ].filter(Boolean)).sort((a, b) => b.ms - a.ms), [all]);
-  const movesThisWeek = moves.filter((m) => m.ms >= weekAgo).length;
 
-  const Hero = (
-    <div className="wdb-hero" style={{ marginBottom: isMobile ? "10px" : "14px", borderRadius: "16px", overflow: "hidden" }}>
-      <div style={{ background: `linear-gradient(120deg, ${BLUE} 0%, #003f7d 100%)`, padding: isMobile ? "14px 14px" : "18px 24px", position: "relative", overflow: "hidden" }}>
-        {/* The portal mark, faint, behind the title. */}
-        <img src="/logos/transfer-portal.svg" alt="" aria-hidden="true" style={{ position: "absolute", right: isMobile ? "-24px" : "18px", top: "50%", transform: "translateY(-50%)", height: isMobile ? "110px" : "150px", opacity: 0.12, pointerEvents: "none" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
-        <h1 style={{ position: "relative", margin: 0, textAlign: "center", fontSize: isMobile ? "22px" : "36px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.03em", color: "#fff", lineHeight: 1.05 }}>
-          {isUpdates
-            ? <>{SEASON} <span style={{ color: GOLD }}>Portal</span> Updates</>
-            : <>{SEASON} <span style={{ color: GOLD }}>{posLabel || "Transfer"}</span> Portal</>}
-        </h1>
-        <div style={{ position: "relative", marginTop: "4px", textAlign: "center", fontSize: isMobile ? "10px" : "12px", fontWeight: 700, color: "rgba(255,255,255,0.82)", letterSpacing: "0.06em", textTransform: "uppercase" }}>
-          {isUpdates ? "Every move in the portal · Entries · Commitments · Withdrawals" : "Every player in the portal · Who's committed · Seasons of eligibility left"}
+  // ── Headers: the CFB team page's hero (TeamPage.js HeroCard) — a
+  // color1 → color2 sweep under a dark overlay, drifting stripes and a
+  // breathing spotlight, a faded mark off the right, logo | name | buttons
+  // (user, 2026-11-18). The board's runs in site blue / gold with the
+  // portal mark; a team's in its colors. The counts that used to sit under
+  // it were dropped — the status pills and the side rail already say them.
+  // to: the team page — the logo and the big name link there (user,
+  // 2026-11-18: they replace the old Team Page button).
+  const heroShell = ({ c1, c2, mark, watermark, kicker, title: h, sub, links, buttons, to, toLabel }) => (
+    <div style={{
+      position: "relative", overflow: "hidden", borderRadius: "14px", border: `2px solid ${c2}`, marginBottom: isMobile ? "10px" : "14px",
+      boxShadow: "0 10px 28px rgba(0,0,0,0.22)", padding: isMobile ? "18px 14px" : "26px 30px",
+      background: ["linear-gradient(rgba(0,0,0,0.38), rgba(0,0,0,0.38))", `linear-gradient(120deg, ${c1} 0%, ${c1} 40%, ${c2} 100%)`].join(", "),
+    }}>
+      <div aria-hidden="true" style={{ position: "absolute", inset: "-20%", zIndex: 0, pointerEvents: "none", background: "repeating-linear-gradient(115deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 2px, transparent 2px, transparent 40px)", animation: "tpHeroDrift 18s linear infinite" }} />
+      <div aria-hidden="true" style={{ position: "absolute", inset: 0, zIndex: 0, pointerEvents: "none", background: "radial-gradient(circle at 20% 30%, rgba(255,255,255,0.18), transparent 55%)", animation: "tpHeroSpotlight 5s ease-in-out infinite" }} />
+      {watermark && !isMobile && <img src={watermark} alt="" aria-hidden="true" style={{ position: "absolute", top: "50%", right: "-4%", transform: "translateY(-50%)", width: "60%", maxWidth: "560px", maxHeight: "170%", objectFit: "contain", opacity: 0.14, zIndex: 0, pointerEvents: "none" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />}
+      <div style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center", gap: isMobile ? "14px" : "26px", flexWrap: isMobile ? "wrap" : "nowrap" }}>
+        {mark && (() => {
+          const img = <img src={mark} alt={to ? toLabel || "" : ""} style={{ display: "block", flexShrink: 0, width: isMobile ? 72 : 130, height: isMobile ? 72 : 130, objectFit: "contain", filter: "drop-shadow(0 4px 10px rgba(0,0,0,0.45))" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />;
+          return to ? <Link to={to} className="tp-hero-home" title={toLabel} style={{ flexShrink: 0 }}>{img}</Link> : img;
+        })()}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {kicker && <div style={{ fontSize: isMobile ? "10px" : "12px", fontWeight: 900, letterSpacing: "0.16em", textTransform: "uppercase", color: "rgba(255,255,255,0.82)", marginBottom: "2px" }}>{kicker}</div>}
+          <h1 style={{ margin: 0, fontWeight: 900, color: "#fff", lineHeight: 1.05, letterSpacing: "0.02em", textTransform: "uppercase", textShadow: "0 2px 8px rgba(0,0,0,0.4)", fontSize: isMobile ? "24px" : "clamp(28px, 3.2vw, 48px)", overflowWrap: "break-word" }}>
+            {to ? <Link to={to} className="tp-hero-home" title={toLabel} style={{ color: "inherit", textDecoration: "none" }}>{h}</Link> : h}
+          </h1>
+          {sub && <div style={{ marginTop: "2px", fontWeight: 900, color: "rgba(255,255,255,0.88)", lineHeight: 1.1, letterSpacing: "0.02em", textTransform: "uppercase", textShadow: "0 2px 8px rgba(0,0,0,0.4)", fontSize: isMobile ? "15px" : "clamp(16px, 1.8vw, 26px)" }}>{sub}</div>}
+          {links && <div style={{ marginTop: "8px", display: "flex", gap: "14px", flexWrap: "wrap", fontSize: "12px", fontWeight: 800 }}>{links}</div>}
         </div>
+        {buttons && <div style={{ flexShrink: 0, display: "flex", flexDirection: isMobile ? "row" : "column", alignItems: "stretch", gap: "8px", ...(isMobile ? { flexBasis: "100%" } : {}) }}>{buttons}</div>}
       </div>
-      <div className="wdb-stripe" style={{ height: "3px", background: GOLD }} />
     </div>
   );
-
-  // The snapshot up top: four counts (each opens the board on that status)
-  // and the way into the updates feed.
-  const pickStatus = (key) => (isUpdates ? navigate(`/portal${key ? `?status=${key}` : ""}`) : setParam("status", key));
-  const Pulse = !loading && all.length > 0 && (
-    <div style={{ marginBottom: isMobile ? "10px" : "14px" }}>
-      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)", gap: "8px" }}>
-        {[
-          [pulse.total, "Entered the Portal", ""],
-          [pulse.open, "Uncommitted", "uncommitted"],
-          [pulse.committed, "Committed", "committed"],
-          [pulse.withdrawn, "Withdrawn", "withdrawn"],
-        ].map(([v, label, key]) => {
-          const on = !isUpdates && status === key;
-          return (
-            <div key={label} role="button" tabIndex={0} onClick={() => pickStatus(key)}
-              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pickStatus(key); } }}
-              style={{ background: "#fff", border: `1px solid ${on ? GOLD : "#e3e8ef"}`, boxShadow: on ? `0 0 0 1px ${GOLD}` : "none", borderRadius: "14px", padding: isMobile ? "10px 12px" : "12px 16px", cursor: "pointer" }}>
-              <div style={{ fontSize: isMobile ? "22px" : "28px", fontWeight: 900, color: BLUE, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>{v}</div>
-              <div style={{ marginTop: "4px", fontSize: "11px", fontWeight: 900, color: "#5b6b84", textTransform: "uppercase", letterSpacing: "0.08em" }}>{label}</div>
-            </div>
-          );
-        })}
-      </div>
-      <Link to={isUpdates ? "/portal" : "/portal/updates"} style={{
-        marginTop: "8px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", padding: isMobile ? "9px 12px" : "10px 16px",
-        background: "#fff", border: "1px solid #e3e8ef", borderRadius: "12px", textDecoration: "none", color: INK, fontSize: isMobile ? "12px" : "13px", fontWeight: 800,
-      }}
-        onMouseEnter={(e) => { e.currentTarget.style.borderColor = BLUE; }}
-        onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#e3e8ef"; }}>
-        <span style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
-          <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: "50%", background: movesThisWeek ? "#2e7d32" : "#b8c2d1", flexShrink: 0 }} />
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {isUpdates ? "Every player in the portal, on one board" : `${movesThisWeek} move${movesThisWeek === 1 ? "" : "s"} this week${moves[0] ? ` · latest ${fmtDate(moves[0].ms)}` : ""}`}
-          </span>
-        </span>
-        <span style={{ flexShrink: 0, color: BLUE, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.06em", fontSize: "12px" }}>
-          {isUpdates ? "← Portal Board" : "Portal Updates →"}
-        </span>
-      </Link>
-    </div>
-  );
+  const heroLink = (to, label) => <Link key={to} to={to} style={{ color: "#fff", textDecoration: "underline", textUnderlineOffset: "3px", textDecorationColor: "rgba(255,255,255,0.5)" }}>{label}</Link>;
+  const Hero = heroShell({
+    c1: BLUE, c2: GOLD, mark: "/logos/transfer-portal-white.svg", watermark: "",
+    kicker: isUpdates ? "Entries · Commitments · Withdrawals" : "College Football",
+    title: isUpdates ? <>{SEASON} <span style={{ color: GOLD }}>Portal</span> Updates</> : <>{SEASON} <span style={{ color: GOLD }}>{posLabel || "Transfer"}</span> Portal</>,
+    sub: isUpdates ? "Every move, newest first" : "Rankings · Eligibility · Commitments",
+    links: isUpdates ? heroLink("/portal", "← Portal board") : null,
+    // The Transfer Portal Sim, the portal's "on the clock" button.
+    buttons: <PortalSimButton c1={BLUE} c2={GOLD} isMobile={isMobile} wide={isMobile} />,
+  });
 
   const posPill = (key, label, count) => {
     const active = position === key;
     return (
-      <Link key={key || "all"} to={(key ? `/portal/${key.toLowerCase()}` : "/portal") + (status ? `?status=${status}` : "")} aria-current={active ? "page" : undefined}
+      <Link key={key || "all"} to={(key ? `/portal/${key.toLowerCase()}` : "/portal") + (() => { const q = new URLSearchParams(); if (status) q.set("status", status); if (statsView && STAT_COLUMNS[key]) q.set("view", "stats"); const t = q.toString(); return t ? `?${t}` : ""; })()} aria-current={active ? "page" : undefined}
         className={"wdb-pill wdb-sel" + (active ? " on" : "")}
         style={{
           flexShrink: 0, display: "inline-flex", alignItems: "center", gap: "6px", padding: isMobile ? "7px 11px" : "7px 13px",
@@ -871,10 +870,148 @@ export default function TransferPortal({ view = "board" }) {
   );
   const List = renderTable(shown);
 
+  // ── A position's Stats view: the same players and filters, last
+  // season's numbers in the position's columns (utils/portalStats.js). ──
+  const ViewBar = statCols && (
+    <div role="tablist" aria-label="View" style={{ display: "flex", justifyContent: "center", marginBottom: isMobile ? "8px" : "12px" }}>
+      <div style={{ display: "inline-flex", padding: "3px", borderRadius: "10px", background: BLUE, gap: "2px" }}>
+        {[["", "Portal Board"], ["stats", "Stats"]].map(([k, label]) => {
+          const on = (k === "stats") === statsView;
+          return (
+            <button key={k || "board"} type="button" role="tab" aria-selected={on} onClick={() => setParam("view", k)} style={{
+              padding: isMobile ? "6px 16px" : "7px 22px", borderRadius: "8px", border: "none", cursor: "pointer", fontFamily: "inherit",
+              background: on ? GOLD : "transparent", color: "#fff", fontWeight: 900, fontSize: isMobile ? "12px" : "13px", textTransform: "uppercase", letterSpacing: "0.06em", whiteSpace: "nowrap",
+            }}>{label}</button>
+          );
+        })}
+      </div>
+    </div>
+  );
+  const statDefault = statCols ? Math.max(0, statCols.findIndex((c) => c.label === "YDS")) : 0;
+  const statIdx = statSort.i >= 0 && statCols?.[statSort.i] ? statSort.i : statDefault;
+  const statOf = (p) => (p.poolId && stats?.rows?.[String(p.poolId)]) || null;
+  // Players with no stats last; ties by stars.
+  const statRows = !statsView ? [] : [...shown].sort((a, b) => {
+    const sa = statOf(a);
+    const sb = statOf(b);
+    if (!sa || !sb) return ((sa ? -1 : 0) + (sb ? 1 : 0)) || (b.stars || 0) - (a.stars || 0);
+    const d = statCols[statIdx].sort(sa) - statCols[statIdx].sort(sb);
+    return (statSort.dir === "asc" ? d : -d) || (b.stars || 0) - (a.stars || 0);
+  });
+  const subOf = (p) => (typeof p.SubPosition === "string" && ["OT", "IOL", "CB", "S"].includes(p.SubPosition) ? p.SubPosition : p.Position);
+  const STAT_W = isMobile ? 52 : 66;
+  const statW = (c) => (c.label.includes("/") || c.label === "FG" || c.label === "XP" ? STAT_W + 18 : STAT_W);
+  const StatsTable = statsView && (() => {
+    const nameW = 150;
+    const head = (
+      <div className="wdb-colhead" style={{ position: "sticky", top: 0, zIndex: 10, display: "flex", alignItems: "center", gap: isMobile ? "8px" : "12px", background: "linear-gradient(135deg, " + BLUE + ", #003d7a)", padding: isMobile ? "10px 12px" : "12px 20px" }}>
+        {!isMobile && <ColLabel label="Stars" width="70px" />}
+        <ColLabel label="Pos" width={(isMobile ? 40 : POS_COL_W) + "px"} />
+        {!isMobile && <ColLabel label="From" width={FROM_TO_W + "px"} />}
+        {!isMobile && <ColLabel label="To" width={FROM_TO_W + "px"} />}
+        <div style={{ ...(isMobile ? { width: nameW, flexShrink: 0 } : { flex: 1, minWidth: 140 }), color: "#fff", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em", opacity: 0.72 }}>Player</div>
+        {statCols.map((c, i) => {
+          const on = i === statIdx;
+          return (
+            <button key={c.label} type="button" title={c.title} aria-label={`Sort by ${c.title}`} aria-pressed={on}
+              onClick={() => setStatSort((cur) => ({ i, dir: i === statIdx && cur.dir === "desc" ? "asc" : "desc" }))}
+              style={{ width: statW(c), flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", gap: "3px", background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit", color: on ? GOLD : "#fff", opacity: on ? 1 : 0.72, fontWeight: 900, fontSize: isMobile ? "11px" : "12px", letterSpacing: "0.06em", whiteSpace: "nowrap" }}>
+              {c.label}{on && <span aria-hidden="true" style={{ fontSize: "9px" }}>{statSort.dir === "asc" && statSort.i === i ? "▲" : "▼"}</span>}
+            </button>
+          );
+        })}
+      </div>
+    );
+    return (
+      <div className="wdb-card" style={{ borderRadius: "14px", overflow: "hidden", background: "#fff" }}>
+        <div className="wdb-cardhead" style={{ background: BLUE, padding: "10px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
+          <div style={{ color: GOLD, fontWeight: 900, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>{title} · {stats?.season ? `${stats.season} ` : ""}Season Stats</div>
+          <div style={{ color: "rgba(255,255,255,0.75)", fontSize: "11px", fontWeight: 700, whiteSpace: "nowrap" }}>{loading ? "" : `${statRows.length} player${statRows.length === 1 ? "" : "s"}`}</div>
+        </div>
+        {loading || !stats ? <LoadingSpinner label="Loading stats" size={32} minHeight="240px" /> : (
+          <div style={{ maxHeight: isMobile ? "calc(72vh / var(--pz, 1))" : "820px", overflow: "auto" }}>
+            <div style={{ minWidth: isMobile ? "max-content" : undefined }}>
+              {head}
+              {statRows.length === 0 ? empty : statRows.map((p) => {
+                const st = statOf(p);
+                return (
+                  <div key={p.id} className="wdb-row" style={{ display: "flex", alignItems: "center", gap: isMobile ? "8px" : "12px", padding: isMobile ? "9px 12px" : "10px 20px", background: "#fff" }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = "#f3f8ff"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}>
+                    {!isMobile && <div style={{ width: "70px", flexShrink: 0, display: "flex", justifyContent: "center" }}><TransferStars stars={p.stars} /></div>}
+                    <div style={{ width: (isMobile ? 40 : POS_COL_W) + "px", flexShrink: 0 }}>
+                      <span style={{ display: "block", fontSize: isMobile ? "11px" : "13px", fontWeight: 900, color: BLUE, background: "#eaf1ff", padding: "5px 0", textAlign: "center", borderRadius: "6px" }}>{subOf(p) || "—"}</span>
+                    </div>
+                    {!isMobile && <div style={{ width: FROM_TO_W + "px", flexShrink: 0, display: "flex", justifyContent: "center" }}><SchoolMark name={p.from} size={34} title={`From ${p.from}`} muted={p.committed} /></div>}
+                    {!isMobile && <div style={{ width: FROM_TO_W + "px", flexShrink: 0, display: "flex", justifyContent: "center" }}><ToCell p={p} size={34} /></div>}
+                    <div style={isMobile ? { width: nameW, flexShrink: 0, display: "flex", alignItems: "center", gap: "6px", minWidth: 0 } : { flex: 1, minWidth: 140 }}>
+                      {isMobile && <SchoolMark name={p.from} size={22} title={`From ${p.from}`} muted={p.committed} />}
+                      <NameLink p={p} hover style={{ color: BLUE, fontWeight: 900, fontSize: isMobile ? "13px" : "19px", lineHeight: 1.15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: isMobile ? "nowrap" : "normal", minWidth: 0 }} />
+                    </div>
+                    {statCols.map((c, i) => {
+                      const v = st ? c.value(st) : "";
+                      return (
+                        <div key={c.label} style={{ width: statW(c), flexShrink: 0, textAlign: "center", fontSize: isMobile ? "13px" : "16px", fontWeight: 900, fontVariantNumeric: "tabular-nums", color: !st ? "#c3cad4" : i === statIdx ? INK : "#4a5568" }}>
+                          {st && v !== "" ? (typeof v === "number" ? v.toLocaleString("en-US") : v) : "—"}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  })();
+
   // ── Sidebars: latest entries, and the portal by position. ──
   const latest = moves.slice(0, 8);
-  const byPos = POSITIONS.map((pos) => [pos, all.filter((p) => p.Position === pos).length]);
-  const maxPos = Math.max(1, ...byPos.map(([, n]) => n));
+  // Each school's comings and goings (commits in; entries and transfers
+  // out — a withdrawal stays home) — the team rails.
+  const flow = useMemo(() => {
+    const add = {};
+    const lost = {};
+    all.forEach((p) => {
+      if (p.committed && p.to) add[p.to] = (add[p.to] || 0) + 1;
+      if (p.from && !p.withdrawn) lost[p.from] = (lost[p.from] || 0) + 1;
+    });
+    return { add, lost };
+  }, [all]);
+  const teamRows = (list) => list.map(([slug, t]) => {
+    const add = flow.add[t.School] || 0;
+    const lost = flow.lost[t.School] || 0;
+    return { slug, t, add, lost, net: add - lost };
+  }).sort((a, b) => b.net - a.net || b.add - a.add || a.t.School.localeCompare(b.t.School));
+  // A team table (In / Out / Net), each row its portal page.
+  const TeamTable = ({ rows, here = "", tint = BLUE, maxHeight }) => (
+    <>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 30px 30px 34px", gap: "6px", padding: "6px 14px", fontSize: "10px", fontWeight: 900, color: "#8a97ab", textTransform: "uppercase", letterSpacing: "0.08em", borderBottom: "1px solid #eef1f5" }}>
+        <span>Team</span><span style={{ textAlign: "right" }}>In</span><span style={{ textAlign: "right" }}>Out</span><span style={{ textAlign: "right" }}>Net</span>
+      </div>
+      <div style={maxHeight ? { maxHeight, overflowY: "auto" } : undefined}>
+        {rows.length === 0 && <div style={{ padding: "16px 14px", fontSize: "12px", fontWeight: 700, color: "#8a97ab" }}>No teams.</div>}
+        {rows.map((r, i) => (
+          <Link key={r.slug} to={`/portal/${r.slug}`} style={{ display: "grid", gridTemplateColumns: "1fr 30px 30px 34px", gap: "6px", alignItems: "center", padding: "7px 14px", textDecoration: "none", background: r.slug === here ? `color-mix(in srgb, ${tint} 9%, #fff)` : "#fff", borderBottom: i < rows.length - 1 ? "1px solid #eef1f5" : "none" }}
+            onMouseEnter={(e) => { if (r.slug !== here) e.currentTarget.style.background = "#f7f9fc"; }}
+            onMouseLeave={(e) => { if (r.slug !== here) e.currentTarget.style.background = "#fff"; }}>
+            <span style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
+              {r.t.Logo1 ? <img src={r.t.Logo1} alt="" loading="lazy" style={{ width: 20, height: 20, objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.visibility = "hidden"; }} /> : <span style={{ width: 20, flexShrink: 0 }} />}
+              <span style={{ fontSize: "13px", fontWeight: 800, color: INK, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.t.School}</span>
+            </span>
+            <span style={{ textAlign: "right", fontSize: "12px", fontWeight: 900, color: "#2e7d32" }}>{r.add}</span>
+            <span style={{ textAlign: "right", fontSize: "12px", fontWeight: 900, color: "#c0392b" }}>{r.lost}</span>
+            <span style={{ textAlign: "right", fontSize: "12px", fontWeight: 900, color: r.net > 0 ? "#2e7d32" : r.net < 0 ? "#c0392b" : "#8a97ab" }}>{r.net > 0 ? `+${r.net}` : r.net}</span>
+          </Link>
+        ))}
+      </div>
+    </>
+  );
+  // The board's rail (user, 2026-11-18 — in place of By Position): every
+  // FBS team's portal page, a conference at a time.
+  const railConfs = FBS_CONFERENCES.filter((c) => Object.values(teams || {}).some((t) => t.Conference === c));
+  const railRows = teamRows(Object.entries(teams || {}).filter(([, t]) => !railConf || t.Conference === railConf));
   const SideCard = ({ title: t, to, children }) => (
     <div className="wdb-side" style={{ borderRadius: "14px", overflow: "hidden", background: "#fff" }}>
       <div className="wdb-sidehead" style={{ background: BLUE, padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
@@ -907,19 +1044,18 @@ export default function TransferPortal({ view = "board" }) {
           })}
         </SideCard>
       )}
-      <SideCard title="By Position">
-        <div style={{ padding: "8px 14px 10px" }}>
-          {byPos.map(([pos, n]) => (
-            <Link key={pos} to={`/portal/${pos.toLowerCase()}`} style={{ display: "grid", gridTemplateColumns: "42px 1fr 28px", alignItems: "center", gap: "8px", padding: "4px 0", textDecoration: "none" }}>
-              <span style={{ fontSize: "12px", fontWeight: 900, color: position === pos ? GOLD : BLUE }}>{pos}</span>
-              <span style={{ height: "8px", borderRadius: "4px", background: "#eef1f5", overflow: "hidden" }}>
-                <span style={{ display: "block", height: "100%", width: `${(n / maxPos) * 100}%`, background: position === pos ? GOLD : BLUE, borderRadius: "4px" }} />
-              </span>
-              <span style={{ fontSize: "12px", fontWeight: 900, color: INK, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{n}</span>
-            </Link>
-          ))}
-        </div>
-      </SideCard>
+      {teams && Object.keys(teams).length > 0 && (
+        <SideCard title="Team Portals">
+          <div style={{ padding: "10px 14px 8px", borderBottom: "1px solid #eef1f5" }}>
+            <select value={railConf} onChange={(e) => setRailConf(e.target.value)} aria-label="Conference" className="wdb-input"
+              style={{ width: "100%", boxSizing: "border-box", border: "2px solid " + GOLD, borderRadius: "8px", padding: "7px 8px", fontWeight: 800, fontSize: "13px", color: BLUE, background: "#fff", fontFamily: "inherit" }}>
+              <option value="">All FBS Teams</option>
+              {railConfs.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <TeamTable rows={railRows} maxHeight={isMobile ? "360px" : "520px"} />
+        </SideCard>
+      )}
     </>
   );
 
@@ -1025,50 +1161,21 @@ export default function TransferPortal({ view = "board" }) {
   const teamMoves = !team ? [] : moves.filter((m) => isIn(m) || isOut(m) || (m.kind === "withdrew" && m.p.to === T));
   const dir = ["in", "out"].includes(params.get("dir")) ? params.get("dir") : "";
   const dirMoves = teamMoves.filter((m) => (dir === "in" ? isIn(m) : dir === "out" ? isOut(m) : true));
-  const additions = !team ? [] : all.filter((p) => p.committed && p.to === T);
-  const losses = !team ? [] : all.filter((p) => p.from === T && !p.withdrawn);
-  const stillOut = losses.filter((p) => p.status === "uncommitted").length;
   const tc1 = team?.Color1 || BLUE;
   const tc2 = team?.Color2 || GOLD;
 
   const KICKER = { "": "Transfer Portal Tracker", roster: `Projected ${SEASON} Roster`, needs: "Team Needs", targets: "Transfer Portal Targets and Projections" };
-  const TeamHero = team && (
-    <div style={{ marginBottom: isMobile ? "10px" : "14px", borderRadius: "16px", overflow: "hidden", border: "1px solid #e3e8ef" }}>
-      <div style={{ position: "relative", overflow: "hidden", padding: isMobile ? "16px 14px" : "20px 26px", display: "flex", alignItems: "center", gap: isMobile ? "14px" : "22px", background: `linear-gradient(120deg, ${tc1} 0%, ${tc1} 55%, color-mix(in srgb, ${tc1} 70%, #000) 100%)` }}>
-        <img src="/logos/transfer-portal.svg" alt="" aria-hidden="true" style={{ position: "absolute", right: isMobile ? "-30px" : "16px", top: "50%", transform: "translateY(-50%)", height: isMobile ? "110px" : "150px", opacity: 0.1, pointerEvents: "none" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
-        {/* Team-color fill: the dark-background logo when there is one. */}
-        {(team.LogoDark || team.Logo1) && <img src={team.LogoDark || team.Logo1} alt={T} style={{ position: "relative", width: isMobile ? 64 : 96, height: isMobile ? 64 : 96, objectFit: "contain", flexShrink: 0, filter: "drop-shadow(0 4px 10px rgba(0,0,0,0.35))" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />}
-        <div style={{ position: "relative", minWidth: 0 }}>
-          <div style={{ fontSize: isMobile ? "11px" : "12px", fontWeight: 900, letterSpacing: "0.16em", textTransform: "uppercase", color: "rgba(255,255,255,0.8)" }}>{KICKER[teamTab]}{team.Conference ? ` · ${team.Conference}` : ""}</div>
-          <h1 style={{ margin: "2px 0 0", fontSize: isMobile ? "24px" : "38px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.02em", color: "#fff", lineHeight: 1.05 }}>{T}</h1>
-          <div style={{ marginTop: "6px", display: "flex", gap: "12px", flexWrap: "wrap", fontSize: "12px", fontWeight: 800 }}>
-            <Link to="/portal" style={{ color: "#fff", textDecoration: "underline", textUnderlineOffset: "3px", textDecorationColor: "rgba(255,255,255,0.5)" }}>← Full portal</Link>
-            {team.teamSlug && <Link to={`/team/${team.teamSlug}`} style={{ color: "#fff", textDecoration: "underline", textUnderlineOffset: "3px", textDecorationColor: "rgba(255,255,255,0.5)" }}>Team page</Link>}
-          </div>
-        </div>
-      </div>
-      <div style={{ height: "4px", background: tc2 }} />
-    </div>
-  );
-  const net = additions.length - losses.length;
-  const TeamPulse = team && !loading && (
-    <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)", gap: "8px", marginBottom: isMobile ? "10px" : "14px" }}>
-      {[
-        [additions.length, "Additions", "in", "#2e7d32"],
-        [losses.length, "Losses", "out", "#c0392b"],
-        [net > 0 ? `+${net}` : net, "Net", "", net > 0 ? "#2e7d32" : net < 0 ? "#c0392b" : BLUE],
-        [stillOut, "Still in Portal", "out", BLUE],
-      ].map(([v, label, k, color]) => {
-        const on = !teamTab && k && dir === k;
-        return (
-          <Link key={label} to={`/portal/${teamSlug}${k ? `?dir=${k}` : ""}`} style={{ background: "#fff", border: `1px solid ${on ? tc1 : "#e3e8ef"}`, borderRadius: "14px", padding: isMobile ? "10px 12px" : "12px 16px", textDecoration: "none" }}>
-            <div style={{ fontSize: isMobile ? "22px" : "28px", fontWeight: 900, color, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>{v}</div>
-            <div style={{ marginTop: "4px", fontSize: "11px", fontWeight: 900, color: "#5b6b84", textTransform: "uppercase", letterSpacing: "0.08em" }}>{label}</div>
-          </Link>
-        );
-      })}
-    </div>
-  );
+  // The team's header: the CFB team page's hero in its colors — its logo and
+  // name go to the team page — and its Portal Sim (the sim started as this
+  // team; PortalSimButton, the portal's "on the clock").
+  const TeamHero = team && heroShell({
+    c1: tc1, c2: tc2, mark: team.LogoDark || team.Logo1, watermark: team.WordmarkDark || team.Wordmark || "",
+    kicker: `${KICKER[teamTab]}${team.Conference ? ` · ${team.Conference}` : ""}`,
+    title: T, sub: team.Mascot || "",
+    links: [heroLink("/portal", "← Full portal")],
+    to: team.teamSlug ? `/team/${team.teamSlug}` : null, toLabel: `${T} team page`,
+    buttons: <PortalSimButton team={teamSlug} school={T} c1={tc1} c2={tc2} isMobile={isMobile} wide={isMobile} />,
+  });
   const teamCounts = { "": teamMoves.length };
   const TeamTabs = team && (
     <div style={{ display: "flex", gap: isMobile ? "5px" : "8px", justifyContent: isMobile ? "flex-start" : "center", overflowX: isMobile ? "auto" : "visible", marginBottom: "12px", paddingBottom: isMobile ? "2px" : 0 }}>
@@ -1280,9 +1387,12 @@ export default function TransferPortal({ view = "board" }) {
         const classLabel = (y) => (y === 99 ? "Eligibility Unknown" : `${CLASS[y] || "Freshman"} (${y} ${y === 1 ? "Year" : "Years"} Remaining)`);
         const years = [...new Set(g.players.map((r) => r.e ?? 99))].sort((a, b) => a - b);
         const none = (text) => <div style={{ padding: "10px 14px", borderRadius: 12, background: "#fff", boxShadow: "0 0 0 1px #e6ebf2", fontSize: "13px", fontWeight: 800, color: "#8a97ab" }}>{text}</div>;
+        // ATH is a recruiting label (user, 2026-11-18): just the commits —
+        // no "No returning players.", and departures only if there are any.
+        const ath = rosterPos === "ATH";
         return (
           <>
-            {g.players.length === 0 && <>{groupTitle(POSITION_PLURAL[rosterPos] || rosterPos, 0)}{none("No returning players.")}</>}
+            {g.players.length === 0 && !ath && <>{groupTitle(POSITION_PLURAL[rosterPos] || rosterPos, 0)}{none("No returning players.")}</>}
             {years.map((y) => {
               const list = g.players.filter((r) => (r.e ?? 99) === y).sort(byDepth);
               return (
@@ -1292,14 +1402,14 @@ export default function TransferPortal({ view = "board" }) {
                 </div>
               );
             })}
-            <div style={{ marginTop: "22px" }}>
-              {groupTitle(`Freshman (${SEASON} Commits)`, g.hs.length)}
+            <div style={{ marginTop: ath && !g.players.length ? 0 : "22px" }}>
+              {groupTitle(ath ? `${SEASON} Commits` : `Freshman (${SEASON} Commits)`, g.hs.length)}
               {g.hs.length ? chipGrid(g.hs.map((r) => rosterChip(r, "hs", { noYears: true }))) : none(`No ${SEASON} commits at ${rosterPos}.`)}
             </div>
-            <div id="departures" style={{ marginTop: "28px" }}>
+            {!(ath && !shownDeparting.length) && <div id="departures" style={{ marginTop: "28px" }}>
               {teamCard(`${rosterPos} Departures`, `${shownDeparting.length} player${shownDeparting.length === 1 ? "" : "s"}`, null, { head: "#5b6b84" })}
               {shownDeparting.length ? departureGroups : none("No departures.")}
-            </div>
+            </div>}
           </>
         );
       })() : (
@@ -1320,7 +1430,10 @@ export default function TransferPortal({ view = "board" }) {
   ));
 
   // ── Targets: the sim's needs, the admin's picks, the sim's suggestions ──
-  const needLevel = (v) => (v >= 1.75 ? ["Big Need", "#c0392b"] : v >= 0.9 ? ["Need", "#c77700"] : v >= 0.35 ? ["Depth", BLUE] : ["Set", "#2e7d32"]);
+  // Need levels (user, 2026-11-18 — the sim's: engine needsOf, averaged
+  // over the build's runs): Needs Upgrade (red), Needs Talent (orange),
+  // Needs Depth (yellow), Set (green).
+  const needLevel = (v) => (v >= 2.5 ? ["Needs Upgrade", "#c0392b"] : v >= 1.5 ? ["Needs Talent", "#e67e22"] : v >= 0.5 ? ["Needs Depth", "#d4a017"] : ["Set", "#2e7d32"]);
   const needs = Object.entries(teamPage?.needs || {}).sort((a, b) => b[1] - a[1]);
   const wantsAt = (pos) => (teamPage?.wants || []).filter((w) => w.pos === pos);
   const NeedsCard = teamCard(`${T} Team Needs`, "Portal Sim projection", (
@@ -1415,31 +1528,13 @@ export default function TransferPortal({ view = "board" }) {
         : <>{DirBar}{renderFeed(dirMoves, { title: `${T} Portal Movement`, emptyText: dir === "in" ? `No commitments to ${T} yet.` : dir === "out" ? `No ${T} players in the ${SEASON} portal yet.` : `No ${T} portal moves yet.` })}</>
   );
   // Right rail on a team page: its conference, each school's net.
-  const confTeams = team ? Object.entries(teams || {}).filter(([, t]) => t.Conference === team.Conference) : [];
-  const confRows = confTeams.map(([slug, t]) => {
-    const add = all.filter((p) => p.committed && p.to === t.School).length;
-    const lost = all.filter((p) => p.from === t.School && !p.withdrawn).length;
-    return { slug, t, add, lost, net: add - lost };
-  }).sort((a, b) => b.net - a.net || b.add - a.add || a.t.School.localeCompare(b.t.School));
+  const confRows = team ? teamRows(Object.entries(teams || {}).filter(([, t]) => t.Conference === team.Conference)) : [];
   const ConfCard = team && (
     <div className="wdb-side" style={{ borderRadius: "14px", overflow: "hidden", background: "#fff" }}>
       <div className="wdb-sidehead" style={{ background: BLUE, padding: "12px 16px" }}>
         <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", letterSpacing: "0.14em", textTransform: "uppercase" }}>{team.Conference} Portal</div>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 30px 30px 34px", gap: "6px", padding: "6px 14px", fontSize: "10px", fontWeight: 900, color: "#8a97ab", textTransform: "uppercase", letterSpacing: "0.08em", borderBottom: "1px solid #eef1f5" }}>
-        <span>Team</span><span style={{ textAlign: "right" }}>In</span><span style={{ textAlign: "right" }}>Out</span><span style={{ textAlign: "right" }}>Net</span>
-      </div>
-      {confRows.map((r, i) => (
-        <Link key={r.slug} to={`/portal/${r.slug}`} style={{ display: "grid", gridTemplateColumns: "1fr 30px 30px 34px", gap: "6px", alignItems: "center", padding: "7px 14px", textDecoration: "none", background: r.slug === teamSlug ? `color-mix(in srgb, ${tc1} 9%, #fff)` : "#fff", borderBottom: i < confRows.length - 1 ? "1px solid #eef1f5" : "none" }}>
-          <span style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
-            {r.t.Logo1 ? <img src={r.t.Logo1} alt="" style={{ width: 20, height: 20, objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.visibility = "hidden"; }} /> : <span style={{ width: 20 }} />}
-            <span style={{ fontSize: "13px", fontWeight: 800, color: INK, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.t.School}</span>
-          </span>
-          <span style={{ textAlign: "right", fontSize: "12px", fontWeight: 900, color: "#2e7d32" }}>{r.add}</span>
-          <span style={{ textAlign: "right", fontSize: "12px", fontWeight: 900, color: "#c0392b" }}>{r.lost}</span>
-          <span style={{ textAlign: "right", fontSize: "12px", fontWeight: 900, color: r.net > 0 ? "#2e7d32" : r.net < 0 ? "#c0392b" : "#8a97ab" }}>{r.net > 0 ? `+${r.net}` : r.net}</span>
-        </Link>
-      ))}
+      <TeamTable rows={confRows} here={teamSlug} tint={tc1} />
     </div>
   );
 
@@ -1448,7 +1543,6 @@ export default function TransferPortal({ view = "board" }) {
       {!team ? <LoadingSpinner label="Loading" size={40} minHeight="300px" /> : (
         <>
           {TeamHero}
-          {TeamPulse}
           {TeamTabs}
           {TeamBody}
         </>
@@ -1457,8 +1551,7 @@ export default function TransferPortal({ view = "board" }) {
   ) : (
     <div style={{ fontFamily: "'Arial Black', Arial, sans-serif" }}>
       {Hero}
-      {Pulse}
-      {isUpdates ? <>{MoveBar}{Feed}</> : <>{Filters}{List}</>}
+      {isUpdates ? <>{MoveBar}{Feed}</> : <>{Filters}{ViewBar}{statsView ? StatsTable : List}</>}
     </div>
   );
 
@@ -1495,8 +1588,14 @@ export default function TransferPortal({ view = "board" }) {
     const status = card.status === "uncommitted" ? ["In the Portal", GOLD] : next ? [`Committed to ${next}`, "#7ee2a8"]
       : card.status === "withdrawn" ? ["Withdrew", "#fff"] : gone === "nfl" ? ["Declared for the NFL Draft", GOLD] : gone === "grad" ? ["Out of eligibility", GOLD] : ["", "#fff"];
     const moving = card.status === "uncommitted" || !!next || !!gone;
-    // His position, on the logos' line (user, 2026-11-17).
-    const posTag = card.pos ? <span style={{ marginLeft: 4, fontSize: 11, fontWeight: 900, background: "rgba(0,0,0,0.35)", borderRadius: 6, padding: "3px 7px" }}>{card.pos}</span> : null;
+    // His position (user, 2026-11-18 — restyled): a solid white tag in the
+    // school's color, leading the stars / status line.
+    const posTag = card.pos ? (
+      <span style={{
+        flexShrink: 0, display: "inline-flex", alignItems: "center", height: 20, padding: "0 8px", borderRadius: 5, background: "#fff",
+        color: inkOn(h1) === "#fff" ? h1 : INK, fontSize: 11, fontWeight: 900, letterSpacing: "0.08em", lineHeight: 1, boxShadow: "0 1px 4px rgba(0,0,0,0.25)",
+      }}>{card.pos}</span>
+    ) : null;
     const statusRows = gone === "nfl" ? [{ key: "nfl", name: `${SEASON} NFL Draft`, brand: { Logo1: NFL_ICON }, span: "Declared", accolades: [] }]
       : gone === "grad" ? [{ key: "grad", name: "Out of Eligibility", brand: { Logo1: GRAD_ICON.light }, span: `Final season ${SEASON - 1}`, accolades: [] }] : [];
     const rows = [...statusRows, ...career.rows];
@@ -1543,13 +1642,12 @@ export default function TransferPortal({ view = "board" }) {
                     {next ? <HeadLogo name={next} size={isMobile ? 30 : 36} />
                       : gone ? <DepartureIcon kind={gone} dark size={isMobile ? 30 : 36} />
                         : card.status === "uncommitted" ? <span aria-label="Undecided" style={{ width: isMobile ? 30 : 36, height: isMobile ? 30 : 36, flexShrink: 0, borderRadius: "50%", border: "2px dashed rgba(255,255,255,0.65)", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: isMobile ? 15 : 18, fontWeight: 900 }}>?</span> : null}
-                    {posTag}
                   </div>
                 )}
-                {(!(card.from || card.to) || (inPortal && card.s) || status[0]) && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+                {(posTag || (inPortal && card.s) || status[0]) && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                    {posTag}
                     {inPortal && card.s ? <TransferStars stars={card.s} size="sm" /> : null}
-                    {!(card.from || card.to) && posTag}
                     {status[0] && <span style={{ fontSize: 12, fontWeight: 900, color: status[1], textShadow: "0 1px 6px rgba(0,0,0,0.4)" }}>{status[0]}</span>}
                   </div>
                 )}
@@ -1657,7 +1755,12 @@ export default function TransferPortal({ view = "board" }) {
         <meta name="robots" content="noindex, nofollow" />
       </Helmet>
       <style>{BOARD_MODERN_STYLE}</style>
-      <style>{"@container (max-width: 265px) { .tp-chip-stars { display: none !important; } }"}</style>
+      <style>{"@container (max-width: 265px) { .tp-chip-stars { display: none !important; } }"
+        + " @keyframes tpHeroDrift { 0% { transform: translate(0, 0); } 100% { transform: translate(-80px, -46px); } }"
+        + " @keyframes tpHeroSpotlight { 0%, 100% { opacity: 0.7; } 50% { opacity: 1; } }"
+        + " .tp-hero-btn { transition: filter 0.15s ease, background 0.15s ease; } .tp-hero-btn:hover { filter: brightness(1.12); } .tp-hero-btn.ghost:hover { background-color: rgba(255,255,255,0.18) !important; border-color: #fff !important; }"
+        + " .tp-hero-home { transition: transform 0.15s ease, opacity 0.15s ease; } .tp-hero-home:hover { opacity: 0.9; } a.tp-hero-home:hover img { transform: scale(1.04); transition: transform 0.15s ease; } h1 a.tp-hero-home:hover { text-decoration: underline !important; text-underline-offset: 4px; text-decoration-thickness: 2px !important; }"
+        + " @media (prefers-reduced-motion: reduce) { [style*='tpHero'] { animation: none !important; } }"}</style>
       {CardModal}
       {isMobile && <style>{".wd-mobile-filter-grid button { width: 100%; box-sizing: border-box; text-align: center; } .wd-mobile-filter-grid > *:last-child:nth-child(odd) { grid-column: 1 / -1; }"}</style>}
       {isMobile ? (

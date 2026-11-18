@@ -63,6 +63,31 @@ const OL_SUB = { T: "OT", OT: "OT", LT: "OT", RT: "OT", G: "IOL", OG: "IOL", LG:
 const STARTERS = { QB: 1, RB: 1, WR: 3, TE: 1, OL: 5, DL: 2, EDGE: 2, LB: 2, DB: 4, K: 1, P: 1 };
 const MIN_SNAPS = { passing: 100, rushing: 60, receiving: 100, blocking: 200, defense: 150, kicking: 8, punting: 15 };
 
+// CFBD sometimes lists one player twice on a roster (user, 2026-11-18:
+// "Anthony Jones" and "Anthony Jones Jr." at Oregon) — two ids, the same
+// kid. Same name (suffixes aside), same listed position and the same
+// jersey, high school or recruiting rank → one player: the row with the
+// most behind it (PFF snaps, a We-Draft link, stats, hometown) wins and
+// takes anything it's missing from the other. Two real players who share a
+// name (Wyoming's DT and WR Jayden Williams) differ on those and stay apart.
+const dupeName = (p) => `${p.first || ""} ${p.last || ""}`.toLowerCase().replace(/\b(jr|sr|ii|iii|iv|v)\b\.?/g, "").replace(/[^a-z]/g, "");
+function dedupeRoster(list, weight) {
+  const out = [];
+  let merged = 0;
+  (list || []).forEach((p) => {
+    const twin = out.findIndex((q) => dupeName(q) === dupeName(p) && String(q.pos || "") === String(p.pos || "")
+      && ((q.no != null && q.no === p.no) || (q.hs && q.hs === p.hs && q.hss === p.hss) || (q.rank && q.rank === p.rank)));
+    if (twin < 0) { out.push(p); return; }
+    const q = out[twin];
+    const [keep, drop] = weight(p) > weight(q) ? [p, q] : [q, p];
+    const filled = { ...keep };
+    Object.entries(drop).forEach(([k, v]) => { if (filled[k] == null && v != null) filled[k] = v; });
+    out[twin] = filled;
+    merged += 1;
+  });
+  return { list: out, merged };
+}
+
 async function buildPortalSimPool(db, { dry = false } = {}) {
   const { solidStats, eligLeft, decodeGrade } = await import("../../src/utils/portalStars.mjs");
   const { packStats } = await import("../../src/utils/portalSim/stats.mjs");
@@ -101,6 +126,7 @@ async function buildPortalSimPool(db, { dry = false } = {}) {
   const teamIdx = new Map();
   const rows = [];
   let season = null;
+  let dupesMerged = 0;
   rosterSnap.docs.forEach((d) => {
     const t = d.data();
     const fcs = !slugBySchool.has(t.school);
@@ -118,8 +144,11 @@ async function buildPortalSimPool(db, { dry = false } = {}) {
       teamList.push(fcs ? [slug, t.school, "FCS", loc[0], loc[1], 1, brandBySchool.get(t.school) || null] : [slug, t.school, fbs[slug].Conference || "", loc[0], loc[1], 0, null]);
     }
 
-    // Each player's sim position and snaps, then roles by position.
-    const players = (t.players || []).map((p) => {
+    // One row per player (CFBD duplicates merged), then each player's sim
+    // position and snaps, then roles by position.
+    const deduped = dedupeRoster(t.players, (p) => (pff.has(String(p.id)) ? 4 : 0) + (wdOf.has(String(p.id)) ? 3 : 0) + (p.s ? 2 : 0) + (p.hl ? 1 : 0));
+    dupesMerged += deduped.merged;
+    const players = deduped.list.map((p) => {
       const rec = pff.get(String(p.id));
       const pos = (rec && PFF_POS[rec.pos]) || CFBD_POS[String(p.pos || "").toUpperCase()] || null;
       const SUB = pos === "DB" ? DB_SUB : pos === "OL" ? OL_SUB : null;
@@ -161,7 +190,7 @@ async function buildPortalSimPool(db, { dry = false } = {}) {
   });
 
   const chunks = Math.ceil(rows.length / CHUNK);
-  const result = { season, teams: teamList.length, players: rows.length, chunks, bytes: JSON.stringify(rows).length };
+  const result = { season, teams: teamList.length, players: rows.length, dupesMerged, chunks, bytes: JSON.stringify(rows).length };
   if (dry) return result;
   const b = db.batch();
   b.set(db.collection("portalSimPool").doc("teams"), { season, chunks, teams: teamList.map((t) => JSON.stringify(t)), builtAt: FieldValue.serverTimestamp() });

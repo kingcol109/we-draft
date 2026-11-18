@@ -6,6 +6,8 @@
 //   compSnapshots/_portal_board(_n)  CFBD portal entries that aren't We-Draft
 //                                    players, plus every We-Draft player's
 //                                    transfer stars (server/portal/public.js)
+//   compSnapshots/_portal_stats(_n)  every portal player's season stats (the
+//                                    position Stats view — utils/portalStats.js)
 //   compSnapshots/_portal_{slug}     a team's projected roster, 2027 signees,
 //                                    sim needs and sim targets
 //   config/portalGrades              the admin's locked stars (the Grades
@@ -48,6 +50,17 @@ export function fetchPortalBoard() {
     if (!first) return { entries: [], stars: {}, season: null, builtAt: null };
     const rest = await Promise.all(Array.from({ length: Math.max(0, (first.parts || 1) - 1) }, (_, i) => read("compSnapshots", `_portal_board_${i + 1}`)));
     return { entries: [...(first.entries || []), ...rest.flatMap((d) => d?.entries || [])], stars: first.stars || {}, season: first.season, builtAt: first.builtAt || null };
+  });
+}
+
+// { season, rows: { [poolId]: packed } } — every portal player's season
+// stats (utils/portalStats.js), for the position Stats view only.
+export function fetchPortalStats() {
+  return cached("stats", async () => {
+    const first = await read("compSnapshots", "_portal_stats");
+    if (!first) return { season: null, rows: {} };
+    const rest = await Promise.all(Array.from({ length: Math.max(0, (first.parts || 1) - 1) }, (_, i) => read("compSnapshots", `_portal_stats_${i + 1}`)));
+    return { season: first.season || null, rows: Object.assign({}, first.rows || {}, ...rest.map((d) => d?.rows || {})) };
   });
 }
 
@@ -112,7 +125,7 @@ export const DEPARTURES = [
   ["x", "Out of Eligibility", "Played his final college season in 2026"],
 ];
 // A need's words (wants kinds — engine wantsOf).
-export const WANT_LABEL = { hole: "Starter needed", upgrade: "Upgrade", depth: "Depth" };
+export const WANT_LABEL = { hole: "Starter needed", upgrade: "Upgrade", talent: "More talent", depth: "Depth" };
 
 // ── Admin: the whole Portal Sim pool (every FBS player, graded FCS) with
 // locks applied, plus FBS branding — the Targets and Manual Entries tabs'

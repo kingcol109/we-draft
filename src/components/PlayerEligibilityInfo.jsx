@@ -153,11 +153,11 @@ function estimatedBirthday(recruitYear) {
 
 // A gold accolade line: "2025 · Lou Groza Award", "4-Star Recruit · No. 45 Nationally".
 // The marker is the conference logo / award icon when one is set.
-function Accolade({ children, title, icon, isMobile }) {
+function Accolade({ children, title, icon, isMobile, dark = false }) {
   const [broken, setBroken] = useState(false);
   const size = isMobile ? 18 : 20;
   return (
-    <div title={title || undefined} style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, fontSize: isMobile ? 12 : 13, fontWeight: 800, color: "#8a5a00" }}>
+    <div title={title || undefined} style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, fontSize: isMobile ? 12 : 13, fontWeight: 800, color: dark ? "#f6c35a" : "#8a5a00" }}>
       {icon && !broken
         ? <img src={icon} alt="" aria-hidden="true" onError={() => setBroken(true)} style={{ width: size, height: size, objectFit: "contain", flexShrink: 0 }} />
         : <span aria-hidden="true" style={{ display: "inline-flex", width: 16, height: 16, margin: (size - 16) / 2, borderRadius: "50%", background: "#f6a21d", color: "#fff", fontSize: 10, alignItems: "center", justifyContent: "center", flexShrink: 0 }}>★</span>}
@@ -207,17 +207,21 @@ const GAP = 12; // between stops
 // fallback: the marker's text with no logo (default: the name's initials).
 // Exported as CareerStop: the Transfer Portal's player card draws its career
 // path with it (pages/TransferPortal.jsx — same look as here).
+// dark (the Portal Sim's card, user 2026-11-18): light text; schools on
+// their own color with the dark-background logo; the high school (and marks
+// with no colors — the portal arrows, the draft) keep a light gray circle.
 export function CareerStop(props) { return <Stop {...props} />; }
-function Stop({ name, sub, span, current, brand, label, to, accolades, fallback, isMobile, last }) {
+function Stop({ name, sub, span, current, brand, label, to, accolades, fallback, isMobile, last, dark = false }) {
   const c1 = isHex(brand?.Color1) ? brand.Color1 : "#5f6b7a";
-  const filled = current && isHex(brand?.Color1);
+  const filled = dark ? label !== "High School" && isHex(brand?.Color1) : current && isHex(brand?.Color1);
   const logo = filled ? brand.LogoDark || brand.Logo1 : brand?.Logo1;
+  const line = dark ? "#2a3850" : "#e6ebf2";
   const size = isMobile ? 38 : 44;
   const nameLine = isMobile ? 18 : 20;
   const marker = (
     <div style={{
-      position: "relative", zIndex: 1, flexShrink: 0, width: size, height: size, borderRadius: "50%", background: filled ? c1 : "#fff",
-      boxShadow: `0 0 0 3px ${current ? (isHex(brand?.Color2) && filled ? brand.Color2 : c1) : "#e6ebf2"}, 0 2px 6px rgba(0,0,0,0.08)`,
+      position: "relative", zIndex: 1, flexShrink: 0, width: size, height: size, borderRadius: "50%", background: filled ? c1 : dark ? "#e9edf3" : "#fff",
+      boxShadow: `0 0 0 3px ${current ? (isHex(brand?.Color2) && filled ? brand.Color2 : c1) : line}, 0 2px 6px rgba(0,0,0,0.08)`,
       display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden",
     }}>
       {logo
@@ -231,7 +235,7 @@ function Stop({ name, sub, span, current, brand, label, to, accolades, fallback,
     <div style={{ position: "relative", display: "flex", alignItems: "flex-start", gap: isMobile ? 12 : 16, marginBottom: last ? 0 : GAP }}>
       {/* The line to the next stop: this marker's center to the next one's
           (none under the last stop, however many lines it has). */}
-      {!last && <div aria-hidden="true" style={{ position: "absolute", left: size / 2 - 1.5, top: size / 2, bottom: -(GAP + size / 2), width: 3, borderRadius: 2, background: "#e6ebf2" }} />}
+      {!last && <div aria-hidden="true" style={{ position: "absolute", left: size / 2 - 1.5, top: size / 2, bottom: -(GAP + size / 2), width: 3, borderRadius: 2, background: line }} />}
       {to ? <Link to={to} style={{ display: "flex", flexShrink: 0, borderRadius: "50%", position: "relative", zIndex: 1 }}>{marker}</Link> : marker}
       <div style={{ flex: 1, minWidth: 0 }}>
         {/* Padded down so the name sits at the logo's vertical middle, with
@@ -240,15 +244,15 @@ function Stop({ name, sub, span, current, brand, label, to, accolades, fallback,
             it on mobile and sit at the right edge on desktop. */}
         <div style={{ paddingTop: (size - nameLine) / 2, display: "flex", alignItems: "center", flexWrap: "wrap", gap: isMobile ? "0 8px" : "0 10px" }}>
           <span style={{ minWidth: 0, display: "inline-flex", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
-            <span style={{ fontSize: isMobile ? 14 : 16, lineHeight: `${nameLine}px`, fontWeight: 900, color: "#1a1f2b", textTransform: "uppercase", letterSpacing: "0.02em" }}>
+            <span style={{ fontSize: isMobile ? 14 : 16, lineHeight: `${nameLine}px`, fontWeight: 900, color: dark ? "#eef2f8" : "#1a1f2b", textTransform: "uppercase", letterSpacing: "0.02em" }}>
               {to ? <Link to={to} style={{ color: "inherit" }}>{name}</Link> : name}
             </span>
-            {label && <span style={{ fontSize: 9, lineHeight: "12px", fontWeight: 900, color: "#6b7685", background: "#eef1f5", borderRadius: 4, padding: "2px 5px", letterSpacing: "0.06em", textTransform: "uppercase" }}>{label}</span>}
+            {label && <span style={{ fontSize: 9, lineHeight: "12px", fontWeight: 900, color: dark ? "#9fb0c8" : "#6b7685", background: dark ? "#1f2b42" : "#eef1f5", borderRadius: 4, padding: "2px 5px", letterSpacing: "0.06em", textTransform: "uppercase" }}>{label}</span>}
           </span>
-          {span && <span style={{ marginLeft: isMobile ? 0 : "auto", fontSize: isMobile ? 14 : 17, lineHeight: `${nameLine}px`, fontWeight: 900, color: current ? c1 : "#4a5466", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", letterSpacing: "0.01em" }}>{span}</span>}
+          {span && <span style={{ marginLeft: isMobile ? 0 : "auto", fontSize: isMobile ? 14 : 17, lineHeight: `${nameLine}px`, fontWeight: 900, color: dark ? (current ? "#fff" : "#b8c4d6") : current ? c1 : "#4a5466", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", letterSpacing: "0.01em" }}>{span}</span>}
         </div>
-        {sub && <div style={{ marginTop: 2, fontSize: 12, fontWeight: 600, color: "#7a8594" }}>{sub}</div>}
-        {(accolades || []).map((a) => <Accolade key={a.key} title={a.title} icon={a.icon} isMobile={isMobile}>{a.text}</Accolade>)}
+        {sub && <div style={{ marginTop: 2, fontSize: 12, fontWeight: 600, color: dark ? "#8b9bb4" : "#7a8594" }}>{sub}</div>}
+        {(accolades || []).map((a) => <Accolade key={a.key} title={a.title} icon={a.icon} isMobile={isMobile} dark={dark}>{a.text}</Accolade>)}
       </div>
     </div>
   );

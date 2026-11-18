@@ -26,6 +26,8 @@
 //                              promised roles)
 //   toggleEval(state, slug, pid) the user's board (portal window 1 is the
 //                              evaluation period: boards only, no offers)
+//   assignCoach(state, slug, role, pid) the user's coaches on board players
+//                              (coaching staffs — see that section)
 //   endWindow(state)           CPU teams make their offers (needs, budget,
 //                              their own boards), players decide (tier,
 //                              playing time, NIL, location), the next window
@@ -48,7 +50,9 @@
 //                        { [slug]: { nil, pt, window, since, made } },
 //                        evals { [slug]: window put on its board }, to,
 //                        deal } },
-//     log: [{ w, stage, kind, pid, team, to, nil, pt, reason }] }
+//     log: [{ w, stage, kind, pid, team, to, nil, pt, reason }],
+//     recs: { [slug]: { [pid]: rec } } (the user's staff — staffRecs) }
+//   team.staff { HC, OC, DC, OA, DA: pid | null }; p.coach { [slug]: built }
 // status: roster | considering | declared | portal | committed | unsigned
 // log w: 0 in the opening windows (stage "nfl" / "retain"), else the portal
 // window.
@@ -87,11 +91,16 @@ export function initPortalSim(pool, opts = {}) {
   let cfg = mergeConfig(opts.config);
   // The run's choices (pages/PortalSim.jsx setup): portal length and
   // transfer frequency.
-  if (opts.windows && cfg.listSizeByWindows?.[opts.windows]) cfg = { ...cfg, windows: opts.windows, listSize: cfg.listSizeByWindows[opts.windows] };
-  cfg = { ...cfg, entryScale: cfg.frequency?.[opts.frequency] ?? 1 };
+  // The portal is two halves (cfg.split) — always that long.
+  const total = cfg.split ? cfg.split.at + cfg.split.after : opts.windows || cfg.windows;
+  cfg = { ...cfg, windows: total, ...(cfg.listSizeByWindows?.[total] ? { listSize: cfg.listSizeByWindows[total] } : {}) };
+  cfg = { ...cfg, entryScale: cfg.frequency?.[opts.frequency] ?? 1, crazy: opts.frequency === "crazy" };
   const seed = opts.seed ?? Math.floor(Math.random() * 1e9);
   const userTeams = opts.userTeams || [];
-  const state = { seed, cfg, season: pool.season, window: 0, windows: cfg.windows, phase: "ready", userTeams, live: !!opts.live, teams: {}, players: {}, log: [] };
+  // targets: the admin's recommended targets (config/portalTargets teams —
+  // { [slug]: { [pid]: rank } }): CPU schools chase theirs; yours show up as
+  // staff recommendations. boardOrder: the user's board, in his order.
+  const state = { seed, cfg, season: pool.season, window: 0, windows: cfg.windows, phase: "ready", userTeams, live: !!opts.live, teams: {}, players: {}, log: [], recs: {}, targets: opts.targets || {}, boardOrder: {}, rankWas: {} };
   pool.teams.forEach((t) => {
     // An FCS school (graded FCS players' home) sits below tier 5 and never
     // recruits or retains.
@@ -126,7 +135,7 @@ export function openNflWindow(state) {
     if (d.kind === "gone") {
       players[p.id] = { ...p, status: "declared", reason: d.reason };
       log.push({ w: 0, stage: "nfl", kind: "declared", pid: p.id, team: p.team, reason: d.reason });
-    } else if (d.kind === "fence" && !state.live) {
+    } else if (d.kind === "fence" && !state.live && !p.live) {
       players[p.id] = { ...p, status: "considering", considering: "nfl", lean: d.chance };
     }
   });
@@ -183,11 +192,15 @@ export const rosterOf = (state, slug) => indexOf(state).of(slug).roster;
 // Needs by position (the page's Roster & Needs and "My needs") — from the
 // school's wants (wantsOf, below).
 export const teamNeeds = (state, slug) => needsOf(state, slug);
+// team.freed (user, 2026-11-18): money back from players released or lost
+// in Market Watch — each one's normal ask — added to the budget.
 export function budgetOf(state, slug) {
   const t = state.teams[slug];
   const reserved = indexOf(state).of(slug).reserved;
-  return { budget: t.budget, spent: t.spent, reserved, available: Math.max(0, t.budget - t.spent - reserved) };
+  const budget = t.budget + (t.freed || 0);
+  return { budget, spent: t.spent, reserved, freed: t.freed || 0, available: Math.max(0, budget - t.spent - reserved) };
 }
+const free = (teams, slug, nil) => { const t = teams[slug]; teams[slug] = { ...t, freed: (t.freed || 0) + nil }; };
 
 // Playing time he'd expect at a school: where he'd fit in that room next
 // season — better players at his position (still there, or signed) vs the
@@ -246,16 +259,33 @@ export const transferLeave = (state, p, offer = null) => {
   const market = M.marketGrade(p, state.cfg, tier) + pull;
   const scale = state.cfg.entryScale;
   const chance = M.scaleEntry(M.leaveChance(homeGrade(state, p, offer), market, state.cfg), scale, state.cfg);
+  // Crazy (user, 2026-11-18): truly crazy — anyone can go, even players
+  // marked as staying (likeliness 0 or 1) and academy players; a 2 or 3
+  // still goes at least as often as his likeliness says.
+  if (state.cfg.crazy) {
+    if (p.likely == null || p.likely <= 1) return chance;
+    return Math.max(chance, M.withLikeliness(chance, p.likely, state.cfg));
+  }
   // A service academy's players rarely leave (the admin's likeliness wins).
   if (p.likely == null) return state.teams[p.team].academy ? chance * (state.cfg.academies?.entry ?? 1) : chance;
   return M.withLikeliness(chance, p.likely, state.cfg, offer ? M.scaleEntry(M.leaveChance(homeGrade(state, p), market, state.cfg), scale, state.cfg) : chance);
 };
 // Interest an offer has built by standing: offering early helps
 // (earlyInterest per window it's been out, capped).
+// Past the split (cfg.split), interest built before it counts lateHeld × —
+// coming in late is easier (user, 2026-11-18).
 export function heldBonus(state, offer) {
   if (!offer?.since) return 0;
   const { perWindow, cap } = state.cfg.earlyInterest;
-  return Math.min(cap, Math.max(0, (state.window - offer.since) * perWindow));
+  const w = state.window;
+  const at = state.cfg.split?.at;
+  let n = w - offer.since;
+  if (at && w > at) {
+    const pre = Math.max(0, Math.min(w, at + 1) - offer.since);
+    const post = Math.max(0, w - Math.max(offer.since, at + 1));
+    n = pre * (state.cfg.split.lateHeld ?? 0.5) + post;
+  }
+  return Math.min(cap, Math.max(0, n * perWindow));
 }
 // His happiness with a school, 0–100 (100 to start): lowballs (offers well
 // under his ask), offering less than before and pulling offers wear it down
@@ -272,7 +302,10 @@ export function gradeOffer(state, slug, p, offer) {
   const held = heldBonus(state, offer);
   const process = processFor(state, slug, p, offer);
   const snub = snubOf(state, slug, p);
-  return { grade: M.overallGrade(base, process, state.cfg) - snub, base, held, happy: happinessOf(p, slug), process, scores, snub };
+  // Coaches, a staff recommendation he's on your board for, and being
+  // near home (coaching staffs, below).
+  const staff = staffBonus(state, slug, p) + catchUpOf(state, slug, p);
+  return { grade: M.overallGrade(base, process, state.cfg) - snub + staff, base, held, happy: happinessOf(p, slug), process, scores, snub, staff, coach: p.coach?.[slug] || 0 };
 }
 // What an offer would cost his happiness with you: { lower, lowball, drop }.
 export function offerHit(state, slug, p, nil) {
@@ -293,6 +326,10 @@ export const offeredThisWindow = (state, slug, p) => p.touched?.[slug] === state
 // from players they can't win (cpuPlan).
 export const isEvalWindow = (state) => state.phase === "window" && state.window === (state.cfg.board?.evalWindow ?? 1);
 export const boardOf = (state, slug) => indexOf(state).of(slug).board;
+// Contacts used (user, 2026-11-18): your board plus the board players
+// you've signed — a signing keeps its spot.
+export const boardCount = (state, slug) => boardOf(state, slug).length
+  + Object.values(state.players).filter((p) => p.status === "committed" && p.to === slug && p.evals?.[slug] != null).length;
 // Contacts allowed in a portal window (board.sizes, the last carries on).
 // CPU schools fill their boards at a window's end with that window's
 // number — their first 10 at the end of the evaluation period.
@@ -353,14 +390,14 @@ export function toggleEval(state, slug, pid) {
     if (p.status === "portal" && p.offers[slug]) {
       const offers = { ...p.offers };
       delete offers[slug];
-      return { state: { ...state, players: { ...state.players, [pid]: { ...p, evals, offers, touched: { ...(p.touched || {}), [slug]: state.window }, happy: sour(p, slug, state.cfg.happiness.pulled) } } } };
+      return { state: { ...withOrder(state, slug, pid, false), players: { ...state.players, [pid]: { ...p, evals, offers, touched: { ...(p.touched || {}), [slug]: state.window }, happy: sour(p, slug, state.cfg.happiness.pulled) } } } };
     }
-    return { state: { ...state, players: { ...state.players, [pid]: { ...p, evals } } } };
+    return { state: { ...withOrder(state, slug, pid, false), players: { ...state.players, [pid]: { ...p, evals } } } };
   }
   if (state.phase !== "window" || p.status !== "portal") return { error: "You can only contact players in the portal." };
   if (p.cut?.[slug]) return { error: "He's cut you from his list." };
-  if (boardOf(state, slug).length >= boardLimit(state)) return { error: `You've used all ${boardLimit(state)} contacts. Remove someone from your board first.` };
-  return { state: { ...state, players: { ...state.players, [pid]: { ...p, evals: { ...(p.evals || {}), [slug]: state.window } } } } };
+  if (boardCount(state, slug) >= boardLimit(state)) return { error: `You've used all ${boardLimit(state)} contacts. Remove someone from your board first.` };
+  return { state: { ...withOrder(state, slug, pid, true), players: { ...state.players, [pid]: { ...p, evals: { ...(p.evals || {}), [slug]: state.window } } } } };
 }
 // A NIL offer this big (× his ask) commits him on the spot.
 export const instantAmount = (state, p) => M.instantAsk(p, state.cfg);
@@ -409,7 +446,10 @@ export const portalPlayers = (state) => Object.values(state.players).filter((p) 
 // happiness with you.
 export function userOffer(state, slug, pid, { nil }) {
   const p = state.players[pid];
-  if (state.phase !== "window") return { error: "The portal isn't open." };
+  // Market Watch (user, 2026-11-18): your own players leaving the roster
+  // can get an offer to come back — no one else until the portal reopens.
+  const marketOwn = state.phase === "market" && p?.team === slug;
+  if (state.phase !== "window" && !marketOwn) return { error: state.phase === "market" ? "Offers reopen when the second half of the portal opens." : "The portal isn't open." };
   if (!state.userTeams.includes(slug)) return { error: "Not your team." };
   if (!p || p.status !== "portal") return { error: "He isn't available." };
   if (offeredThisWindow(state, slug, p)) return { error: "You've already made your move on him this window." };
@@ -417,7 +457,7 @@ export function userOffer(state, slug, pid, { nil }) {
   if (isEvalWindow(state)) return { error: "It's the evaluation period — no offers yet. Contact him to start building interest." };
   // An offer counts as a contact (if you have one left).
   const evalSince = p.evals?.[slug];
-  if (evalSince == null && boardOf(state, slug).length >= boardLimit(state)) return { error: `You've used all ${boardLimit(state)} contacts. Remove someone from your board to offer him.` };
+  if (evalSince == null && boardCount(state, slug) >= boardLimit(state)) return { error: `You've used all ${boardLimit(state)} contacts. Remove someone from your board to offer him.` };
   const amount = Math.max(0, Math.round(Number(nil) || 0));
   const { available } = budgetOf(state, slug);
   const current = p.offers[slug]?.nil || 0;
@@ -447,7 +487,7 @@ export function userOffer(state, slug, pid, { nil }) {
       committed: true,
     };
   }
-  return { state: { ...state, players: { ...state.players, [pid]: { ...q, offers: { ...p.offers, [slug]: offer } } } } };
+  return { state: { ...(evalSince == null ? withOrder(state, slug, pid, true) : state), players: { ...state.players, [pid]: { ...q, offers: { ...p.offers, [slug]: offer } } } } };
 }
 // Pulling an offer costs his happiness with you; the interest it built is
 // gone, and it's your move for the window.
@@ -462,13 +502,604 @@ export function retractOffer(state, slug, pid) {
   };
 }
 
+// ── Releasing a player (user, 2026-11-18): one of yours on the roster goes
+// into the portal for someone else to sign. Not a commit, not someone
+// still deciding, and not one you signed out of this portal.
+// What releasing him frees: cfg.release share of his ask by last season's
+// role (a player who never played is worth little to the market).
+export const releaseValue = (state, p) => Math.round((p.ask * (state.cfg.release?.[p.role] ?? 0.15)) / 1000) * 1000;
+export function userRelease(state, slug, pid) {
+  const p = state.players[pid];
+  if (!["nfl", "retain", "window"].includes(state.phase)) return { error: "You can't release players right now." };
+  if (!state.userTeams.includes(slug) || p?.team !== slug) return { error: "Not your player." };
+  if (p.status !== "roster") return { error: "He isn't on your roster." };
+  // (user, 2026-11-18) Anyone you've re-signed this offseason — kept from
+  // the NFL or the portal, paid in Market Watch — can't be released.
+  if (p.retained) return { error: "You re-signed him this offseason — he can't be released." };
+  const w = state.phase === "window" ? state.window : 0;
+  // Part of his market ask comes back to you (releaseValue).
+  const back = releaseValue(state, p);
+  const teams = { ...state.teams };
+  free(teams, slug, back);
+  return {
+    state: {
+      ...state,
+      teams,
+      players: { ...state.players, [pid]: { ...p, status: "portal", enteredWindow: Math.max(1, w), reason: "released", released: true } },
+      log: [...state.log, { w, ...(w ? {} : { stage: state.phase }), kind: "entered", pid, team: slug, reason: "released", released: true, nil: back }],
+    },
+  };
+}
+
+// ── The real portal (user, 2026-11-18): no NFL or retention windows — the
+// real decisions are already made. Both opening windows run at once and the
+// portal opens; summary.stage "opening" carries everything that happened
+// (who left, and why) for the recap.
+export function openLivePortal(state) {
+  if (state.phase !== "ready") return { state, summary: null };
+  const before = state.log.length;
+  let next = openNflWindow(state);
+  next = endOpening(next, "nfl").state;
+  next = endOpening(next, "retain").state;
+  return { state: next, summary: { stage: "opening", events: next.log.slice(before) } };
+}
+
+// ── Coaching staffs (user, 2026-11-18 — borrowed from the Recruit Sim) ──
+// Every school has five coaches: Head Coach, Offensive and Defensive
+// Coordinators, Offensive and Defensive Assistants (cfg.staff.roles). Two
+// jobs:
+//   1. Recruiting: a coach assigned to a player on the school's board
+//      (team.staff { [role]: pid }) builds interest every window he's on him
+//      — staff.gain by role, staff.offSide on the other side of the ball
+//      (the head coach recruits everyone), capped per player (staff.cap) —
+//      p.coach { [slug]: built }, added to the school's grade (gradeOffer).
+//      Assignments stand until moved or the player leaves the portal. CPU
+//      schools assign theirs by priority (cpuStaff): the close races that
+//      matter most.
+//   2. Advice (the user's school only — CPU logic is already its own
+//      advice): staffRecs reads the school the way a CPU school does
+//      (planWants, seenEff, standing) and recommends portal players for its
+//      wants — replacing a big loss first, then holes, upgrades, talent,
+//      depth and roster numbers, nearby players a plus. state.recs { [slug]:
+//      { [pid]: { by, kind, pos, pri, w, lost, miles, have, goal, rivals } } }
+//      (the words: utils/portalSim/staff.js). Pursuing one (on your board)
+//      earns staff.recBoost.
+// Distance (user, 2026-11-18): on top of his "close to home" interest, a
+// school near his hometown gets a direct bump (staff.near: full within
+// `full` miles, fading to 0 at `zero`) — a factor, never the deciding one.
+export const STAFF_ROLES = ["HC", "OC", "DC", "OA", "DA"];
+const OFFENSE = new Set(["QB", "RB", "WR", "TE", "OL"]);
+const DEFENSE = new Set(["DL", "EDGE", "LB", "DB"]);
+export const sideOfPos = (pos) => (OFFENSE.has(pos) ? "off" : DEFENSE.has(pos) ? "def" : "st");
+const ROLE_SIDE = { HC: null, OC: "off", DC: "def", OA: "off", DA: "def" };
+// What one window of a coach on him is worth.
+export function coachGain(cfg, role, pos) {
+  const s = cfg.staff;
+  const side = ROLE_SIDE[role];
+  const g = s.gain[role] || 0;
+  if (!side) return g;
+  const his = sideOfPos(pos);
+  return his === side ? g : his === "st" ? g * (s.special ?? 0.75) : g * s.offSide;
+}
+// Which of a school's coaches are on him.
+export const coachesOn = (state, slug, pid) => STAFF_ROLES.filter((r) => state.teams[slug]?.staff?.[r] === pid);
+// The bump a school near his home gets.
+export function nearBonus(state, slug, p) {
+  const n = state.cfg.staff?.near;
+  const miles = M.milesBetween(p.home, state.teams[slug]?.loc);
+  if (!n || miles == null) return 0;
+  return n.max * Math.max(0, Math.min(1, (n.zero - miles) / (n.zero - n.full)));
+}
+// A school's staff edge with him: coach work built, plus the boost for
+// chasing a player its staff recommended (the user's school).
+export function staffBonus(state, slug, p) {
+  const built = p.coach?.[slug] || 0;
+  const rec = state.recs?.[slug]?.[p.id] && p.evals?.[slug] != null ? state.cfg.staff.recBoost : 0;
+  return built + rec + nearBonus(state, slug, p);
+}
+
+// The user puts a coach on a player on his board (pid null: off him).
+export function assignCoach(state, slug, role, pid) {
+  if (!STAFF_ROLES.includes(role)) return { error: "No such coach." };
+  if (!state.userTeams.includes(slug)) return { error: "Not your team." };
+  if (state.phase !== "window") return { error: "The portal isn't open." };
+  if (pid) {
+    const p = state.players[pid];
+    if (!p || p.status !== "portal") return { error: "He isn't in the portal." };
+    if (p.evals?.[slug] == null) return { error: "Contact him first — coaches work players on your board." };
+  }
+  const t = state.teams[slug];
+  return { state: { ...state, teams: { ...state.teams, [slug]: { ...t, staff: { ...(t.staff || {}), [role]: pid || null } } } } };
+}
+
+// Coaches put in their window's work (endWindow, before players decide).
+function staffWork(state) {
+  const cap = state.cfg.staff.cap;
+  const players = { ...state.players };
+  let touched = false;
+  Object.values(state.teams).forEach((t) => {
+    if (!t.staff) return;
+    STAFF_ROLES.forEach((role) => {
+      const pid = t.staff[role];
+      const p = pid && players[pid];
+      if (!p || p.status !== "portal" || p.evals?.[t.slug] == null) return;
+      const now = p.coach?.[t.slug] || 0;
+      const next = Math.min(cap, now + coachGain(state.cfg, role, p.pos));
+      if (next === now) return;
+      players[pid] = { ...p, coach: { ...(p.coach || {}), [t.slug]: next } };
+      touched = true;
+    });
+  });
+  return touched ? { ...state, players } : state;
+}
+// Assignments to players no longer on the board (signed, dropped, cut) end.
+function staffClear(state) {
+  let teams = null;
+  Object.values(state.teams).forEach((t) => {
+    if (!t.staff) return;
+    const next = { ...t.staff };
+    let changed = false;
+    STAFF_ROLES.forEach((role) => {
+      const p = next[role] && state.players[next[role]];
+      if (next[role] && (!p || p.status !== "portal" || p.evals?.[t.slug] == null)) { next[role] = null; changed = true; }
+    });
+    if (changed) { teams = teams || { ...state.teams }; teams[t.slug] = { ...t, staff: next }; }
+  });
+  return teams ? { ...state, teams } : state;
+}
+
+// CPU schools put their coaches to work: the head coach on its biggest close
+// race, the coordinators on the biggest on their side, the assistants on the
+// next ones — one coach per player. A race is close when it's in it but not
+// running away with it; worth = how good he is (as it sees him) × how much
+// it wants him (an offer out counts more).
+function cpuStaff(state) {
+  const teams = { ...state.teams };
+  const gap = state.cfg.board?.gap ?? 0.12;
+  const idx = indexOf(state);
+  const tiesCache = new Map();
+  const tiesFor = (p) => { if (!tiesCache.has(p.id)) tiesCache.set(p.id, tiesOf(state, p)); return tiesCache.get(p.id); };
+  Object.values(state.teams).forEach((t) => {
+    if (t.user || t.fcs || t.academy) return;
+    const board = idx.of(t.slug).board;
+    if (!board.length) { if (t.staff) teams[t.slug] = { ...t, staff: null }; return; }
+    const scored = board.map((p) => {
+      const ties = tiesFor(p);
+      const mine = ties.grades[t.slug] ?? 0;
+      const ratio = ties.best > 0 ? mine / ties.best : 1;
+      const others = Math.max(0, ...Object.entries(ties.grades).filter(([k]) => k !== t.slug).map(([, g]) => g));
+      // Running away with it (well clear of the field) or out of it: less
+      // worth a coach.
+      const race = ratio < 1 - gap ? 0.3 : others > 0 && mine > others * (1 + gap) ? 0.45 : 1;
+      return { p, v: Math.max(0.5, seenEff(state, t.slug, p)) * (p.offers?.[t.slug] ? 1.25 : 1) * race };
+    }).sort((a, b) => b.v - a.v);
+    const taken = new Set();
+    const staff = {};
+    const pick = (side) => {
+      const x = scored.find((y) => !taken.has(y.p.id) && (!side || sideOfPos(y.p.pos) === side)) || scored.find((y) => !taken.has(y.p.id));
+      if (!x) return null;
+      taken.add(x.p.id);
+      return x.p.id;
+    };
+    staff.HC = pick(null);
+    staff.OC = pick("off");
+    staff.DC = pick("def");
+    staff.OA = pick("off");
+    staff.DA = pick("def");
+    teams[t.slug] = { ...t, staff };
+  });
+  return { ...state, teams };
+}
+
+// Your staff's recommendations (user teams). For each want, most important
+// first: portal players who'd fill it (as your staff sees them), you could
+// realistically land, and afford — the best value × chance, nearby players
+// a little ahead. Up to staff.recs.perWant per want and staff.recs.max a
+// window. Earlier recommendations stand while he's still in the portal and
+// still landable (or on your board).
+// Landable (user, 2026-11-18): your likely grade against the best school on
+// him, less recs.tierPenalty per tier your program sits under his level
+// (cfg.idealTier — a Group of 5 school doesn't land a 6★). Within
+// recs.reach it's a real target; early on (through window
+// recs.longshotUntil) up to recs.longshots a window within recs.longReach
+// come as long shots ("the risk is worth the reward"); later, the bar
+// tightens (recs.lateReach) — nobody near impossible.
+// Kinds: replace (a big loss at his spot), upside (a blue-chip recent
+// recruit who hasn't played much — never "steps in and replaces"),
+// target (the admin's targets for your school — always), then the want's
+// own: hole / upgrade / talent / depth / body.
+export function landable(state, slug, p) {
+  const r = state.cfg.staff?.recs || {};
+  // On fit (his A–F grade of each school — what you can't change by
+  // working harder), less part of the leader's head start (interest and
+  // coaching it has built: recs.headStart).
+  const mine = gradeOffer(state, slug, p, likelyOffer(state, slug, p)).base;
+  const slugs = [...new Set([...Object.keys(p.offers || {}), ...Object.keys(p.evals || {})])].filter((k) => k !== slug && state.teams[k]);
+  let best = 0;
+  let lead = 0;
+  slugs.forEach((k) => {
+    const g = gradeOffer(state, k, p, likelyOffer(state, k, p));
+    if (g.base > best) { best = g.base; lead = g.held + g.coach; }
+  });
+  const ratio = best > mine && best > 0 ? mine / best : 1;
+  const gap = (state.teams[slug]?.tier ?? 3) - (state.cfg.idealTier?.[p.stars] ?? 4.5);
+  return { value: ratio - lead * (r.headStart ?? 0.5) - Math.max(0, gap - 0.5) * (r.tierPenalty ?? 0.08), rivals: slugs.length };
+}
+function staffRecs(state) {
+  if (!state.userTeams?.length) return state;
+  const cfg = state.cfg;
+  const s = cfg.staff;
+  const recs = { ...(state.recs || {}) };
+  const portal = Object.values(state.players).filter((p) => p.status === "portal");
+  state.userTeams.forEach((slug) => {
+    const team = state.teams[slug];
+    if (!team) return;
+    const R = s.recs || {};
+    const evalW = cfg.board?.evalWindow ?? 1;
+    const early = state.window <= (R.longshotUntil ?? 3);
+    const reach = early ? R.reach ?? 0.1 : R.lateReach ?? 0.06;
+    // Earlier picks stand while he's in the portal, hasn't cut you, and is
+    // still landable — or he's on your board.
+    const prev = Object.fromEntries(Object.entries(recs[slug] || {}).filter(([pid]) => {
+      const p = state.players[pid];
+      if (p?.status !== "portal" || p.cut?.[slug]) return false;
+      if (p.evals?.[slug] != null || state.window <= evalW) return true;
+      return landable(state, slug, p).value >= 1 - (early ? R.longReach ?? 0.22 : reach);
+    }));
+    const { available } = budgetOf(state, slug);
+    const idx = indexOf(state).of(slug);
+    const have = {};
+    idx.roster.forEach((p) => { have[p.pos] = (have[p.pos] || 0) + 1; });
+    // Its big losses at each position, best first (NFL or the portal).
+    const lostAt = {};
+    idx.departed.filter((p) => p.reason !== "exhausted" && (p.role === "starter" || p.stars >= 4))
+      .sort((a, b) => b.stars - a.stars || (a.role === "starter" ? -1 : 1))
+      .forEach((p) => { (lostAt[p.pos] = lostAt[p.pos] || []).push(p); });
+    const wants = planWants(state, slug);
+    const used = new Set(Object.keys(prev));
+    const lostUsed = new Set();
+    const fresh = {};
+    let count = 0;
+    let longshots = 0;
+    // Recent blue-chip recruits who haven't played much: upside, not a plug-in.
+    const upside = (p) => (p.role === "reserve" || p.role === "none") && M.recruitLevel(p, cfg) != null && ((p.rStars || 0) >= 4 || (p.rRank && p.rRank <= 250));
+    // The admin's targets for your school (always, top of the list).
+    Object.entries(state.targets?.[slug] || {}).forEach(([pid, rank]) => {
+      const p = state.players[pid];
+      if (!p || p.status !== "portal" || p.team === slug || p.cut?.[slug] || used.has(pid)) return;
+      const miles = M.milesBetween(p.home, team.loc);
+      const land = landable(state, slug, p);
+      fresh[pid] = {
+        by: "HC", kind: upside(p) ? "upside" : "target", pos: p.pos, pri: 3 + 1 / (1 + (Number(rank) || 9)), w: state.window, lost: null,
+        miles: miles != null ? Math.round(miles) : null, rivals: state.window > evalW ? land.rivals : null, longshot: land.value < 1 - reach,
+        have: have[p.pos] || 0, goal: team.portalTarget?.[p.pos] ?? null,
+      };
+      used.add(pid);
+    });
+    const perWant = s.recs?.perWant ?? 2;
+    const max = s.recs?.max ?? 12;
+    // One pass per want kind block keeps a hole ahead of a depth body.
+    for (const x of wants) {
+      if (count >= max) break;
+      const cands = portal.filter((p) => p.team !== slug && !p.cut?.[slug] && !used.has(p.id) && p.ask <= available * (s.recs?.budgetShare ?? 0.6))
+        .map((p) => ({ p, level: seenEff(state, slug, p) }))
+        // Late (past recs.longshotUntil), the bar drops toward the best
+        // left (recs.lateDrop stars by the end): you missed — bring guys in.
+        .filter(({ p, level }) => fitsWant(x, p, level) || (!early && fitsWant({ ...x, min: x.min - (R.lateDrop ?? 1) * progressOf(state, state.window) }, p, level)))
+        .sort((a, b) => b.level - a.level)
+        .slice(0, s.recs?.look ?? 30)
+        .map(({ p, level }) => {
+          const land = landable(state, slug, p);
+          const miles = M.milesBetween(p.home, team.loc);
+          const near = miles != null && miles <= (R.localMiles ?? 200) ? 0.15 : 0;
+          return { p, level, ratio: land.value, rivals: land.rivals, miles, longshot: land.value < 1 - reach, score: (level - x.min + 1) * Math.min(1, land.value) + near };
+        })
+        .filter((c) => c.ratio >= 1 - reach || (early && c.ratio >= 1 - (R.longReach ?? 0.22)))
+        .sort((a, b) => a.longshot - b.longshot || b.score - a.score)
+        .slice(0, perWant + 2);
+      let here = 0;
+      for (const c of cands) {
+        if (count >= max || here >= perWant) break;
+        // Long shots: a couple a window at most.
+        if (c.longshot) {
+          if (longshots >= (R.longshots ?? 2)) continue;
+          longshots += 1;
+        }
+        here += 1;
+        // Replacing a big loss: one he left at this position, about this
+        // good — each named once where there's a choice.
+        const replacing = x.kind === "hole" || x.kind === "upgrade" || x.kind === "body" || x.kind === "depth";
+        const near = replacing ? (lostAt[x.pos] || []).filter((l) => effOf(l, cfg) <= c.level + 1) : [];
+        const lost = near.find((l) => !lostUsed.has(l.id)) || near[0] || null;
+        if (lost) lostUsed.add(lost.id);
+        // A depth / numbers want he'd start for reads as an upgrade.
+        const starts = (x.kind === "depth" || x.kind === "body") && fitAt(state, slug, c.p).fit === "starter";
+        const fallback = !early && c.level < x.min && (x.kind === "hole" || x.kind === "upgrade" || x.kind === "talent");
+        const kind = upside(c.p) ? "upside" : fallback ? "fallback" : lost ? "replace" : starts ? "upgrade" : x.kind;
+        const side = sideOfPos(x.pos);
+        // Who says it: the head coach on the biggest calls, the coordinator
+        // on starters, the assistant on depth.
+        const by = (lost && lost.stars >= 5) || x.pos === "QB" ? "HC"
+          : kind === "depth" || kind === "body" ? (side === "def" ? "DA" : "OA") : side === "def" ? "DC" : "OC";
+        fresh[c.p.id] = {
+          by, kind, pos: x.pos, pri: Math.round(x.pri * 100) / 100, w: state.window,
+          lost: lost && kind === "replace" ? { pid: lost.id, why: lost.status === "declared" ? "nfl" : "portal" } : null,
+          longshot: c.longshot,
+          miles: c.miles != null ? Math.round(c.miles) : null,
+          // Who else is on him — only once boards exist (after the evaluation period).
+          rivals: state.window > (cfg.board?.evalWindow ?? 1) ? c.rivals : null,
+          have: have[x.pos] || 0, goal: team.portalTarget?.[x.pos] ?? null,
+        };
+        used.add(c.p.id);
+        count += 1;
+      }
+    }
+    // At most recs.keep at once: anyone on your board stays; then the
+    // newest, most important.
+    const all = Object.entries({ ...prev, ...fresh });
+    const keep = s.recs?.keep ?? 20;
+    const onBoard = (pid) => state.players[pid]?.evals?.[slug] != null;
+    recs[slug] = Object.fromEntries(all.length <= keep ? all
+      : all.sort((a, b) => onBoard(b[0]) - onBoard(a[0]) || b[1].w - a[1].w || b[1].pri - a[1].pri).slice(0, Math.max(keep, all.filter(([pid]) => onBoard(pid)).length)));
+  });
+  return { ...state, recs };
+}
+
+// ── The user's board order (user, 2026-11-18): a new contact goes last;
+// he can move anyone up or down. state.boardOrder { [slug]: [pid] } —
+// players who've left the board are skipped where it's read.
+function withOrder(state, slug, pid, add) {
+  const cur = (state.boardOrder?.[slug] || []).filter((x) => x !== pid);
+  return { ...state, boardOrder: { ...(state.boardOrder || {}), [slug]: add ? [...cur, pid] : cur } };
+}
+// The board in order: the saved order first, then anyone on it the order
+// missed (newest contact last).
+export function boardInOrder(state, slug) {
+  const on = boardOf(state, slug);
+  const ids = new Set(on.map((p) => p.id));
+  const order = (state.boardOrder?.[slug] || []).filter((id) => ids.has(id));
+  const seen = new Set(order);
+  const rest = on.filter((p) => !seen.has(p.id)).sort((a, b) => (a.evals?.[slug] ?? 0) - (b.evals?.[slug] ?? 0));
+  return [...order.map((id) => state.players[id]), ...rest];
+}
+// Move a player to a spot on the board (0 = top).
+export function moveOnBoard(state, slug, pid, to) {
+  const list = boardInOrder(state, slug).map((p) => p.id).filter((id) => id !== pid);
+  list.splice(Math.max(0, Math.min(list.length, to)), 0, pid);
+  return { ...state, boardOrder: { ...(state.boardOrder || {}), [slug]: list } };
+}
+// "Same as last window": your coaches back on last window's players (the
+// ones still on your board).
+export function repeatStaff(state, slug) {
+  const t = state.teams[slug];
+  if (!t?.lastStaff || state.phase !== "window") return state;
+  const staff = {};
+  STAFF_ROLES.forEach((role) => {
+    const pid = t.lastStaff[role];
+    const p = pid && state.players[pid];
+    staff[role] = p && p.status === "portal" && p.evals?.[slug] != null ? pid : null;
+  });
+  return { ...state, teams: { ...state.teams, [slug]: { ...t, staff } } };
+}
+// Each window your coaches come home (user, 2026-11-18): their assignments
+// reset, kept as lastStaff for "Same as last window".
+function staffHome(state) {
+  let teams = null;
+  state.userTeams.forEach((slug) => {
+    const t = state.teams[slug];
+    if (!t?.staff || !Object.values(t.staff).some(Boolean)) return;
+    teams = teams || { ...state.teams };
+    teams[slug] = { ...t, lastStaff: t.staff, staff: {} };
+  });
+  return teams ? { ...state, teams } : state;
+}
+// Where the user stands with each player on his board — his rank among the
+// schools on him — taken as he ends a window, so the next one shows the
+// move (▲ / ▼). state.rankWas { [slug]: { [pid]: rank } }.
+function snapRanks(state) {
+  const rankWas = { ...(state.rankWas || {}) };
+  state.userTeams.forEach((slug) => {
+    const out = {};
+    boardOf(state, slug).forEach((p) => {
+      const ties = tiesOf(state, p);
+      const mine = ties.grades[slug];
+      if (mine == null) return;
+      out[p.id] = 1 + Object.entries(ties.grades).filter(([k, g]) => k !== slug && g > mine).length;
+    });
+    rankWas[slug] = out;
+  });
+  return { ...state, rankWas };
+}
+
+// Making up ground late (user, 2026-11-18): after the early rush, a school
+// a level or more above everyone else on a player — a top program that
+// missed its first choice, looking at a guy only smaller schools are on —
+// closes the gap faster: catchUp.max × how far into the portal × the tier
+// gap (catchUp.tiers for the full amount).
+export function catchUpOf(state, slug, p) {
+  const c = state.cfg.catchUp;
+  const team = state.teams[slug];
+  if (!c || !team || state.phase !== "window") return 0;
+  const pr = progressOf(state, state.window);
+  if (pr <= 0) return 0;
+  const others = [...new Set([...Object.keys(p.offers || {}), ...Object.keys(p.evals || {})])].filter((k) => k !== slug && state.teams[k]);
+  if (!others.length) return 0;
+  const bestOther = Math.min(...others.map((k) => state.teams[k].tier));
+  const gap = bestOther - team.tier;
+  return gap > 0 ? c.max * pr * Math.min(1, gap / c.tiers) : 0;
+}
+
+// The user's needs as the portal opens (state.needsOpen { slug: needs }) —
+// Market Watch's report says what got filled.
+function noteNeeds(state) {
+  const needsOpen = {};
+  state.userTeams.forEach((slug) => { needsOpen[slug] = needsOf(state, slug); });
+  return { ...state, needsOpen };
+}
+
+// Real commitments (user, 2026-11-18): a player who's really committed
+// (data.js: p.realTo — the school's slug) signs there as the portal opens,
+// at his ask. Window 1, logged real.
+function realCommits(state) {
+  let players = null;
+  let teams = null;
+  const log = [...state.log];
+  Object.values(state.players).forEach((p) => {
+    if (p.status !== "portal" || !p.realTo || !state.teams[p.realTo] || p.realTo === p.team) return;
+    players = players || { ...state.players };
+    teams = teams || { ...state.teams };
+    const t = teams[p.realTo];
+    players[p.id] = { ...p, status: "committed", to: p.realTo, deal: { nil: p.ask, window: 1 }, offers: {}, mix: [] };
+    teams[p.realTo] = { ...t, spent: t.spent + p.ask };
+    log.push({ w: 1, kind: "committed", pid: p.id, team: p.team, to: p.realTo, nil: p.ask, offeredBy: [p.realTo], real: true });
+  });
+  return players ? { ...state, players, teams, log } : state;
+}
+
+// ── Market Watch (user, 2026-11-18) — between the portal's two halves ──
+// Where everyone on a roster fits when the portal opens (starter / rotation
+// / depth) — state.fitOpen { [pid]: 0 | 1 | 2 } — so Market Watch can see
+// who a signing pushed down.
+const FIT_RANK = { starter: 0, rotation: 1, depth: 2 };
+function noteFits(state) {
+  const fitOpen = {};
+  Object.values(state.players).forEach((p) => { if (p.status === "roster") fitOpen[p.id] = FIT_RANK[fitAt(state, p.team, p).fit]; });
+  return { ...state, fitOpen };
+}
+// The best deal signed at his position by a player at his level or better.
+function marketRate(state, p) {
+  let best = null;
+  Object.values(state.players).forEach((x) => {
+    if (x.status !== "committed" || x.pos !== p.pos || x.stars < p.stars || !x.deal) return;
+    if (!best || x.deal.nil > best.nil) best = { nil: x.deal.nil, pid: x.id };
+  });
+  return best;
+}
+// Market Watch opens (phase "market", still window `split.at`):
+//   1. reshuffle entrants — pushed down a depth chart by a signing
+//   2. market demands — CPU schools pay or lose him now; the user's wait
+//      (status considering, considering "demand", demand { nil, comp }).
+function openMarket(state) {
+  const cfg = state.cfg;
+  const at = cfg.split.at;
+  const players = { ...state.players };
+  const teams = { ...state.teams };
+  const log = [...state.log];
+  const signedAt = new Set();
+  Object.values(state.players).forEach((p) => { if (p.status === "committed" && p.to !== p.team) signedAt.add(`${p.to}|${p.pos}`); });
+  const rs = cfg.reshuffle;
+  const mk = cfg.market;
+  Object.values(state.players).forEach((p) => {
+    if (p.status !== "roster" || state.teams[p.team]?.fcs) return;
+    // 1. Pushed down by a signing.
+    if (rs && signedAt.has(`${p.team}|${p.pos}`) && state.fitOpen?.[p.id] != null && (p.likely !== 0 || cfg.crazy) && !state.teams[p.team].academy) {
+      const was = state.fitOpen[p.id];
+      const now = FIT_RANK[fitAt(state, p.team, p).fit];
+      const key = was === 0 && now === 1 ? "starterRotation" : was === 0 && now === 2 ? "starterDepth" : was === 1 && now === 2 ? "rotationDepth" : null;
+      const chance = key ? (rs.fall[key] || 0) * (rs.stars[p.stars] ?? 1) * (cfg.entryScale ?? 1) : 0;
+      if (chance > 0 && draw(state, `reshuffle|${p.id}`) < chance) {
+        players[p.id] = { ...p, status: "portal", enteredWindow: at + 1, reason: "snaps", reshuffled: true };
+        log.push({ w: at, stage: "market", kind: "entered", pid: p.id, team: p.team, reason: "snaps", reshuffle: true });
+        return;
+      }
+    }
+    // 2. Wants the market rate.
+    if (!mk || p.stars < mk.minStars || p.role !== "starter") return;
+    const comp = marketRate(state, p);
+    const now = p.retained?.nil ?? p.ask * cfg.homeNil;
+    const odds = (state.teams[p.team].user ? mk.chance : mk.cpuChance || mk.chance)[p.stars] ?? 0;
+    if (!comp || comp.nil < now * mk.gap || draw(state, `demand|${p.id}`) >= odds) return;
+    const nil = Math.round(comp.nil / 1000) * 1000;
+    const t = teams[p.team];
+    if (t.user) {
+      players[p.id] = { ...p, status: "considering", considering: "demand", demand: { nil, comp: comp.pid }, retain: null };
+      return;
+    }
+    const { available } = budgetOf({ ...state, teams }, p.team);
+    if (available >= nil && draw(state, `pay|${p.id}`) < mk.cpuPay) {
+      teams[p.team] = { ...t, spent: t.spent + nil, retainSpent: (t.retainSpent || 0) + nil };
+      players[p.id] = { ...p, retained: { nil, stage: "market" } };
+      log.push({ w: at, stage: "market", kind: "demand", pid: p.id, team: p.team, nil, comp: comp.pid, paid: true });
+    } else {
+      players[p.id] = { ...p, status: "portal", enteredWindow: at + 1, reason: "money" };
+      free(teams, p.team, p.ask);
+      log.push({ w: at, stage: "market", kind: "demand", pid: p.id, team: p.team, nil, comp: comp.pid, paid: false, freed: p.ask });
+      log.push({ w: at, stage: "market", kind: "entered", pid: p.id, team: p.team, reason: "money", demand: true });
+    }
+  });
+  return { ...state, players, teams, log, phase: "market" };
+}
+// The user's done with Market Watch: his players paid stay, the rest enter;
+// CPU schools look at the new names; the second half opens. → { state, summary }
+export function endMarket(state) {
+  if (state.phase !== "market") return { state, summary: null };
+  const at = state.cfg.split.at;
+  const before = state.log.length;
+  const players = { ...state.players };
+  const teams = { ...state.teams };
+  const log = [...state.log];
+  Object.values(state.players).filter((p) => p.status === "considering" && p.considering === "demand").forEach((p) => {
+    if (p.retain && p.retain.nil >= p.demand.nil) {
+      const t = teams[p.team];
+      teams[p.team] = { ...t, spent: t.spent + p.retain.nil, retainSpent: (t.retainSpent || 0) + p.retain.nil };
+      players[p.id] = { ...p, status: "roster", considering: null, retain: null, retained: { nil: p.retain.nil, stage: "market" } };
+      log.push({ w: at, stage: "market", kind: "demand", pid: p.id, team: p.team, nil: p.demand.nil, comp: p.demand.comp, paid: true });
+    } else {
+      players[p.id] = { ...p, status: "portal", considering: null, retain: null, enteredWindow: at + 1, reason: "money" };
+      free(teams, p.team, p.ask);
+      log.push({ w: at, stage: "market", kind: "demand", pid: p.id, team: p.team, nil: p.demand.nil, comp: p.demand.comp, paid: false, freed: p.ask });
+      log.push({ w: at, stage: "market", kind: "entered", pid: p.id, team: p.team, reason: "money", demand: true });
+    }
+  });
+  let next = { ...state, players, teams, log, phase: "window" };
+  next = cpuPlan(next).state;
+  next = cpuStaff(staffClear(next));
+  next = staffRecs({ ...next, window: at + 1 });
+  // The whole Market Watch, for the recap: everything logged in it.
+  return { state: next, summary: { stage: "market", events: next.log.filter((e) => e.stage === "market").concat(next.log.slice(before).filter((e) => e.stage !== "market" && e.kind === "entered")) } };
+}
+
+// Your staff's full list (user, 2026-11-18): besides the picks they talk
+// about, a few names at every position, always — the best players there
+// you could realistically land and afford, not on your board.
+// → { [pos]: [pid] } (staff.suggest per position).
+export function staffSuggestions(state, slug) {
+  const cfg = state.cfg;
+  const R = cfg.staff?.recs || {};
+  const team = state.teams[slug];
+  if (!team || state.phase === "done") return {};
+  const { available } = budgetOf(state, slug);
+  const early = state.window <= (R.longshotUntil ?? 3);
+  const reach = early ? R.reach ?? 0.1 : R.lateReach ?? 0.08;
+  const per = cfg.staff?.suggest ?? 6;
+  const byPos = {};
+  Object.values(state.players).forEach((p) => {
+    if (p.status !== "portal" || p.team === slug || p.cut?.[slug] || p.evals?.[slug] != null || p.ask > available) return;
+    (byPos[p.pos] = byPos[p.pos] || []).push(p);
+  });
+  const out = {};
+  Object.keys(cfg.starters).forEach((pos) => {
+    // Best first, down the list until `per` you could realistically land
+    // (user, 2026-11-18: realistic names only — lower down the board if
+    // that's who's there).
+    const list = (byPos[pos] || []).map((p) => ({ p, e: seenEff(state, slug, p) })).sort((a, b) => b.e - a.e);
+    const picks = [];
+    for (let i = 0; i < list.length && i < 120 && picks.length < per; i += 1) {
+      if (landable(state, slug, list[i].p).value >= 1 - reach) picks.push(list[i].p.id);
+    }
+    out[pos] = picks;
+  });
+  return out;
+}
+
 // ── Retention offers (opening windows): keep one of your own ──
 export function userRetain(state, slug, pid, { nil }) {
   const p = state.players[pid];
-  if (state.phase !== "nfl" && state.phase !== "retain") return { error: "Retention is closed." };
+  if (state.phase !== "nfl" && state.phase !== "retain" && state.phase !== "market") return { error: "Retention is closed." };
   if (!state.userTeams.includes(slug) || p?.team !== slug) return { error: "Not your player." };
   if (p.status !== "considering") return { error: "He's already decided." };
   const amount = Math.max(0, Math.round(Number(nil) || 0));
+  if (p.considering === "demand" && amount < p.demand.nil) return { error: `He wants ${p.demand.nil.toLocaleString("en-US")} — nothing less.` };
   const { available } = budgetOf(state, slug);
   if (amount > available + (p.retain?.nil || 0)) return { error: "Over your NIL budget." };
   const retain = { nil: amount };
@@ -544,13 +1175,14 @@ function openRetainWindow(state) {
   const log = [...state.log];
   Object.values(state.players).forEach((p) => {
     if (p.status !== "roster" || p.retained) return;
-    if (state.live) {
-      // The real portal: who's actually in it, straight in.
-      if (!p.live) return;
-      players[p.id] = { ...p, status: "portal", enteredWindow: 1 };
-      log.push({ w: 0, stage: "retain", kind: "entered", pid: p.id, team: p.team });
+    // The real portal (user, 2026-11-18): every run — projected too — puts
+    // the players really in it straight in (data.js marks them live).
+    if (p.live) {
+      players[p.id] = { ...p, status: "portal", enteredWindow: 1, reason: p.reason || "real" };
+      log.push({ w: 0, stage: "retain", kind: "entered", pid: p.id, team: p.team, real: true });
       return;
     }
+    if (state.live) return;
     const scores = homeScores(state, p);
     const homeTier = state.teams[p.team].tier;
     // His chance of wanting out (the same model the retention window
@@ -566,7 +1198,7 @@ function openRetainWindow(state) {
 function endOpening(state, stage) {
   const before = state.log.length;
   let next = resolveConsidering(cpuRetention(state), stage);
-  next = stage === "nfl" ? openRetainWindow(next) : rosterTargets({ ...shedRosters(next), phase: "window", window: 1 });
+  next = stage === "nfl" ? openRetainWindow(next) : staffRecs(noteNeeds(noteFits(rosterTargets(realCommits({ ...shedRosters(next), phase: "window", window: 1 })))));
   return { state: next, summary: { stage, events: next.log.slice(before) } };
 }
 
@@ -594,7 +1226,7 @@ function shedRosters(state) {
     roster.forEach((p) => { count[p.pos] = (count[p.pos] || 0) + 1; });
     const keepMin = (pos) => (cfg.starters[pos] || 0) + (cfg.cpu.depth?.[pos] ?? 0) + 1;
     const order = roster
-      .filter((p) => p.pos !== "K" && p.pos !== "P" && p.likely !== 0)
+      .filter((p) => p.pos !== "K" && p.pos !== "P" && (p.likely !== 0 || cfg.crazy))
       .map((p) => ({ p, v: effOf(p, cfg) + Math.min(p.elig || 0, 4) * 0.01 + draw(state, `shed|${p.id}`) * 0.01 }))
       .sort((a, b) => a.v - b.v);
     for (const { p } of order) {
@@ -753,7 +1385,7 @@ export function opinionOf(state, slug, pid) {
   return z * (state.cfg.cpu.opinionSd ?? 0.45);
 }
 // His level as a school sees him.
-export const seenEff = (state, slug, p) => effOf(p, state.cfg) + opinionOf(state, slug, p.id);
+export const seenEff = (state, slug, p) => effOf(p, state.cfg) + opinionOf(state, slug, p.id) + (state.targets?.[slug]?.[p.id] != null ? state.cfg.staff?.targetLike ?? 0 : 0);
 
 // A school's wants, most important first:
 // [{ pos, sub (CB / S, OT / IOL — starters only), kind: hole | upgrade |
@@ -802,6 +1434,12 @@ export function wantsOf(state, slug) {
           // (Never over a player it signed this portal — it brought him in
           // to start.)
           starters.push({ pos, sub, kind: "upgrade", min: cur + c.upgradeBy, base: cur, cur, pri: (std - cur) * w });
+        } else if (cur < std + (c.talentAbove ?? 0.4) && pos !== "K" && pos !== "P" && r[i].x.status !== "committed") {
+          // Talent (user, 2026-11-18): a starter who's just OK — at or a
+          // little over its standard. Set used to be too lenient; a school
+          // tries to improve its position groups, so it looks for a clear
+          // step up here too (below an upgrade).
+          starters.push({ pos, sub, kind: "talent", min: cur + c.upgradeBy, base: cur, cur, pri: (c.talentPri ?? 0.55) * (std + (c.talentAbove ?? 0.4) - cur + 0.25) * w });
         }
       }
     });
@@ -825,7 +1463,11 @@ export function wantsOf(state, slug) {
   const maxUp = c.maxUpgrades?.[team?.tier];
   const ups = starters.filter((x) => x.kind === "upgrade").sort((a, b) => b.pri - a.pri);
   const keepUp = new Set(maxUp == null ? ups : ups.slice(0, maxUp));
-  const out = starters.filter((x) => x.kind !== "upgrade" || keepUp.has(x));
+  // And at most cpu.maxTalent talent wants (its weakest "OK" rooms).
+  const maxTal = c.maxTalent?.[team?.tier];
+  const tals = starters.filter((x) => x.kind === "talent").sort((a, b) => b.pri - a.pri);
+  const keepTal = new Set(maxTal == null ? tals : tals.slice(0, maxTal));
+  const out = starters.filter((x) => (x.kind !== "upgrade" || keepUp.has(x)) && (x.kind !== "talent" || keepTal.has(x)));
   // Depth and bodies stop at the roster cap (its roster now + its implied
   // high school class): depth first, then bodies one at a time to the
   // position furthest short of its goal. (Schools over the cap made room
@@ -844,15 +1486,27 @@ export function wantsOf(state, slug) {
   t.wants = out.sort((a, b) => b.pri - a.pri);
   return t.wants;
 }
-// Needs for the page (Roster & Needs, filters): per position, big (a hole
-// or a big upgrade) 2, a need 1, depth 0.4, bodies 0.2, set 0.
+// Needs (user, 2026-11-18), per position — its most urgent level, from the
+// roster it has now (so they move as the portal goes on):
+//   3 Needs Upgrade  a hole, or a starter under its standard   (red)
+//   2 Needs Talent   the room is just OK                       (orange)
+//   1 Needs Depth    short in numbers, or the group behind the
+//                    starters isn't good enough                (yellow)
+//   0 Set            a good group                              (green)
+// A position can need more than one kind at once (upgrade + depth): it
+// shows the most urgent, and the school pursues every want (wantsOf).
+export const NEED_LEVELS = [
+  [3, "Needs Upgrade", "#ff6b5b"],
+  [2, "Needs Talent", "#ff9f43"],
+  [1, "Needs Depth", "#f5d33f"],
+  [0, "Set", "#7ee2a8"],
+];
+export const needLevelOf = (v) => NEED_LEVELS.find(([n]) => (v || 0) >= n - 0.5) || NEED_LEVELS[3];
+const KIND_LEVEL = { hole: 3, upgrade: 3, talent: 2, depth: 1, body: 1 };
 export function needsOf(state, slug) {
   const out = {};
   Object.keys(state.cfg.starters).forEach((pos) => { out[pos] = 0; });
-  wantsOf(state, slug).forEach((w) => {
-    const v = w.kind === "hole" ? 2 : w.kind === "upgrade" ? (w.pri >= 1.5 ? 2 : 1) : w.kind === "depth" ? 0.4 : 0.2;
-    out[w.pos] = Math.min(3, out[w.pos] + v);
-  });
+  wantsOf(state, slug).forEach((w) => { out[w.pos] = Math.max(out[w.pos] || 0, KIND_LEVEL[w.kind] || 0); });
   return out;
 }
 
@@ -1239,7 +1893,7 @@ function decisions(state, last) {
       const pulled = Object.entries(p.offers).filter(([slug, offer]) => {
         const t = teams[slug];
         if (!t || t.user) return false;
-        return wantFor(slug, p) < 0 || offer.nil > t.budget - t.spent;
+        return wantFor(slug, p) < 0 || offer.nil > t.budget + (t.freed || 0) - t.spent;
       });
       if (pulled.length) {
         const offers = { ...p.offers };
@@ -1255,7 +1909,8 @@ function decisions(state, last) {
         const pt = ptNow(slug, p);
         return {
           slug, offer,
-          u: M.overallGrade(M.offerUtility(p, teams[slug], offer, { pt, field: fieldOf(p, slug) }, state.cfg, signedDraw(state, `choose|${p.id}|${slug}|${state.window}`)), processFor(state, slug, p, offer), state.cfg) - snubOf(state, slug, p),
+          u: M.overallGrade(M.offerUtility(p, teams[slug], offer, { pt, field: fieldOf(p, slug) }, state.cfg, signedDraw(state, `choose|${p.id}|${slug}|${state.window}`)), processFor(state, slug, p, offer), state.cfg) - snubOf(state, slug, p)
+            + staffBonus(state, slug, p) + catchUpOf(state, slug, p),
           bad: M.badAs(p, M.schoolScores(p, teams[slug], { nil: offer.nil, pt }, state.cfg), state.cfg) >= state.cfg.cutBadA.count,
           blowout: offer.nil >= instantAmount(state, p),
         };
@@ -1266,10 +1921,26 @@ function decisions(state, last) {
       // Interest from a board carries in `since`, not here.
       // Top players take longer (cfg.patience — windows an offer must stand,
       // by stars): their recruitments run, and everyone can answer.
-      const wait = state.cfg.patience?.[p.stars] ?? 1;
+      // Resolving (user, 2026-11-18): the early portal is for top talent —
+      // the best players take a good offer early (resolve.early by stars
+      // off the bar). And a recruitment that's one school's (no one else on
+      // him, or the leader well clear — resolve.margin) wraps up fast:
+      // patience drops to 1 and resolve.runaway comes off the bar.
+      const r = state.cfg.resolve || {};
+      const rivals = new Set([...Object.keys(p.offers), ...Object.keys(p.evals || {})]).size;
+      const runaway = scored.length === 1 ? rivals <= 1 : scored.length > 1 && scored[1].u < scored[0].u * (1 - (r.margin ?? 0.08));
+      // Around the split, the players pursued hardest (2+ offers) resolve.
+      const push = state.cfg.split && state.window === state.cfg.split.at && scored.length >= 2;
+      const wait = runaway || push ? 1 : state.cfg.patience?.[p.stars] ?? 1;
       const ripe = scored.filter((x) => (x.offer.made ?? x.offer.since) <= state.window - wait && !x.bad);
-      const bar = M.commitBar(p, state.window, state.windows, state.cfg, state.teams[p.team].tier);
-      const best = blowout || (last ? scored[0] : ripe[0] && ripe[0].u >= bar ? ripe[0] : null);
+      const bar = M.commitBar(p, state.window, state.windows, state.cfg, state.teams[p.team].tier)
+        * (1 - (r.early?.[p.stars] ?? 0)) * (runaway ? 1 - (r.runaway ?? 0) : 1) * (push ? 1 - (state.cfg.split.push ?? 0) : 1);
+      // A second-half entrant (Market Watch) gets a whole recruitment of his
+      // own (user, 2026-11-18): no commitment before split.newWait windows
+      // in — schools contact, offer, and build interest first.
+      const sp = state.cfg.split;
+      const fresh = sp && p.enteredWindow > sp.at && state.window < p.enteredWindow + (sp.newWait ?? 2);
+      const best = blowout || (last ? scored[0] : !fresh && ripe[0] && ripe[0].u >= bar ? ripe[0] : null);
       if (best) {
         players[p.id] = { ...p, status: "committed", to: best.slug, deal: { ...best.offer, window: state.window }, offers: {}, mix: mixOf(state, p) };
         teams[best.slug] = { ...teams[best.slug], spent: teams[best.slug].spent + best.offer.nil };
@@ -1325,12 +1996,19 @@ export function endWindow(state) {
   // every CPU school re-reads its roster, the portal and its standings and
   // makes its moves for the next window (cpuPlan).
   const evalPeriod = isEvalWindow(state);
-  let next = evalPeriod ? state : decisions(state, last);
+  // The coaches' work this window counts before anyone decides; where you
+  // stand with your board is noted first (the next window shows the move).
+  const worked = staffWork(snapRanks(state));
+  let next = evalPeriod ? worked : decisions(worked, last);
   let made = 0;
   if (!last) ({ state: next, made } = cpuPlan(next));
+  next = staffHome(staffClear(next));
+  if (!last) next = cpuStaff(next);
   const fresh = next.log.slice(before);
+  const split = !last && state.cfg.split && w === state.cfg.split.at;
   if (last) next = { ...next, phase: "done" };
-  else next = lateEntries({ ...next, window: w + 1 });
+  else if (split) next = openMarket(next);
+  else next = staffRecs(lateEntries({ ...next, window: w + 1 }));
   return {
     state: next,
     summary: {
@@ -1341,6 +2019,7 @@ export function endWindow(state) {
       evalPeriod,
       unsigned: fresh.filter((e) => e.kind === "unsigned"),
       entered: next.log.slice(before).filter((e) => e.kind === "entered"),
+      market: split || undefined,
     },
   };
 }
