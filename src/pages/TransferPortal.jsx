@@ -78,6 +78,9 @@ const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
 const INK = "#0f1b2d";
 const SEASON = activePortalSeason();
+// When the real portal officially opens (user, 2026-11-18) — until then an
+// empty team Movement section points to the Portal Sim.
+const PORTAL_OPENS = Date.UTC(2027, 0, 4, 5); // Jan 4, 2027, midnight Eastern
 
 const POSITIONS = ["QB", "RB", "WR", "TE", "OL", "EDGE", "DL", "LB", "DB", "K", "P"];
 const POSITION_PLURAL = {
@@ -1104,9 +1107,11 @@ export default function TransferPortal({ view = "board" }) {
         </div>
       </div>
       {loading ? <LoadingSpinner label="Loading" size={32} minHeight="240px" /> : list.length === 0 ? (
-        <div style={{ padding: "48px 20px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "14px" }}>
-          {emptyText}
-        </div>
+        typeof emptyText === "string" ? (
+          <div style={{ padding: "48px 20px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "14px" }}>
+            {emptyText}
+          </div>
+        ) : emptyText
       ) : groups.map((g) => (
         <div key={g.label}>
           <div style={{ position: "sticky", top: 0, zIndex: 2, padding: "8px 16px", background: "#f7f9fc", borderBottom: "1px solid #e3e8ef", fontSize: "11px", fontWeight: 900, color: "#5b6b84", textTransform: "uppercase", letterSpacing: "0.12em" }}>{g.label}</div>
@@ -1181,6 +1186,49 @@ export default function TransferPortal({ view = "board" }) {
     to: team.teamSlug ? `/team/${team.teamSlug}` : null, toLabel: `${T} team page`,
     buttons: <PortalSimButton team={teamSlug} school={T} c1={tc1} c2={tc2} isMobile={isMobile} wide={isMobile} />,
   });
+  // Before the portal opens (user, 2026-11-18): an empty Movement says when
+  // it opens and points to the Portal Sim — a small ad in the school's colors.
+  const daysToOpen = Math.max(0, Math.ceil((PORTAL_OPENS - Date.now()) / 86400000));
+  const PreOpen = team && (
+    <div style={{ padding: isMobile ? "20px 14px 22px" : "34px 32px 36px", textAlign: "center" }}>
+      {/* When it opens, with a countdown. */}
+      <div style={{ display: "inline-flex", alignItems: "center", gap: isMobile ? "10px" : "16px", padding: isMobile ? "8px 14px" : "10px 20px", borderRadius: "999px", background: "#f2f6fb", border: "1px solid #dfe7f1" }}>
+        <span style={{ fontWeight: 900, fontSize: isMobile ? "24px" : "34px", color: BLUE, lineHeight: 1 }}>{daysToOpen}</span>
+        <span style={{ textAlign: "left", fontWeight: 900, fontSize: isMobile ? "10px" : "12px", letterSpacing: "0.12em", color: "#5b6b84", textTransform: "uppercase", lineHeight: 1.3 }}>day{daysToOpen === 1 ? "" : "s"} until<br />the portal opens</span>
+      </div>
+      <div style={{ color: "#33415c", fontWeight: 800, fontSize: isMobile ? "14px" : "18px", lineHeight: 1.5, maxWidth: "640px", margin: isMobile ? "12px auto 0" : "16px auto 0" }}>
+        The transfer portal officially opens on <b style={{ color: BLUE }}>January 4, 2027</b>. Check out our portal sim in the meantime.
+      </div>
+      {/* The Portal Sim, in the school's colors. */}
+      <Link to={`/portalsim/${teamSlug}`} className="tp-sim-ad" style={{
+        position: "relative", overflow: "hidden", display: "flex", alignItems: "center", gap: isMobile ? "14px" : "28px",
+        margin: isMobile ? "16px 0 0" : "26px 0 0", padding: isMobile ? "14px" : "28px 32px",
+        borderRadius: "16px", textDecoration: "none", textAlign: "left", color: "#fff", border: `2px solid ${tc2}`, boxShadow: "0 10px 28px rgba(0,0,0,0.2)",
+        background: `linear-gradient(115deg, ${tc1} 0%, ${tc1} 55%, color-mix(in srgb, ${tc2} 55%, ${tc1}) 100%)`,
+      }}>
+        <span aria-hidden="true" style={{ position: "absolute", inset: 0, background: "linear-gradient(rgba(0,0,0,0.12), rgba(0,0,0,0.38))", pointerEvents: "none" }} />
+        <img src="/logos/transfer-portal-white.svg" alt="" aria-hidden="true" style={{ position: "absolute", right: isMobile ? -30 : -10, top: "50%", transform: "translateY(-50%) rotate(-8deg)", height: isMobile ? 130 : 240, opacity: 0.09, pointerEvents: "none" }} />
+        {(team.LogoDark || team.Logo1) && <img src={team.LogoDark || team.Logo1} alt="" style={{ position: "relative", width: isMobile ? 52 : 120, height: isMobile ? 52 : 120, objectFit: "contain", flexShrink: 0, filter: "drop-shadow(0 4px 12px rgba(0,0,0,0.4))" }} />}
+        <span style={{ position: "relative", flex: 1, minWidth: 0 }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", background: "rgba(0,0,0,0.35)", borderRadius: "6px", padding: isMobile ? "2px 8px" : "4px 10px", fontWeight: 900, fontSize: isMobile ? "10px" : "11px", letterSpacing: "0.14em", whiteSpace: "nowrap" }}>
+            <img src="/logos/transfer-portal-white.svg" alt="" aria-hidden="true" style={{ width: isMobile ? 12 : 14, height: isMobile ? 12 : 14 }} />{isMobile ? "PORTAL SIM" : "TRANSFER PORTAL SIM"}
+          </span>
+          <span style={{ display: "block", fontWeight: 900, fontSize: isMobile ? "16px" : "30px", lineHeight: 1.08, marginTop: isMobile ? "5px" : "8px", textTransform: "uppercase", textShadow: "0 2px 10px rgba(0,0,0,0.3)" }}>Run {T} through the portal</span>
+          {!isMobile && (
+            <>
+              <span style={{ display: "block", fontSize: "14px", fontWeight: 700, opacity: 0.92, marginTop: "6px", maxWidth: "560px" }}>Keep your stars from the NFL, make NIL offers, beat every FBS school to your targets and get a grade for your portal class.</span>
+              <span style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "12px" }}>
+                {["NFL decisions", "Retention", "NIL offers", "Coaching staff", "Class grade"].map((x) => (
+                  <span key={x} style={{ fontSize: "11px", fontWeight: 900, letterSpacing: "0.06em", textTransform: "uppercase", padding: "4px 10px", borderRadius: "999px", background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,255,255,0.25)" }}>{x}</span>
+                ))}
+              </span>
+            </>
+          )}
+        </span>
+        <span style={{ position: "relative", flexShrink: 0, background: "#fff", color: inkOn(tc1) === "#fff" ? tc1 : "#111", borderRadius: "999px", padding: isMobile ? "8px 12px" : "14px 26px", fontWeight: 900, fontSize: isMobile ? "12px" : "15px", letterSpacing: "0.06em", textTransform: "uppercase", whiteSpace: "nowrap", boxShadow: "0 6px 16px rgba(0,0,0,0.25)" }}>{isMobile ? "Play →" : "Play the Sim →"}</span>
+      </Link>
+    </div>
+  );
   const teamCounts = { "": teamMoves.length };
   const TeamTabs = team && (
     <div style={{ display: "flex", gap: isMobile ? "5px" : "8px", justifyContent: isMobile ? "flex-start" : "center", overflowX: isMobile ? "auto" : "visible", marginBottom: "12px", paddingBottom: isMobile ? "2px" : 0 }}>
@@ -1530,7 +1578,7 @@ export default function TransferPortal({ view = "board" }) {
     teamTab === "roster" ? RosterView
       : teamTab === "needs" ? NeedsView
       : teamTab === "targets" ? TargetsView
-        : <>{DirBar}{renderFeed(dirMoves, { title: `${T} Portal Movement`, emptyText: dir === "in" ? `No commitments to ${T} yet.` : dir === "out" ? `No ${T} players in the ${SEASON} portal yet.` : `No ${T} portal moves yet.` })}</>
+        : <>{DirBar}{renderFeed(dirMoves, { title: `${T} Portal Movement`, emptyText: !dir && Date.now() < PORTAL_OPENS ? PreOpen : dir === "in" ? `No commitments to ${T} yet.` : dir === "out" ? `No ${T} players in the ${SEASON} portal yet.` : `No ${T} portal moves yet.` })}</>
   );
   // Right rail on a team page: its conference, each school's net.
   const confRows = team ? teamRows(Object.entries(teams || {}).filter(([, t]) => t.Conference === team.Conference)) : [];
@@ -1764,6 +1812,7 @@ export default function TransferPortal({ view = "board" }) {
         + " @keyframes tpHeroDrift { 0% { transform: translate(0, 0); } 100% { transform: translate(-80px, -46px); } }"
         + " @keyframes tpHeroSpotlight { 0%, 100% { opacity: 0.7; } 50% { opacity: 1; } }"
         + " .tp-hero-btn { transition: filter 0.15s ease, background 0.15s ease; } .tp-hero-btn:hover { filter: brightness(1.12); } .tp-hero-btn.ghost:hover { background-color: rgba(255,255,255,0.18) !important; border-color: #fff !important; }"
+        + " .tp-sim-ad { transition: transform 0.15s ease, box-shadow 0.15s ease; } .tp-sim-ad:hover { transform: translateY(-2px); box-shadow: 0 12px 28px rgba(0,0,0,0.25) !important; }"
         + " .tp-hero-home { transition: transform 0.15s ease, opacity 0.15s ease; } .tp-hero-home:hover { opacity: 0.9; } a.tp-hero-home:hover img { transform: scale(1.04); transition: transform 0.15s ease; } h1 a.tp-hero-home:hover { text-decoration: underline !important; text-underline-offset: 4px; text-decoration-thickness: 2px !important; }"
         + " @media (prefers-reduced-motion: reduce) { [style*='tpHero'] { animation: none !important; } }"}</style>
       {CardModal}

@@ -15,6 +15,7 @@
 // built from what each step adds to the engine's log.
 import { useCallback, useMemo, useRef, useState } from "react";
 import { deskPosts } from "../../utils/portalSim/desk";
+import { countPortalSim } from "../../utils/portalSim/usage";
 import {
   initPortalSim, openNflWindow, endNflWindow, endRetainWindow, endWindow,
   userOffer, retractOffer, userRetain, clearRetain, teamView, portalPlayers,
@@ -42,6 +43,7 @@ export default function usePortalSim({ data, team, seed, live = false, frequency
   // The real portal (user, 2026-11-18) skips both opening windows — the
   // real decisions are made — and opens on a recap of who left and why.
   const start = useCallback(() => {
+    countPortalSim("started"); // Admin → Portal Sim Stats (utils/portalSim/usage.js)
     if (live) {
       const r = openLivePortal(state);
       post(r.state, r.summary.events);

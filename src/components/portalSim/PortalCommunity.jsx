@@ -287,7 +287,12 @@ function Insights({ branding, isMobile }) {
     setData(undefined);
     const since = period === "week" ? now - WEEK_MS : 0;
     Promise.all([portalTotals(since), loadPortalResults({ since })])
-      .then(([totals, runs]) => live && setData({ totals, runs }))
+      .then(([totals, runs]) => {
+        if (!live) return;
+        // Sums unavailable (index still building): add up the loaded runs.
+        const add = (k) => runs.reduce((t, r) => t + (Number(r[k]) || 0), 0);
+        setData({ totals: { ...totals, signings: totals.signings ?? add("n"), spent: totals.spent ?? add("spent") }, runs });
+      })
       .catch((e) => { console.error("Portal insights load error:", e); if (live) setData(null); });
     return () => { live = false; };
   }, [period, now]);

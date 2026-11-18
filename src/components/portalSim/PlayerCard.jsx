@@ -73,6 +73,7 @@ const ROLE_LABEL = { starter: "Starter", rotation: "Rotation", reserve: "Reserve
 const FIT_LABEL = { starter: "Starter", rotation: "Rotation", depth: "Depth" };
 const FIT_COLOR = { starter: GREEN, rotation: GOLD, depth: RED };
 const CELEBRATE_CSS = `
+  .wdc-range { touch-action: none; height: 34px; margin: 0; cursor: pointer; }
   @keyframes wdcWipe { from { clip-path: circle(0% at 82% 60%); } to { clip-path: circle(150% at 82% 60%); } }
   @keyframes wdcPop { 0% { transform: scale(0) rotate(-12deg); opacity: 0; } 55% { transform: scale(1.25) rotate(4deg); opacity: 1; } 75% { transform: scale(0.95) rotate(0); } 100% { transform: scale(1); opacity: 1; } }
   @keyframes wdcStamp { 0% { transform: scale(2.4) rotate(-14deg); opacity: 0; } 60% { transform: scale(0.92) rotate(-8deg); opacity: 1; } 100% { transform: scale(1) rotate(-8deg); opacity: 1; } }
@@ -87,8 +88,8 @@ const CELEBRATE_CSS = `
 `;
 // Phones: the header's fixed height, and the name's size to fit one line
 // in the space beside the headshot (Arial Black-ish caps run ~0.68em).
-const HEADER_H = 150;
-const nameSize = (name) => Math.max(16, Math.min(28, Math.floor(232 / (Math.max(String(name || "").length, 1) * 0.68))));
+const HEADER_H = 172;
+const nameSize = (name) => Math.max(16, Math.min(28, Math.floor(262 / (Math.max(String(name || "").length, 1) * 0.68))));
 const VALUE_LABEL = { tier: "Program", nil: "NIL", loc: "Close to home", pt: "Playing time", success: "Winning", dev: "Development" };
 const WANTS_LABEL = { level: "Wants a bigger stage", snaps: "Wants snaps", money: "Wants a bigger NIL deal", home: "Wants to be closer to home", winning: "Wants to win", development: "Wants to develop", roster: "Cut for roster space", released: "Released" };
 // The NFL header (a player gone to the draft).
@@ -337,10 +338,10 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
           {!shot && (drafted ? NFL_ICON : hb.LogoDark || hb.Logo1) && <img key={hb.School} src={drafted ? NFL_ICON : hb.LogoDark || hb.Logo1} alt="" aria-hidden="true" className="wdc-anim" style={{ position: "absolute", right: isMobile ? 10 : 24, top: "50%", marginTop: isMobile ? -55 : -75, height: isMobile ? 110 : 150, width: "auto", opacity: 0.16, pointerEvents: "none", animation: celebrate ? "wdcMark 3.2s .4s ease-out both" : undefined }} />}
           {celebrate ? <div key={`s${celebrate}`} className="wdc-anim" style={{ position: "absolute", top: 0, bottom: 0, left: 0, width: "30%", background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent)", animation: "wdcShine 1.1s .5s ease-out both", pointerEvents: "none" }} /> : null}
           <div style={{ position: "relative", display: "flex", alignItems: "flex-end", gap: isMobile ? 8 : 18, padding: isMobile ? "12px 12px 0" : "18px 22px 0", ...(isMobile ? { height: HEADER_H, boxSizing: "border-box" } : {}) }}>
-            <div style={{ flex: 1, minWidth: 0, paddingBottom: isMobile ? 12 : 18, alignSelf: isMobile ? "stretch" : undefined, display: isMobile ? "flex" : undefined, flexDirection: "column", justifyContent: "flex-end" }}>
+            <div style={{ flex: 1, minWidth: 0, paddingBottom: isMobile ? 12 : 18, alignSelf: isMobile ? "stretch" : undefined, display: isMobile ? "flex" : undefined, flexDirection: "column", justifyContent: "space-between", position: "relative", zIndex: 1 }}>
               {/* Phones: one line, sized to fit beside the buttons (user, 2026-11-18). */}
-              <div style={{ fontSize: isMobile ? nameSize(p.name) : 48, fontWeight: 900, textTransform: "uppercase", lineHeight: isMobile ? 1.05 : 0.95, letterSpacing: "-0.01em", paddingRight: isMobile ? 0 : 150, textShadow: "0 2px 12px rgba(0,0,0,0.35)", ...(isMobile ? { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginTop: "auto" } : {}) }}>{p.name}</div>
-              <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 6 : 10, marginTop: isMobile ? 8 : 14, minWidth: 0 }}>
+              <div style={{ fontSize: isMobile ? nameSize(p.name) : 48, fontWeight: 900, textTransform: "uppercase", lineHeight: isMobile ? 1.05 : 0.95, letterSpacing: "-0.01em", paddingRight: isMobile ? 0 : 150, textShadow: "0 2px 12px rgba(0,0,0,0.35)", ...(isMobile ? { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", paddingRight: 92, paddingTop: 4 } : {}) }}>{p.name}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 6 : 10, marginTop: isMobile ? 8 : 14, minWidth: 0, ...(isMobile ? { maxWidth: "56%" } : {}) }}>
                 <Logo onColor b={b} size={isMobile ? 28 : 44} />
                 {(moving || gone) && <span style={{ fontSize: isMobile ? 16 : 26, fontWeight: 900, opacity: 0.85 }}>→</span>}
                 {gone && <DepartureIcon kind={gone} dark size={isMobile ? 28 : 44} />}
@@ -362,14 +363,14 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
             {/* The headshot over his school's faint logo, centered behind
                 him (the NFL shield once he's gone to the draft). */}
             {shot && (
-              <div style={{ position: "relative", flexShrink: 0, alignSelf: "flex-end", display: "flex" }}>
+              <div style={isMobile ? { position: "absolute", right: 2, bottom: 0, display: "flex", zIndex: 0 } : { position: "relative", flexShrink: 0, alignSelf: "flex-end", display: "flex" }}>
                 {(drafted ? NFL_ICON : hb.LogoDark || hb.Logo1) && (
-                  <div aria-hidden="true" style={{ position: "absolute", left: "50%", top: "46%", transform: "translate(-50%, -50%)", width: isMobile ? 110 : 200, height: isMobile ? 110 : 200, pointerEvents: "none" }}>
+                  <div aria-hidden="true" style={{ position: "absolute", left: "50%", top: "46%", transform: "translate(-50%, -50%)", width: isMobile ? 150 : 200, height: isMobile ? 150 : 200, pointerEvents: "none" }}>
                     <img key={hb.School} src={drafted ? NFL_ICON : hb.LogoDark || hb.Logo1} alt="" className="wdc-anim" style={{ width: "100%", height: "100%", objectFit: "contain", opacity: 0.18, animation: celebrate ? "wdcMark 3.2s .4s ease-out both" : undefined }} />
                   </div>
                 )}
                 <img src={`https://a.espncdn.com/i/headshots/college-football/players/full/${p.id}.png`} alt="" onError={() => setShot(false)}
-                  style={{ position: "relative", height: isMobile ? 96 : 160, maxWidth: isMobile ? 96 : "none", width: "auto", objectFit: "contain", objectPosition: "bottom", filter: "drop-shadow(0 4px 10px rgba(0,0,0,0.45))" }} />
+                  style={{ position: "relative", height: isMobile ? 132 : 160, width: "auto", objectFit: "contain", objectPosition: "bottom", filter: "drop-shadow(0 4px 10px rgba(0,0,0,0.45))" }} />
               </div>
             )}
           </div>
@@ -563,7 +564,7 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6 }}>
                     <span style={{ fontSize: 28, fontWeight: 900, color: nil > max ? RED : INK, minWidth: 96 }}>{money(nil)}</span>
-                    <input type="range" min={0} max={slideMax} step={Math.max(1000, Math.round(p.ask / 100 / 1000) * 1000)} value={Math.min(nil, slideMax)} onChange={(e) => setNil(Number(e.target.value))} aria-label="NIL offer" style={{ flex: 1, accentColor: GOLD }} />
+                    <input type="range" className="wdc-range" min={0} max={slideMax} step={Math.max(1000, Math.round(p.ask / 100 / 1000) * 1000)} value={Math.min(nil, slideMax)} onChange={(e) => setNil(Number(e.target.value))} onInput={(e) => setNil(Number(e.target.value))} aria-label="NIL offer" style={{ flex: 1, minWidth: 0, accentColor: GOLD }} />
                   </div>
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
                     {[0.5, 0.8, 1, 1.25, 1.5, 2].map((m) => <button key={m} type="button" style={pill(Math.round(p.ask * m / 1000) * 1000 === nil, BLUE)} onClick={() => setNil(Math.round((p.ask * m) / 1000) * 1000)}>{m === 1 ? "Ask" : `${Math.round(m * 100)}%`}</button>)}
@@ -575,6 +576,19 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
                     {room.chasing.length ? <> He sees you're also chasing {room.chasing.length} other {p.pos}{room.chasing.length === 1 ? "" : "s"} ({room.chasing.slice(0, 3).map((x) => x.name.split(" ").slice(-1)[0]).join(", ")}).</> : null}
                     {!mine && !moved && state.window < state.windows ? " Offer now: interest builds every window your offer stands." : ""}
                   </div>
+                  {/* Make / New / Pull / Drop — right under the NIL (user, 2026-11-18). */}
+              {moved ? (
+                <div style={{ marginTop: 10, padding: "8px 12px", background: "#13233f", color: "#9fc3ff", fontWeight: 800, fontSize: 13, borderRadius: 8 }}>
+                  You've made your move on him this window. You can offer again next window.
+                </div>
+              ) : null}
+              {sim.error && <div style={{ marginTop: 10, padding: "8px 12px", background: "#3a1219", color: "#ffb3a8", fontWeight: 800, fontSize: 13, borderRadius: 8 }}>{sim.error}</div>}
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12, flexWrap: "wrap" }}>
+                {/* Drop: off your board — pulling your offer too, if one's out. */}
+                {onBoard && canOffer && <button type="button" title={mine ? "Drop him — pulls your offer" : "Drop him from your board"} style={{ ...pill(false), color: RED }} onClick={() => sim.toggleStar(p.id)}>Drop</button>}
+                {mine && !moved && <button type="button" style={pill(false)} onClick={() => sim.retract(p.id)}>Pull Offer</button>}
+                <button type="button" disabled={!canOffer || nil > max || moved} style={{ ...pill(true, "#2e7d32"), padding: "11px 22px", fontSize: 14, opacity: nil > max || moved ? 0.5 : 1 }} onClick={() => sim.offer(p.id, { nil })}>{mine ? "New Offer" : "Make Offer"}</button>
+              </div>
                 </div>
                 {/* How he sees it. */}
                 <div style={{ background: "#111a2b", border: `1px solid ${LINE}`, borderRadius: 12, padding: 14 }}>
@@ -610,18 +624,6 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
                   )}
                   <div style={{ fontSize: 11, fontWeight: 700, color: SUB, marginTop: 8 }}>{yours ? "Bars: how your school scores with the offer you sent. " : ""}Letters: how much he cares (A's first). The factors count 3× the process.</div>
                 </div>
-              </div>
-              {moved ? (
-                <div style={{ marginTop: 10, padding: "8px 12px", background: "#13233f", color: "#9fc3ff", fontWeight: 800, fontSize: 13, borderRadius: 8 }}>
-                  You've made your move on him this window. You can offer again next window.
-                </div>
-              ) : null}
-              {sim.error && <div style={{ marginTop: 10, padding: "8px 12px", background: "#3a1219", color: "#ffb3a8", fontWeight: 800, fontSize: 13, borderRadius: 8 }}>{sim.error}</div>}
-              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12, flexWrap: "wrap" }}>
-                {/* Drop: off your board — pulling your offer too, if one's out. */}
-                {onBoard && canOffer && <button type="button" title={mine ? "Drop him — pulls your offer" : "Drop him from your board"} style={{ ...pill(false), color: RED }} onClick={() => sim.toggleStar(p.id)}>Drop</button>}
-                {mine && !moved && <button type="button" style={pill(false)} onClick={() => sim.retract(p.id)}>Pull Offer</button>}
-                <button type="button" disabled={!canOffer || nil > max || moved} style={{ ...pill(true, "#2e7d32"), padding: "11px 22px", fontSize: 14, opacity: nil > max || moved ? 0.5 : 1 }} onClick={() => sim.offer(p.id, { nil })}>{mine ? "New Offer" : "Make Offer"}</button>
               </div>
               </div>
             </>
@@ -741,7 +743,7 @@ function Retain({ p, sim, team, nil, setNil, isMobile }) {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6 }}>
             <span style={{ fontSize: 28, fontWeight: 900, color: nil > max ? RED : INK, minWidth: 96 }}>{money(nil)}</span>
-            <input type="range" min={0} max={slideMax} step={Math.max(1000, Math.round(base.ask / 100 / 1000) * 1000)} value={Math.min(nil, slideMax)} onChange={(e) => setNil(Number(e.target.value))} aria-label="Retention NIL" style={{ flex: 1, accentColor: GOLD }} />
+            <input type="range" className="wdc-range" min={0} max={slideMax} step={Math.max(1000, Math.round(base.ask / 100 / 1000) * 1000)} value={Math.min(nil, slideMax)} onChange={(e) => setNil(Number(e.target.value))} onInput={(e) => setNil(Number(e.target.value))} aria-label="Retention NIL" style={{ flex: 1, minWidth: 0, accentColor: GOLD }} />
           </div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
             {[0.5, 0.8, 1, 1.25, 1.5].map((m) => <button key={m} type="button" style={pill(Math.round(base.ask * m / 1000) * 1000 === nil, BLUE)} onClick={() => setNil(Math.round((base.ask * m) / 1000) * 1000)}>{m === 1 ? "Ask" : `${Math.round(m * 100)}%`}</button>)}

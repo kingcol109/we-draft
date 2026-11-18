@@ -195,9 +195,12 @@ export function RecQuote({ state, pid, rec, compact = false }) {
     </div>
   );
 }
-export const RecChip = ({ state, pid, rec }) => (rec ? (
-  <span title={`${ROLE_TITLE[rec.by]}: “${recQuote(state, pid, rec)}”`} style={{ flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 900, letterSpacing: "0.04em", color: GOLD, border: "1px solid rgba(246,162,29,0.5)", borderRadius: 999, padding: "2px 7px", whiteSpace: "nowrap" }}>
-    ★ {rec.by} pick
+// compact: the phone rows' tag beside the name — "★HC", no border growth.
+export const RecChip = ({ state, pid, rec, compact = false }) => (rec ? (
+  <span title={`${ROLE_TITLE[rec.by]}: “${recQuote(state, pid, rec)}”`} style={compact
+    ? { flexShrink: 0, display: "inline-flex", alignItems: "center", fontSize: 9, fontWeight: 900, letterSpacing: "0.02em", color: "#0e1626", background: GOLD, borderRadius: 4, padding: "1px 4px", lineHeight: 1.3, whiteSpace: "nowrap" }
+    : { flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 900, letterSpacing: "0.04em", color: GOLD, border: "1px solid rgba(246,162,29,0.5)", borderRadius: 999, padding: "2px 7px", whiteSpace: "nowrap" }}>
+    {compact ? `★${rec.by}` : `★ ${rec.by} pick`}
   </span>
 ) : null);
 

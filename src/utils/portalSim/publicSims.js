@@ -17,6 +17,7 @@
 //     signings: [{ id, name, pos, stars, from (slug), fromSchool, nil, w }] }
 import { addDoc, collection, count, doc, getAggregateFromServer, getDocs, limit, orderBy, query, serverTimestamp, sum, Timestamp, where, writeBatch } from "firebase/firestore";
 import { db } from "../../firebase";
+import { countPortalSim } from "./usage";
 
 export const SIM_PATH = "/portalsim";
 export const CLASSES_PATH = "/portalsim/classes";
@@ -89,6 +90,7 @@ const recorded = new Set(); // runs already recorded this session (key: team-see
 export async function recordPortalResult(key, rec) {
   if (recorded.has(key)) return;
   recorded.add(key);
+  countPortalSim("finished"); // the day's counter (utils/portalSim/usage.js)
   const signings = (rec.signings || []).slice(0, 80).map((p) => ({
     id: String(p.id), name: String(p.name || ""), pos: String(p.pos || ""), stars: Number(p.stars) || 0,
     from: String(p.from || ""), fromSchool: String(p.fromSchool || ""), nil: Math.round(Number(p.nil) || 0),
@@ -105,9 +107,15 @@ export async function recordPortalResult(key, rec) {
 export async function portalTotals(since = 0) {
   const base = collection(db, RESULTS);
   const q = since ? query(base, where("createdAt", ">=", Timestamp.fromMillis(since))) : base;
-  const snap = await getAggregateFromServer(q, { runs: count(), signings: sum("n"), spent: sum("spent") });
-  const d = snap.data();
-  return { runs: d.runs || 0, signings: d.signings || 0, spent: d.spent || 0 };
+  // The count needs no index; the two sums do (firestore.indexes.json:
+  // portalSimResults n + spent). Without them, signings / spent come back
+  // null and the page adds up the runs it loaded instead.
+  const [c, sums] = await Promise.all([
+    getAggregateFromServer(q, { runs: count() }),
+    getAggregateFromServer(q, { signings: sum("n"), spent: sum("spent") }).catch((e) => { console.warn("Portal insights sums:", e?.code || e); return null; }),
+  ]);
+  const d = sums ? sums.data() : null;
+  return { runs: c.data().runs || 0, signings: d ? d.signings || 0 : null, spent: d ? d.spent || 0 : null };
 }
 // The newest runs, for the lists.
 export async function loadPortalResults({ since = 0, max = INSIGHTS_SAMPLE } = {}) {

@@ -338,6 +338,20 @@
           "order": "DESCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "portalSimResults",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "n",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "spent",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": []

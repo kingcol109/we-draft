@@ -26,6 +26,7 @@ import CfbUniverseSearch from "../components/CfbUniverseSearch";
 import AdminTransferPortal from "../components/AdminTransferPortal";
 import AdminPortalGrades from "../components/AdminPortalGrades";
 import AdminPortalSim from "../components/AdminPortalSim";
+import AdminPortalSimStats from "../components/AdminPortalSimStats";
 import AdminPortalTargets from "../components/AdminPortalTargets";
 import AdminPortalPages from "../components/AdminPortalPages";
 import AdminPortalManual from "../components/AdminPortalManual";
@@ -347,6 +348,7 @@ const PLAYER_GROUPS = [
       { key: "portalPages", label: "Team Pages" },
       { key: "portal", label: "Portal Sync" },
       { key: "portalSim", label: "Portal Sim" },
+      { key: "portalSimStats", label: "Portal Sim Stats" },
     ],
   },
   {
@@ -1575,6 +1577,8 @@ function PlayerDataSection() {
         <AdminPortalGrades allPlayers={allPlayers} />
       ) : playerDataTab === "portalSim" ? (
         <AdminPortalSim />
+      ) : playerDataTab === "portalSimStats" ? (
+        <AdminPortalSimStats />
       ) : playerDataTab === "portalTargets" ? (
         <AdminPortalTargets allPlayers={allPlayers} />
       ) : playerDataTab === "portalPages" ? (

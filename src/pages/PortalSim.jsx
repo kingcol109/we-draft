@@ -142,6 +142,8 @@ const CSS = `
   html.wd-sim-navhide.wd-sim-navopen .wd-navbar-wrap { transform: none; }
   .wd-sim-nofooter footer { display: none; }
   .wd-ps-tabs { scrollbar-width: none; }
+  .wd-ps-right button { padding: 5px 10px !important; font-size: 11px !important; }
+  .wd-ps-right > span, .wd-ps-right > div { min-width: 0; }
   .wd-ps-tabs::-webkit-scrollbar { display: none; }
   @keyframes psDrift { 0% { transform: translate(0, 0); } 100% { transform: translate(-80px, -46px); } }
   @keyframes psGlow { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
@@ -756,9 +758,13 @@ const Undecided = ({ size }) => (
 
 // A player line: stars, position, name, where from (→ where to — a "?"
 // while he's in the portal undecided), then any Info / Stats columns.
-function PlayerLine({ p, brand, to, isMobile, right, extra, onOpen, cols, flush = false }) {
+// tag: a small mark beside the name (a coach's pick, coaches on him);
+// note: a short value (your offer) — phones put them by the name and on the
+// second line; desktop, ahead of the row's right side.
+function PlayerLine({ p, brand, to, isMobile, right, extra, onOpen, cols, flush = false, tag = null, note = null }) {
   const lg = isMobile ? 22 : 26;
-  if (isMobile) return <PlayerLineMobile p={p} brand={brand} to={to} right={right} extra={extra} onOpen={onOpen} cols={cols} flush={flush} />;
+  if (isMobile) return <PlayerLineMobile p={p} brand={brand} to={to} right={right} extra={extra} onOpen={onOpen} cols={cols} flush={flush} tag={tag} note={note} />;
+  if (tag || note) right = <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexShrink: 0 }}>{tag}{note}{right}</span>;
   return (
     <div className="wd-sim-row" style={{ display: "flex", alignItems: "center", gap: isMobile ? 8 : 12, padding: isMobile ? "9px 10px" : "10px 16px", borderBottom: flush ? "none" : `1px solid ${LINE}` }}>
       <TransferStars stars={p.stars} size="sm" />
@@ -789,31 +795,38 @@ function PlayerLine({ p, brand, to, isMobile, right, extra, onOpen, cols, flush 
 // from → where he's going and the row's note; then the row's own pieces
 // (status, offers, buttons), wrapping as needed — never wider than the
 // screen. Info / Stats columns become small labeled cells.
-function PlayerLineMobile({ p, brand, to, right, extra, onOpen, cols, flush }) {
+function PlayerLineMobile({ p, brand, to, right, extra, onOpen, cols, flush, tag, note }) {
   const lg = 18;
   const arrow = <span style={{ color: SUB, fontWeight: 900, fontSize: 11 }}>→</span>;
-  const nameStyle = { fontWeight: 900, fontSize: 14, lineHeight: 1.2, display: "block", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" };
+  const nameStyle = { fontWeight: 900, fontSize: 14, lineHeight: 1.25, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 };
   return (
-    <div className="wd-sim-row" style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "9px 10px", borderBottom: flush ? "none" : `1px solid ${LINE}`, minWidth: 0 }}>
-      <div style={{ width: 40, flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, paddingTop: 1 }}>
+    <div className="wd-sim-row" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderBottom: flush ? "none" : `1px solid ${LINE}`, minWidth: 0 }}>
+      <div style={{ width: 40, flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
         <TransferStars stars={p.stars} size="sm" />
         <span style={{ width: 40, textAlign: "center", fontSize: 10, fontWeight: 900, color: "#9fc3ff", background: "#13233f", borderRadius: 5, padding: "2px 0" }}>{p.sub || p.pos}</span>
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        {onOpen
-          ? <button type="button" onClick={() => onOpen(p.id)} style={{ all: "unset", cursor: "pointer", ...nameStyle, textDecoration: "underline", textDecorationColor: "rgba(255,255,255,0.25)", textUnderlineOffset: 3 }}>{p.name}</button>
-          : <div style={nameStyle}>{p.name}</div>}
-        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "6px 8px", marginTop: 3, minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0, flex: "1 1 130px" }}>
-          {brand(p.team, p) ? <Logo b={brand(p.team, p)} size={lg} /> : null}
-          {to && <>{arrow}<Logo b={brand(to)} size={lg} /></>}
-          {!to && p.status === "portal" && <>{arrow}<Undecided size={lg} /></>}
-          {!to && p.status === "declared" && <>{arrow}<DepartureIcon kind={p.reason === "exhausted" ? "grad" : "nfl"} dark size={lg} /></>}
-          <span style={{ marginLeft: 2, minWidth: 0, fontSize: 11, fontWeight: 700, color: SUB, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-            {extra ? <span style={{ color: "#9fc3ff" }}>{extra} · </span> : null}{p.elig} yr{p.elig === 1 ? "" : "s"} · {ROLE_LABEL[p.role] || "—"}
-          </span>
+        {/* Line 1: the name, and its tag (a coach's pick) right beside it. */}
+        <div style={{ display: "flex", alignItems: "center", gap: 5, minWidth: 0 }}>
+          {onOpen
+            ? <button type="button" onClick={() => onOpen(p.id)} style={{ all: "unset", cursor: "pointer", ...nameStyle, textDecoration: "underline", textDecorationColor: "rgba(255,255,255,0.25)", textUnderlineOffset: 3 }}>{p.name}</button>
+            : <div style={nameStyle}>{p.name}</div>}
+          {tag && <span style={{ display: "inline-flex", alignItems: "center", gap: 3, flexShrink: 0 }}>{tag}</span>}
         </div>
-        {right && !cols && <div className="wd-ps-right" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end", gap: 6, marginLeft: "auto", minWidth: 0, maxWidth: "100%" }}>{right}</div>}
+        {/* Line 2: from → to, years left, the note (your offer) — the row's
+            buttons on the right, never wrapping. */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0, flex: 1 }}>
+            {brand(p.team, p) ? <Logo b={brand(p.team, p)} size={lg} /> : null}
+            {to && <>{arrow}<Logo b={brand(to)} size={lg} /></>}
+            {!to && p.status === "portal" && <>{arrow}<Undecided size={lg} /></>}
+            {!to && p.status === "declared" && <>{arrow}<DepartureIcon kind={p.reason === "exhausted" ? "grad" : "nfl"} dark size={lg} /></>}
+            <span style={{ marginLeft: 2, minWidth: 0, fontSize: 11, fontWeight: 700, color: SUB, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {extra ? <span style={{ color: "#9fc3ff" }}>{extra} · </span> : null}{p.elig} yr{p.elig === 1 ? "" : "s"}
+              {note ? <> · {note}</> : null}
+            </span>
+          </div>
+          {right && !cols && <div className="wd-ps-right" style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 5, flexShrink: 0, maxWidth: "62%", minWidth: 0 }}>{right}</div>}
         </div>
         {cols && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 10px", marginTop: 5 }}>
@@ -828,7 +841,7 @@ function PlayerLineMobile({ p, brand, to, right, extra, onOpen, cols, flush }) {
             })}
           </div>
         )}
-        {right && cols && <div className="wd-ps-right" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end", gap: 6, marginTop: 6, minWidth: 0 }}>{right}</div>}
+        {right && cols && <div className="wd-ps-right" style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 5, marginTop: 6, minWidth: 0 }}>{right}</div>}
       </div>
     </div>
   );
@@ -858,11 +871,12 @@ function PortalTab({ sim, team, brand, isMobile }) {
         const interested = Object.keys({ ...(p.evals || {}), ...p.offers }).filter((k) => k !== team).length;
         return (
           <div key={p.id}>
-            <PlayerRow cols={cols} p={p} brand={brand} isMobile={isMobile} onOpen={sim.openCard} right={(
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                {!cols && <RecChip state={sim.state} pid={p.id} rec={recs[p.id]} />}
+            <PlayerRow cols={cols} p={p} brand={brand} isMobile={isMobile} onOpen={sim.openCard}
+              tag={!cols || isMobile ? <RecChip state={sim.state} pid={p.id} rec={recs[p.id]} compact={isMobile} /> : null}
+              note={mine ? <span style={{ fontSize: isMobile ? 11 : 12, fontWeight: 900, color: "#7ee2a8" }}>{isMobile ? `Your offer ${money(mine.nil)}` : money(mine.nil)}</span> : null}
+              right={(
+              <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 5 : 8, flexShrink: 0 }}>
                 {!isMobile && interested > 0 && <span style={{ fontSize: 12, fontWeight: 800, color: "#9fc3ff", whiteSpace: "nowrap" }}>{interested} team{interested === 1 ? "" : "s"} interested</span>}
-                {mine && <span style={{ fontSize: 12, fontWeight: 900, color: "#7ee2a8" }}>{money(mine.nil)}</span>}
                 <ContactBtn sim={sim} pid={p.id} />
                 {canOffer && (p.cut?.[team]
                   ? <button type="button" onClick={() => sim.openCard(p.id)} style={{ ...pillBtn(false), color: "#ff8a7a", borderColor: "#5c1f28" }}>Cut you</button>
@@ -1224,6 +1238,27 @@ function BoardTab({ sim, team, brand, isMobile }) {
       </div>
     );
   };
+  // Phones: the same, in the row's slots — coach pick and coaches on him by
+  // the name, your offer on line 2, the standing (one line) and Drop on the right.
+  const boardTag = (p) => <><RecChip state={state} pid={p.id} rec={sim.recs[p.id]} compact /><OnHim sim={sim} pid={p.id} /></>;
+  // Line 2 carries the standing (and its move since last window); the right
+  // side, your offer as a short figure and Drop.
+  const boardNote = (p) => {
+    const [text, color, rank] = boardStanding(state, p, team, evalPeriod);
+    const before = was[p.id];
+    const moved = rank && before ? before - rank : 0;
+    return (
+      <span style={{ color, fontWeight: 900 }}>
+        {text}{moved ? <span style={{ marginLeft: 4, color: moved > 0 ? "#7ee2a8" : "#ff8a7a" }}>{moved > 0 ? `▲${moved}` : `▼${-moved}`}</span> : null}
+      </span>
+    );
+  };
+  const standingShort = (p) => (
+    <>
+      {p.offers[team] && <span title="Your offer" style={{ fontSize: 11, fontWeight: 900, color: "#7ee2a8", whiteSpace: "nowrap" }}>{money(p.offers[team].nil)}</span>}
+      <ContactBtn sim={sim} pid={p.id} />
+    </>
+  );
   // Your staff's picks you haven't contacted — by position, best stars
   // first, then last name; passed ones at the bottom.
   const recIds = Object.keys(sim.recs);
@@ -1236,9 +1271,8 @@ function BoardTab({ sim, team, brand, isMobile }) {
   // Contact first; Pass in red.
   const recRow = ({ p, rec }, isPassed) => (
     <div key={p.id} style={{ opacity: isPassed ? 0.6 : 1 }}>
-      <PlayerLine p={p} brand={brand} isMobile={isMobile} onOpen={sim.openCard} flush={!isPassed && !!rec} right={(
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-          <RecChip state={state} pid={p.id} rec={rec} />
+      <PlayerLine p={p} brand={brand} isMobile={isMobile} onOpen={sim.openCard} flush={!isPassed && !!rec} tag={<RecChip state={state} pid={p.id} rec={rec} compact={isMobile} />} right={(
+        <span style={{ display: "inline-flex", alignItems: "center", gap: isMobile ? 5 : 8 }}>
           <ContactBtn sim={sim} pid={p.id} />
           <button type="button" onClick={() => sim.pass(p.id)} style={isPassed ? { ...pillBtn(false), padding: "5px 10px" } : { ...pillBtn(false), padding: "5px 10px", color: "#ff8a7a", borderColor: "#5c1f28" }}>{isPassed ? "Restore" : "Pass"}</button>
         </span>
@@ -1284,7 +1318,7 @@ function BoardTab({ sim, team, brand, isMobile }) {
                 <button type="button" aria-label={`Move ${p.name} down`} disabled={i === board.length - 1} onClick={() => sim.move(p.id, i + 1)} style={{ all: "unset", cursor: i === board.length - 1 ? "default" : "pointer", color: i === board.length - 1 ? "#2a3a58" : INK, fontSize: 13, padding: "4px 8px", lineHeight: 1 }}>▼</button>
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <PlayerLine p={p} brand={brand} isMobile onOpen={sim.openCard} flush right={standingLine(p, i)} />
+                <PlayerLine p={p} brand={brand} isMobile onOpen={sim.openCard} flush tag={boardTag(p)} note={boardNote(p)} right={standingShort(p)} />
               </div>
             </div>
           ))
