@@ -21,6 +21,14 @@
     "api/mock-og.js": { "maxDuration": 20, "includeFiles": "{server/stream-manager/assets/BebasNeue-Regular.ttf,src/assets/Logo2.png}" },
     "api/first-pick.js": { "maxDuration": 30, "includeFiles": "{server/firstPickImage.mjs,server/stream-manager/assets/BebasNeue-Regular.ttf,src/assets/Logo2.png,src/utils/instagram/*.js,src/utils/*.js}" },
     "api/instagram.js": { "maxDuration": 300 },
-    "api/instagram-webhook.js": { "maxDuration": 30 }
-  }
+    "api/instagram-webhook.js": { "maxDuration": 30 },
+    "api/riser-graphic.js": { "maxDuration": 30, "includeFiles": "{server/riserImage.mjs,server/firstPickImage.mjs,server/stream-manager/assets/BebasNeue-Regular.ttf,src/assets/Logo2.png,src/utils/instagram/*.js,src/utils/*.js}" },
+    "api/risers/[year]/[file].js": { "maxDuration": 30, "includeFiles": "{api/riser-graphic.js,server/riserImage.mjs,server/firstPickImage.mjs,server/stream-manager/assets/BebasNeue-Regular.ttf,src/assets/Logo2.png,src/utils/instagram/*.js,src/utils/*.js}" },
+    "api/cutout.js": { "maxDuration": 30, "includeFiles": "{server/firstPickImage.mjs,src/utils/instagram/*.js,src/utils/*.js}" },
+    "api/portal-graphic.js": { "maxDuration": 30, "includeFiles": "{server/portalNewsImage.mjs,server/firstPickImage.mjs,server/stream-manager/assets/BebasNeue-Regular.ttf,src/assets/Logo2.png,src/utils/instagram/*.js,src/utils/*.js}" },
+    "api/portal-news/[file].js": { "maxDuration": 30, "includeFiles": "{api/portal-graphic.js,server/portalNewsImage.mjs,server/firstPickImage.mjs,server/stream-manager/assets/BebasNeue-Regular.ttf,src/assets/Logo2.png,src/utils/instagram/*.js,src/utils/*.js}" }
+  },
+  "redirects": [
+    { "source": "/portal/updates", "destination": "/portal/news/updates", "permanent": true }
+  ]
 }

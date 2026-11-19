@@ -20,7 +20,7 @@ import { fileURLToPath } from "url";
 import { createRequire } from "module";
 import zlib from "zlib";
 import { knockOut, hasBackdrop, opaqueBounds, inkBounds } from "../src/utils/instagram/knockout.js";
-import { firstPickInput, firstPickSvg, firstPickImageUrls } from "../src/utils/instagram/firstPick.js";
+import { firstPickInput, firstPickSvg, firstPickImageUrls, lockedShot } from "../src/utils/instagram/firstPick.js";
 
 const require = createRequire(import.meta.url);
 const { renderPng, measure, fetchLogo, pngSize } = require("./stream-manager/thumbnail");
@@ -72,7 +72,7 @@ function encodePng(px, w, h) {
 // An image as loadFeatureImage(url, true) makes it: at most FEATURE_MAX
 // tall, its plain backdrop out, trimmed to what's left → { href, w, h }.
 // ink: a logo or wordmark, trimmed as loadFeatureImage's ink option does.
-async function featureImage(url, { ink = false } = {}) {
+export async function featureImage(url, { ink = false } = {}) {
   const { Resvg } = require("@resvg/resvg-js");
   const got = await fetchBytes(directUrl(url));
   if (!got) return null;
@@ -108,7 +108,7 @@ function jpegSize(buf) {
 }
 
 // A logo as it is → { href, w?, h? }.
-async function plainImage(url) {
+export async function plainImage(url) {
   const r = await fetchLogo(directUrl(url));
   if (!r.data) return null;
   let size = {};
@@ -124,10 +124,13 @@ async function currentWeek(db, year) {
 }
 
 // The team's first pick this week and his placed shots: { week, pick, shots }
-// — shots empty when he has none (the page shows no graphic).
-export async function firstPickOf(db, team, year) {
+// — shots empty when he has none (the page shows no graphic). overall: one
+// of the team's other picks instead (the full mock's first-round cards —
+// a team with two first-rounders), by its number.
+export async function firstPickOf(db, team, year, overall = 0) {
   const week = await currentWeek(db, year);
-  const pick = (week?.picks || []).filter((p) => p.owner === team && p.player?.id).sort((a, b) => a.overall - b.overall)[0] || null;
+  const mine = (week?.picks || []).filter((p) => p.owner === team && p.player?.id).sort((a, b) => a.overall - b.overall);
+  const pick = (overall ? mine.find((p) => p.overall === overall) : mine[0]) || null;
   if (!pick) return { week, pick: null, shots: [] };
   const ph = await db.collection("playerPhotos").doc(pick.player.id).get();
   const shots = (ph.exists ? ph.data().action || [] : []).filter((a) => a?.url && a.firstPick);
@@ -136,10 +139,11 @@ export async function firstPickOf(db, team, year) {
 
 // → { png, pick, shot } or null. width: drawn this wide (the graphic is
 // 1080 × 1350; a smaller copy for the page's display, the same picture).
-export async function firstPickPng(db, team, year, { random = Math.random, width = 1080 } = {}) {
-  const { pick, shots } = await firstPickOf(db, team, year);
+export async function firstPickPng(db, team, year, { width = 1080, overall = 0 } = {}) {
+  const { week, pick, shots } = await firstPickOf(db, team, year, overall);
   if (!pick || !shots.length) return null;
-  const shot = shots[Math.floor(random() * shots.length) % shots.length];
+  // Locked for the week: the same shot every time it's drawn (lockedShot).
+  const shot = lockedShot(shots, week?.id, team, pick.overall);
   const [pl, sch, nfl] = await Promise.all([
     db.collection("players").doc(pick.player.id).get(),
     pick.player.School ? db.collection("schools").where("School", "==", pick.player.School).limit(1).get() : null,

@@ -63,8 +63,11 @@ const HighSchoolTeamPage = lazy(() => import("./pages/HighSchoolTeamPage"));
 const PortalSim = lazy(() => import("./pages/PortalSim"));
 // /recruitsim — Recruit Sim (recruiting season game). Beta: admins + Sim Beta users (SimRoute).
 const RecruitSim = lazy(() => import("./pages/RecruitSim"));
-// /portal, /portal/:position, /portal/updates, /portal/:team(/:tab) — the Transfer Portal.
+// /portal, /portal/:position, /portal/news/updates, /portal/:team(/:tab) — the Transfer Portal.
+// (The updates feed moved from /portal/updates to /portal/news/updates — user, 2026-11-19; the old URL redirects, here and in vercel.json.)
 const TransferPortal = lazy(() => import("./pages/TransferPortal"));
+// /portal/news (+ /in, /out, /{pos}, /{pos}/in|out, /updates) — Portal News (utils/portalNews.js): the portal's editorial pages; an empty page is noindexed.
+const PortalNews = lazy(() => import("./pages/PortalNews"));
 // /hs/rankings — the high school leaderboards (also unlisted; admin link).
 const HighSchoolRankings = lazy(() => import("./pages/HighSchoolRankings"));
 
@@ -96,6 +99,8 @@ const DraftOrderPage = lazy(() => import("./pages/DraftOrderPage"));
 // /events/{event}/{year} — each event's page (utils/events.js).
 const DraftCalendar = lazy(() => import("./pages/DraftCalendar"));
 const EventPage = lazy(() => import("./pages/EventPage"));
+// /risers/{year} — Draft Risers (utils/risers.js; Admin → Content → Rising Page).
+const Risers = lazy(() => import("./pages/Risers"));
 // /map, /map/draft, /map/{team} — interactive 3D maps (deck.gl; utils/mapData.js).
 const MapPage = lazy(() => import("./pages/MapPage"));
 
@@ -223,6 +228,9 @@ function MainLayout() {
             <Route path="/events/combine" element={<EventPage hub />} />
             <Route path="/events/:event" element={<EventLatestYear />} />
             <Route path="/events/:event/:year/:tab?/:pos?" element={<EventPage />} />
+            <Route path="/risers" element={<Navigate to="/risers/2027" replace />} />
+            <Route path="/risers/:year" element={<Risers />} />
+            <Route path="/risers/:year/:edition" element={<Risers />} />
             <Route path="/news" element={<News />} />
             <Route path="/news/:id" element={<NewsArticle />} />
             {/* Same gate as the year/position routes (it passes the
@@ -252,7 +260,12 @@ function MainLayout() {
             <Route path="/portalsim/:team" element={<><PortalSimMeta /><PortalSim /></>} />
             <Route path="/recruitsim" element={<SimRoute signInPrompt><RecruitSim /></SimRoute>} />
             <Route path="/portal" element={<TransferPortal />} />
-            <Route path="/portal/updates" element={<TransferPortal view="updates" />} />
+            <Route path="/portal/updates" element={<Navigate to="/portal/news/updates" replace />} />
+            <Route path="/portal/news" element={<PortalNews />} />
+            {/* Latest Moves: a tab of Portal News (the portal's updates feed inside it). */}
+            <Route path="/portal/news/updates" element={<PortalNews view="updates" />} />
+            <Route path="/portal/news/:pos" element={<PortalNews />} />
+            <Route path="/portal/news/:pos/:side" element={<PortalNews />} />
             <Route path="/portal/:position" element={<TransferPortal />} />
             <Route path="/portal/:position/:tab" element={<TransferPortal />} />
             <Route path="/hs/rankings" element={<HighSchoolRankings />} />

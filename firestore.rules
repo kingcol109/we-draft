@@ -968,6 +968,26 @@ service cloud.firestore {
       allow update: if false;
     }
     match /trends/{doc} { allow read, write: if true; }
+    // Draft Risers (/risers/{year}, utils/risers.js) — one doc per class,
+    // set in Admin → Content → Rising Page. Public: names, types, the chosen
+    // (public CFBD) stats and notes — never PFF.
+    match /risers/{year} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    // Each published edition of a class's list (riserEditions/{year}_{date}
+    // — written on the admin's Save, utils/risers.js): the News feed and
+    // /risers/{year}/{date}. Public, admin-written, same as the list.
+    match /riserEditions/{editionId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    // Portal News (/portal/news, utils/portalNews.js) — one doc, the
+    // admin's picks: names, schools, (public CFBD) stats and write-ups.
+    match /portalNews/{doc} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
     // Weekly AP-style Top 25 — one doc per week (doc id is the schedule26
     // Week string, e.g. "Week 1"), each holding an ordered Top25 array of
     // {Rank, School}. Week 0 has no doc of its own — everything reading

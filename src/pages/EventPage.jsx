@@ -87,11 +87,28 @@ export default function EventPage({ hub = false }) {
   // SEO
   const posName = pos ? POS_NAMES[pos] || pos : "";
   const base = `${year} ${past ? "NFL Combine" : ev.name}`;
-  const title = tab === "results" ? `${base} Results${pos ? `: ${posName}s` : ""} — 40 Times, Measurements and Testing`
+  // The current Combine and the all-star games: "{what} | {year} {event} Updates".
+  const updates = `${base} Updates`;
+  const seo = isCombine && !past ? {
+    title: tab === "results" ? `${pos ? `${posName} Results` : "40 Times and Testing Results"} | ${updates}`
+      : tab === "participants" ? `${pos ? `${posName} Invites` : "Invite List"} | ${updates}`
+        : `${base} Schedule and Draft Updates`,
+    description: tab === "results"
+      ? `${pos ? `Every ${posName.toLowerCase()}'s` : "Every"} ${base} result as it comes in: 40-yard dash, vertical, broad jump, bench, 3-cone, shuttle and measurements, sortable by drill.`
+      : tab === "participants"
+        ? `Every ${pos ? `${posName.toLowerCase()} ` : "prospect "}invited to the ${base}, with school, position and a link to each player's We-Draft.com profile.`
+        : `The ${base} schedule — when it starts, which positions work out each day — plus the invite list, results and draft updates from Indianapolis.`,
+  } : ev.teams ? {
+    title: tab === "participants" ? `${pos ? `${posName} Participants` : `${ev.teams.join(" and ")} Team Rosters`} | ${updates}` : `${base} Participants and Draft Updates`,
+    description: tab === "participants"
+      ? `Every ${pos ? `${posName.toLowerCase()} ` : "player "}on the ${base} ${ev.teams.join(" and ")} rosters, with school, position and a link to each prospect's We-Draft.com profile.`
+      : `${base} participants, practice week dates and draft updates${ev.location ? ` from ${ev.location}` : ""}. ${ev.about}`,
+  } : null;
+  const title = seo ? seo.title : tab === "results" ? `${base} Results${pos ? `: ${posName}s` : ""} — 40 Times, Measurements and Testing`
     : tab === "participants" ? `${base} ${past ? "Participants" : event === "combine" ? "Invites" : event === "pro-days" ? "Participants" : "Roster"}${pos ? `: ${posName}s` : ""}`
       : past ? `${year} NFL Combine Results, Measurements and Top Performers`
         : event === "pro-days" ? `${year} NFL Pro Day Schedule and Results` : `${base}: Dates, ${event === "combine" ? "Schedule, Invites and Results" : "Practices, Roster and Schedule"}`;
-  const description = tab === "results"
+  const description = seo ? seo.description : tab === "results"
     ? `Every ${pos ? `${posName.toLowerCase()} ` : ""}result from the ${base}: 40-yard dash, vertical, broad jump, bench, 3-cone, shuttle and measurements, sortable by event.`
     : tab === "participants"
       ? `Every ${pos ? `${posName.toLowerCase()} ` : "player "}at the ${base}${event === "pro-days" ? ", school by school" : ""}, with links to each prospect's We-Draft.com profile.`
@@ -108,7 +125,7 @@ export default function EventPage({ hub = false }) {
   return (
     <>
       <Helmet>
-        <title>{`${title} | We-Draft.com`}</title>
+        <title>{seo ? title : `${title} | We-Draft.com`}</title>
         <meta name="description" content={description} />
         <link rel="canonical" href={url} />
         <meta property="og:type" content="website" />
@@ -137,19 +154,19 @@ export default function EventPage({ hub = false }) {
         <Hero ev={ev} year={year} start={start} end={end} now={now} isMobile={isMobile} count={people.length} schools={schedule.length} past={past} />
 
         {/* Tabs */}
-        <div style={{ display: "flex", gap: 6, margin: "14px 0 16px", borderBottom: "2px solid #e2e7ef", overflowX: "auto" }}>
+        <div style={{ display: "flex", gap: 6, margin: "14px 0 16px", boxShadow: "inset 0 -2px 0 #e2e7ef", overflowX: "auto", overflowY: "hidden", scrollbarWidth: "none" }}>
           {tabs.map(([k, label]) => {
             const on = k === tab;
             return (
               <Link key={k || "overview"} to={eventPath(event, year, k)} style={{
                 padding: isMobile ? "9px 12px" : "10px 18px", fontSize: isMobile ? 12 : 13, fontWeight: 900, letterSpacing: "0.06em", textTransform: "uppercase",
-                textDecoration: "none", whiteSpace: "nowrap", color: on ? ev.color : "#5a6475", borderBottom: `3px solid ${on ? ev.color : "transparent"}`, marginBottom: -2,
+                textDecoration: "none", whiteSpace: "nowrap", color: on ? ev.color : "#5a6475", borderBottom: `3px solid ${on ? ev.color : "transparent"}`,
               }}>{label}{k === "participants" && people.length ? ` (${people.length})` : ""}</Link>
             );
           })}
         </div>
 
-        {isCombine && <YearSwitch ev={ev} year={year} tab={tab} pos={pos} index={combineIndex} />}
+        {past && <YearSwitch ev={ev} year={year} tab={tab} pos={pos} index={combineIndex} />}
 
         {loading ? (
           <div style={{ padding: 30, textAlign: "center", color: "#8a94a6", fontWeight: 800 }}>Loading…</div>
@@ -244,17 +261,16 @@ const Pill = ({ children }) => <span style={{ padding: "4px 11px", borderRadius:
 // ── Overview (Combine, all-star games) ──
 function Overview({ ev, year, people, dates, isMobile }) {
   const today = startOfToday();
-  const workouts = ev.slug === "combine"
-    ? DRAFT_EVENTS.filter((e) => e.type === "workout").map((e) => ({ ...e, start: parseDay(e.date), finish: parseDay(e.end || e.date) }))
-    : [];
   return (
     <>
       <p style={{ margin: "0 0 4px", fontSize: isMobile ? 14 : 16, fontWeight: 600, color: "#3a4352", lineHeight: 1.6, fontFamily: BODY_FONT }}>{ev.about}</p>
 
       <SectionHead icon="calendar" title="Key Dates" isMobile={isMobile} color={ev.color} />
-      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(280px, 1fr))", gap: 10 }}>
-        {[...dates.entries, ...workouts].map((e) => <DateCard key={e.id} e={e} ev={ev} today={today} isMobile={isMobile} />)}
-      </div>
+      {ev.slug === "combine" ? <CombineKeyDates ev={ev} year={year} dates={dates} today={today} isMobile={isMobile} /> : (
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(280px, 1fr))", gap: 10 }}>
+          {dates.entries.map((e) => <DateCard key={e.id} e={e} ev={ev} today={today} isMobile={isMobile} />)}
+        </div>
+      )}
 
       {ev.slug === "combine" && (
         <>
@@ -264,31 +280,89 @@ function Overview({ ev, year, people, dates, isMobile }) {
       )}
 
       {ev.teams ? (
-        <>
-          <SectionHead icon="users" title="Rosters" isMobile={isMobile} color={ev.color} />
-          {people.length ? (
-            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 12 }}>
-              {ev.teams.map((team, i) => (
-                <TeamColumn key={team} ev={ev} team={team} people={people.filter((p) => p.team === team)} accent={i ? ev.accent : ev.accent2 || ev.color} limit={12} year={year} />
-              ))}
-            </div>
-          ) : <Empty ev={ev}>Rosters post here as invitations go out.</Empty>}
-          {people.some((p) => !ev.teams.includes(p.team)) && (
-            <div style={{ marginTop: 10, fontSize: 12, fontWeight: 700, color: "#8a94a6", fontFamily: BODY_FONT }}>
-              {people.filter((p) => !ev.teams.includes(p.team)).length} more invited — teams not set yet. <Link to={eventPath(ev.slug, year, "participants")} style={{ color: ev.color }}>See everyone →</Link>
-            </div>
-          )}
-        </>
+        // The rosters live on the Participants tab.
+        <div style={{ marginTop: 18 }}>
+          <Link to={eventPath(ev.slug, year, "participants")} style={ctaStyle(ev)}>{people.length ? `See all ${people.length} participants →` : "Participants →"}</Link>
+        </div>
       ) : (
         <>
           <SectionHead icon="users" title="Invites by Position" isMobile={isMobile} color={ev.color} />
-          {people.length ? <PositionTiles ev={ev} year={year} people={people} tab="participants" isMobile={isMobile} /> : <Empty ev={ev}>The invite list posts here once the NFL sends it out.</Empty>}
+          {people.length ? <PositionTiles ev={ev} year={year} people={people} tab="participants" isMobile={isMobile} /> : <Empty ev={ev}>The invite list posts here once the NFL sends it out.<ClassButton ev={ev} year={year} /></Empty>}
           {people.some((p) => p.results && Object.values(p.results).some((v) => v !== "" && v != null)) && (
             <div style={{ marginTop: 12 }}><Link to={eventPath(ev.slug, year, "results")} style={ctaStyle(ev)}>See the results →</Link></div>
           )}
         </>
       )}
     </>
+  );
+}
+
+// The Combine's key dates as one graphic: the day it opens, then each
+// on-field workout day with the positions working out (each → its results).
+const POS_LINK = { "K/P": "K" };
+function CombineKeyDates({ ev, year, dates, today, isMobile }) {
+  const open = dates.entries.find((e) => e.id === "combine") || dates.entries[0];
+  const workouts = DRAFT_EVENTS.filter((e) => e.type === "workout").map((e) => ({ ...e, start: parseDay(e.date) })).sort((a, b) => a.start - b.start);
+  if (!open) return null;
+  const dim = (d) => ({ opacity: d < today ? 0.5 : 1 });
+  const big = (d, size) => (
+    <>
+      <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.18em", textTransform: "uppercase", color: GOLD }}>{WEEKDAYS[d.getDay()]}</div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 6, color: "#fff", lineHeight: 0.95 }}>
+        <span style={{ fontSize: Math.round(size * 0.42), fontWeight: 900, textTransform: "uppercase", opacity: 0.85 }}>{MON(d)}</span>
+        <span style={{ fontSize: size, fontWeight: 900 }}>{d.getDate()}</span>
+      </div>
+    </>
+  );
+  return (
+    <div style={{
+      position: "relative", borderRadius: 18, overflow: "hidden", color: "#fff",
+      background: `linear-gradient(135deg, ${ev.dark} 0%, ${ev.color} 60%, ${ev.accent} 130%)`, boxShadow: "0 12px 30px rgba(0,30,70,0.25)",
+      display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 0.9fr) minmax(0, 2.1fr)",
+    }}>
+      {/* Faint yard lines behind it all. */}
+      <div aria-hidden="true" style={{ position: "absolute", inset: 0, backgroundImage: "repeating-linear-gradient(90deg, rgba(255,255,255,0.05) 0 2px, transparent 2px 64px)", pointerEvents: "none" }} />
+
+      {/* Opening day */}
+      <div style={{ position: "relative", padding: isMobile ? "18px 18px 16px" : "24px", background: "rgba(0,0,0,0.22)", borderRight: isMobile ? "none" : `4px solid ${GOLD}`, borderBottom: isMobile ? `4px solid ${GOLD}` : "none", display: "flex", alignItems: "center", gap: 16, ...dim(open.finish) }}>
+        <img src={ev.logo} alt="" style={{ width: isMobile ? 54 : 64, height: isMobile ? 54 : 64, objectFit: "contain", filter: "drop-shadow(0 3px 8px rgba(0,0,0,0.4))" }} />
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 4 }}>Combine opens</div>
+          {big(open.start, isMobile ? 46 : 56)}
+          <div style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.8)", fontFamily: BODY_FONT, marginTop: 6 }}>
+            Through {WEEKDAYS[open.finish.getDay()]}, {MON(open.finish)} {open.finish.getDate()} · {ev.location}
+          </div>
+        </div>
+      </div>
+
+      {/* On-field workouts */}
+      <div style={{ position: "relative", padding: isMobile ? "16px 14px 18px" : "20px 22px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 900, letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 12 }}>
+          <Icon name="stopwatch" size={16} stroke={2.4} style={{ color: GOLD }} />On-field workouts
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, minmax(0, 1fr))" : "repeat(4, minmax(0, 1fr))", gap: 10 }}>
+          {workouts.map((w) => {
+            const isToday = sameDay(w.start, today);
+            return (
+              <div key={w.id} style={{
+                background: isToday ? "rgba(246,162,29,0.22)" : "rgba(255,255,255,0.1)", border: `1px solid ${isToday ? GOLD : "rgba(255,255,255,0.18)"}`,
+                borderTop: `4px solid ${GOLD}`, borderRadius: 12, padding: "10px 12px 12px", ...dim(w.start),
+              }}>
+                {big(w.start, isMobile ? 34 : 40)}
+                {isToday && <div style={{ fontSize: 10, fontWeight: 900, color: GOLD, letterSpacing: "0.12em", marginTop: 2 }}>TODAY</div>}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 10 }}>
+                  {w.short.split(" · ").map((g) => (
+                    <Link key={g} to={eventPath(ev.slug, year, "results", POS_LINK[g] || g)} title={`${POS_NAMES[POS_LINK[g] || g] || g} results`} style={{
+                      padding: "3px 8px", borderRadius: 6, background: "#fff", color: ev.dark, fontSize: 12, fontWeight: 900, textDecoration: "none", letterSpacing: "0.03em",
+                    }}>{g}</Link>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -313,6 +387,13 @@ function DateCard({ e, ev, today, isMobile }) {
     </div>
   );
 }
+
+// Until the invites are out: the class on the Community Board.
+const ClassButton = ({ ev, year }) => (
+  <div style={{ marginTop: 12 }}>
+    <Link to={`/community/${year}`} style={ctaStyle(ev)}>View the {year} class →</Link>
+  </div>
+);
 
 function Empty({ ev, children }) {
   return (
@@ -353,7 +434,7 @@ function PosChips({ ev, year, tab, pos, people }) {
 function Participants({ ev, year, people, pos, isMobile, schedule, badgeFor }) {
   const shown = pos ? people.filter((p) => p.position === pos) : people;
   if (!people.length) {
-    return <Empty ev={ev}>{ev.slug === "pro-days" ? "Participants post here as each school sets its pro day." : ev.slug === "combine" ? "The invite list posts here once the NFL sends it out." : "Rosters post here as invitations go out."}</Empty>;
+    return <Empty ev={ev}>{ev.slug === "pro-days" ? "Participants post here as each school sets its pro day." : ev.slug === "combine" ? <>The invite list posts here once the NFL sends it out.<ClassButton ev={ev} year={year} /></> : "Rosters post here as invitations go out."}</Empty>;
   }
   return (
     <>

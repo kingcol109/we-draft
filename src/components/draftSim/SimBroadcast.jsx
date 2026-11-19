@@ -30,6 +30,7 @@ import { PlayerName } from "./FitName";
 import { ProspectCardProvider, PlayerLink } from "./ProspectCard";
 import { fetchEspnRoster, fetchDepthOrder, groupRoster } from "../../utils/nflRoster";
 import { loadHeadshot, useHeadshot } from "./simHeadshots";
+import { startSimPickCard } from "../FirstPickGraphic";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -679,6 +680,8 @@ function Stat({ label, value, sub }) {
   );
 }
 
+
+
 // The right-hand card: glass while the team's on the clock, turning over
 // to white for the pick.
 function StageCard({ mode, s, data, isMobile, pick, team, look, event }) {
@@ -933,6 +936,14 @@ function Stage({ s, data, isMobile, onPickTeam, strip = null }) {
   // "The pick is in": fetch the pick's headshot for the card that's next.
   const pendingId = pendingPick?.prospect?.id;
   useEffect(() => { if (pendingId) loadHeadshot(pendingId); }, [pendingId]);
+  // …and a user pick's card (its Desk post's graphic), so it's drawn by the
+  // time the post is in — queued, drawn when the browser's idle.
+  useEffect(() => {
+    if (pendingPick && s.sim.userTeams.includes(pendingPick.team)) {
+      const p = pendingPick.prospect;
+      startSimPickCard({ id: p.id, first: p.First, last: p.Last, pos: p.Position, school: p.School, logo: p.logo, pick: pendingPick.pick.overall, round: pendingPick.pick.round, team: pendingPick.team, year: data.year });
+    }
+  }, [pendingId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (s.phase === "intro") {
     if (s.sim.userTeams.length === 1) look = teamLook(brandOf(data, s.sim.userTeams[0]));
@@ -2087,7 +2098,7 @@ function Console({ s, data, isMobile, fill = false }) {
     )
     : null;
   const body = {
-    desk: <SimFeed feed={s.feed} branding={data.branding} height={isMobile ? "auto" : consoleHeight(isMobile)} isMobile={isMobile} />,
+    desk: <SimFeed feed={s.feed} branding={data.branding} height={isMobile ? "auto" : consoleHeight(isMobile)} isMobile={isMobile} cardPick={{ teams: s.sim.userTeams, year: data.year }} />,
     draft: <DraftTab s={s} data={data} isMobile={isMobile} onTradePick={s.quick ? null : tradePick} fit={fill && !isMobile} />,
     board: <DraftBoardTab s={s} data={data} isMobile={isMobile} />,
     warroom: <WarRoomTab s={s} data={data} isMobile={isMobile} onTrade={() => { setTradeSeed(null); setTab("trades"); }} />,
@@ -2176,7 +2187,7 @@ function BroadcastBody({ s, data, isMobile, onSettings, onPickTeam, fill = false
             </div>
             <Console s={s} data={data} isMobile={false} fill />
           </div>
-          <SimFeed feed={s.feed} branding={data.branding} height="100%" isMobile={false} />
+          <SimFeed feed={s.feed} branding={data.branding} height="100%" isMobile={false} cardPick={{ teams: s.sim.userTeams, year: data.year }} />
         </div>
       </div>
     );
@@ -2191,7 +2202,7 @@ function BroadcastBody({ s, data, isMobile, onSettings, onPickTeam, fill = false
         </div>
         {!isMobile && (
           <div style={{ position: "sticky", top: 12 }}>
-            <SimFeed feed={s.feed} branding={data.branding} height="calc(100vh / var(--pz, 1) - 120px)" isMobile={false} />
+            <SimFeed feed={s.feed} branding={data.branding} height="calc(100vh / var(--pz, 1) - 120px)" isMobile={false} cardPick={{ teams: s.sim.userTeams, year: data.year }} />
           </div>
         )}
       </div>

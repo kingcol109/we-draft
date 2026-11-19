@@ -43,18 +43,18 @@ export function SubTabs({ views, view, onView }) {
 
 // view / onView: the sub-tab; branding / names / order: the sim's setup
 // (order: this class's draft order, for the first round's teams).
-export default function SimCommunity({ view, onView, branding = {}, names, order = [], orderYear, isMobile }) {
+export default function SimCommunity({ view, onView, branding = {}, names, nickname = names, order = [], orderYear, isMobile }) {
   return (
     <div>
       <SubTabs views={COMMUNITY_VIEWS} view={view} onView={onView} />
       {view === "recent"
         ? <RecentSims branding={branding} names={names} isMobile={isMobile} />
-        : <Insights branding={branding} names={names} order={order} orderYear={orderYear} isMobile={isMobile} />}
+        : <Insights branding={branding} names={names} nickname={nickname} order={order} orderYear={orderYear} isMobile={isMobile} />}
     </div>
   );
 }
 
-function Insights({ branding, names, order, orderYear, isMobile }) {
+function Insights({ branding, names, nickname, order, orderYear, isMobile }) {
   const [doc, setDoc] = useState(undefined);
   const [year, setYear] = useState(SIM_YEAR);
   const [period, setPeriod] = useState("week");
@@ -136,7 +136,14 @@ function Insights({ branding, names, order, orderYear, isMobile }) {
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1fr) minmax(0, 1fr)", gap: 14, alignItems: "start" }}>
           <div style={{ display: "grid", gap: 14 }}>
-            <TeamBars teams={y.teams} names={names} logo={logo} />
+            <TeamBars key={`${year}-${period}`} teams={y.teams} mocks={y.teamMocks || {}} names={names} nickname={nickname} logo={logo}
+              renderPlayer={(id) => (
+                <>
+                  {schoolLogo(id, 20)}
+                  <PlayerLink p={players[id]} name={nameOf(id)} />
+                  <span style={{ color: "#8b9bb4", fontSize: 11 }}>{players[id]?.pos} {players[id]?.s}</span>
+                </>
+              )} />
             <div style={{ ...PANEL, padding: 14 }}>
               <div style={heading}>{ready ? "COMMUNITY FAVORITES" : "MOST PICKED PLAYERS"}</div>
               {ready && <div style={{ color: "#8b9bb4", fontSize: 12, fontFamily: BODY, marginBottom: 8 }}>The players users take furthest ahead of their board spot — their median pick ({FAVORITE_MIN}+ selections).</div>}
@@ -209,14 +216,48 @@ function useSchoolLogos(players) {
 const spotsEarly = (spots) => `+${spots} ${spots === 1 ? "spot" : "spots"} early`;
 const picksText = (n) => `${n.toLocaleString()} ${n === 1 ? "pick" : "picks"}`;
 
-// The teams users draft as, the top TOP_TEAMS: one bar each, against the most.
-function TeamBars({ teams, names, logo }) {
+// The teams users draft as, the top TOP_TEAMS: one bar each, against the
+// most — or, a team picked from the dropdown, its average 7-round mock
+// from user picks only (mocks: the doc's teamMocks; renderPlayer: a
+// player's logo, name and position).
+function TeamBars({ teams, mocks, names, nickname, logo, renderPlayer }) {
+  const [team, setTeam] = useState("");
   const top = teams.slice(0, TOP_TEAMS);
   const max = Math.max(1, ...top.map((t) => t.n));
+  const options = Object.keys(mocks).sort((a, b) => String(names(a)).localeCompare(String(names(b))));
+  const mock = team ? mocks[team] || [] : null;
   return (
     <div style={{ ...PANEL, padding: 14 }}>
-      <div style={heading}>MOST POPULAR TEAMS</div>
-      {top.map((t) => (
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+        <div style={{ ...heading, marginBottom: 0, marginRight: "auto" }}>{team ? "AVERAGE USER MOCK" : "MOST POPULAR TEAMS"}</div>
+        {options.length > 0 && (
+          <select value={team} onChange={(e) => setTeam(e.target.value)} aria-label="Team"
+            style={{ background: "#0e1626", color: "#fff", border: `2px solid ${team ? GOLD : "#24324d"}`, borderRadius: 999, padding: "5px 10px", fontFamily: "inherit", fontWeight: 900, fontSize: 11, maxWidth: "100%" }}>
+            <option value="">MOST POPULAR TEAMS</option>
+            {options.map((t) => <option key={t} value={t}>{names(t)}</option>)}
+          </select>
+        )}
+      </div>
+      {mock ? (
+        <>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            {logo(team) && <img src={logo(team)} alt="" style={{ width: 22, height: 22, objectFit: "contain", flexShrink: 0 }} />}
+            <span style={{ color: "#8b9bb4", fontSize: 12, fontFamily: BODY }}>Most common user picks when the {nickname(team)} are on the clock.</span>
+          </div>
+          {mock.map((p, i) => (
+            <div key={p.overall} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", borderTop: i ? "1px solid #18233a" : "none", fontFamily: BODY }}>
+              <span style={{ color: GOLD, fontWeight: 900, fontSize: 10, width: 22, flexShrink: 0 }}>R{p.round}</span>
+              <span style={{ color: "#6f7f99", fontWeight: 900, fontSize: 11, width: 26, textAlign: "right", flexShrink: 0 }}>{p.overall}</span>
+              {p.id ? (
+                <>
+                  {renderPlayer(p.id)}
+                  <span style={{ marginLeft: "auto", color: "#dbe4f0", fontSize: 12, fontWeight: 800, fontVariantNumeric: "tabular-nums" }} title={`${p.n} of ${p.of} user picks near this slot`}>{Math.round((p.n / p.of) * 100)}%</span>
+                </>
+              ) : <span style={{ color: "#6f7f99", fontSize: 12 }}>No user picks near this slot yet</span>}
+            </div>
+          ))}
+        </>
+      ) : top.map((t) => (
         <div key={t.t} title={names(t.t)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0" }}>
           {logo(t.t) ? <img src={logo(t.t)} alt="" style={{ width: 22, height: 22, objectFit: "contain", flexShrink: 0 }} /> : <span style={{ width: 22, flexShrink: 0 }} />}
           <span style={{ color: "#dbe4f0", fontSize: 12, fontWeight: 900, width: 38, flexShrink: 0 }}>{t.t}</span>

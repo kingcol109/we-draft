@@ -1,4 +1,5 @@
 // scripts/generate-sitemap.js
+import { NEWS_POSITIONS, newsPosGroup, newsPath, PORTAL_NEWS_DOC } from "../src/utils/portalNews.js";
 import fs from "fs";
 import { initializeApp } from "firebase/app";
 import {
@@ -339,7 +340,7 @@ for (const doc of allTeams) {
     // Transfer Portal board, updates feed and position boards (team pages
     // are with portalPages below). Released 2026-11-18.
     { path: "/portal", priority: 0.8, lastmod: today },
-    { path: "/portal/updates", priority: 0.6, lastmod: today },
+    { path: "/portal/news/updates", priority: 0.6, lastmod: today },
     ...["qb", "rb", "wr", "te", "ol", "edge", "dl", "lb", "db", "k", "p"].map((pos) => ({ path: `/portal/${pos}`, priority: 0.55, lastmod: today })),
     { path: "/mocks", priority: 0.7, lastmod: today },
     { path: "/profile", priority: 0.6, lastmod: today },
@@ -452,6 +453,46 @@ for (const doc of allTeams) {
   }
   console.log(`✅ ${weeklyMockPages.length} Weekly Mock pages.`);
 
+  /* =========================
+     DRAFT RISERS — each class's latest list (/risers/{year}), dated to its
+     last Save; a class with no list yet is left out. Past editions
+     (/risers/{year}/{date}) are noindexed, like past Weekly Mock weeks.
+  ========================= */
+  const riserPages = [];
+  for (const [i, year] of ["2027", "2028", "2029"].entries()) {
+    const snap = await getDoc(doc(db, "risers", year)).catch(() => null);
+    const data = snap?.exists() ? snap.data() : null;
+    if (!(data?.players || []).length) continue;
+    const lastmod = data.updatedAt?.toDate?.()?.toLocaleDateString("en-CA", { timeZone: "America/New_York" }) || today;
+    riserPages.push({ path: `/risers/${year}`, priority: i ? 0.6 : 0.75, lastmod });
+  }
+  console.log(`✅ ${riserPages.length} Draft Risers pages.`);
+
+  /* =========================
+     PORTAL NEWS — /portal/news and its IN / OUT and position pages, like the
+     Risers: only once a board is published (portalNews/current has players),
+     dated to its last Save, and only the pages that have someone on them
+     (an empty position page is noindexed on the page, so it's left out here).
+  ========================= */
+  const portalNewsPages = [];
+  {
+    const snap = await getDoc(doc(db, ...PORTAL_NEWS_DOC)).catch(() => null);
+    const data = snap?.exists() ? snap.data() : null;
+    const entries = data?.entries || [];
+    if (entries.length) {
+      const lastmod = data.updatedAt?.toDate?.()?.toLocaleDateString("en-CA", { timeZone: "America/New_York" }) || today;
+      const sideOf = (e) => (e.status === "committed" ? "out" : "in");
+      const has = (pos, side) => entries.some((e) => (!pos || newsPosGroup(e.pos) === pos) && (!side || sideOf(e) === side));
+      for (const pos of ["", ...NEWS_POSITIONS]) {
+        for (const side of ["", "in", "out"]) {
+          if (!has(pos, side)) continue;
+          portalNewsPages.push({ path: newsPath(pos, side), priority: !pos ? (side ? 0.7 : 0.75) : side ? 0.55 : 0.6, lastmod });
+        }
+      }
+    }
+  }
+  console.log(`✅ ${portalNewsPages.length} Portal News pages.`);
+
   console.log("🔄 Fetching current staff from Firestore...");
   const staffDocs = await getCurrentStaff();
   const staffPages = [];
@@ -499,7 +540,7 @@ for (const doc of allTeams) {
     { path: `/portal/${slug}/needs`, priority: 0.45, lastmod: today },
     { path: `/portal/${slug}/targets`, priority: 0.5, lastmod: today },
   ]);
-  const allUrls = [...staticPages, ...communityBoardPages, ...teamPages, ...nflPages, ...portalSimPages, ...portalPages, ...(MAPS_RELEASED ? mapPages : []), ...weeklyMockPages, ...staffPages, ...playerPages, ...comparisonPages, ...newsPages, ...gamePages];
+  const allUrls = [...staticPages, ...communityBoardPages, ...teamPages, ...nflPages, ...portalSimPages, ...portalPages, ...(MAPS_RELEASED ? mapPages : []), ...weeklyMockPages, ...riserPages, ...portalNewsPages, ...staffPages, ...playerPages, ...comparisonPages, ...newsPages, ...gamePages];
   const chunks = [];
   
   for (let i = 0; i < allUrls.length; i += chunkSize) {

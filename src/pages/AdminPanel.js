@@ -30,6 +30,7 @@ import AdminPortalSimStats from "../components/AdminPortalSimStats";
 import AdminPortalTargets from "../components/AdminPortalTargets";
 import AdminPortalPages from "../components/AdminPortalPages";
 import AdminPortalManual from "../components/AdminPortalManual";
+import AdminPortalNews from "../components/AdminPortalNews";
 import AdminEligibility, { classChange } from "../components/AdminEligibility";
 import { activePortalSeason, currentDraftClass, classTag, firstClassFor } from "../utils/eligibility";
 import AdminSubPositions from "../components/AdminSubPositions";
@@ -45,6 +46,7 @@ import AdminMockDraft from "../components/AdminMockDraft";
 import AdminResearch from "../components/AdminResearch";
 import AdminProspectResearch from "../components/AdminProspectResearch";
 import AdminPhotos from "../components/AdminPhotos";
+import AdminRisers from "../components/AdminRisers";
 import AdminSideGraphics from "../components/AdminSideGraphics";
 import AdminProDayIcons from "../components/AdminProDayIcons";
 import AdminEvents from "../components/AdminEvents";
@@ -351,6 +353,8 @@ const PLAYER_GROUPS = [
       { key: "portal", label: "Portal Sync" },
       { key: "portalSim", label: "Portal Sim" },
       { key: "portalSimStats", label: "Portal Sim Stats" },
+      // WX Pages: the portal's editorial pages — Portal News (/portal/news, AdminPortalNews.jsx).
+      { key: "portalNews", label: "WX Pages" },
     ],
   },
   {
@@ -396,6 +400,7 @@ const CONTENT_SECTION_TABS = [
   { key: "branding", label: "Branding" },
   { key: "calendar", label: "Content Calendar" },
   { key: "photos", label: "Photos" },
+  { key: "risers", label: "Rising Page" },
   { key: "instagram", label: "Instagram" },
   { key: "instagramAnalytics", label: "Instagram Analytics" },
   { key: "x", label: "X Posts" },
@@ -445,6 +450,7 @@ function ContentSection({ initialTab }) {
       {tab === "branding" && <BrandingSection />}
       {tab === "calendar" && <ContentCalendarManager onOpenPost={(platform, what) => openIn(platform === "x" ? "x" : "instagram", what)} />}
       {tab === "photos" && <AdminPhotos />}
+      {tab === "risers" && <AdminRisers />}
       {tab === "instagram" && <AdminInstagram openPostId={opening?.tab === "instagram" ? opening.id : null} onOpenInX={(id) => openIn("x", { id })} />}
       {tab === "instagramAnalytics" && <AdminInstagramAnalytics />}
       {tab === "x" && <AdminX open={opening?.tab === "x" ? opening : null} />}
@@ -1589,6 +1595,8 @@ function PlayerDataSection() {
         <AdminPortalPages />
       ) : playerDataTab === "portalManual" ? (
         <AdminPortalManual allPlayers={allPlayers} />
+      ) : playerDataTab === "portalNews" ? (
+        <AdminPortalNews allPlayers={allPlayers} />
       ) : playerDataTab === "eligibility" ? (
         <AdminEligibility allPlayers={allPlayers} setAllPlayers={setAllPlayers} />
       ) : playerDataTab === "recruits" ? (

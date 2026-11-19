@@ -7,6 +7,7 @@ import Logo1 from "../assets/Logo1.png";
 import LoadingSpinner from "../components/LoadingSpinner";
 import MarginSidebars from "../components/MarginSidebars";
 import { loadWeeklyMockNews } from "../utils/weeklyMockNews";
+import { loadRiserNews } from "../utils/risers";
 import { isSiteUpdate } from "../utils/siteUpdates";
 
 const BLUE = "#0055a5";
@@ -30,17 +31,18 @@ export default function News() {
   useEffect(() => {
     const fetch = async () => {
       try {
-        const [newsSnap, articlesSnap, weeklyItems] = await Promise.all([
+        const [newsSnap, articlesSnap, weeklyItems, riserItems] = await Promise.all([
           getDocs(query(collection(db, "news"), where("active", "==", true), orderBy("publishedAt", "desc"))),
           getDocs(query(collection(db, "articles"), where("status", "==", "published"), orderBy("publishedAt", "desc"))),
           loadWeeklyMockNews(),
+          loadRiserNews(),
         ]);
 
         const newsItems = newsSnap.docs.map((d) => ({ id: d.id, type: "news", ...d.data() }));
         const articleItems = articlesSnap.docs.map((d) => ({ id: d.id, type: "article", ...d.data() }));
 
         // Reverse chronological — unchanged.
-        const combined = [...newsItems, ...articleItems, ...weeklyItems].sort((a, b) =>
+        const combined = [...newsItems, ...articleItems, ...weeklyItems, ...riserItems].sort((a, b) =>
           (b.publishedAt?.toMillis?.() || 0) - (a.publishedAt?.toMillis?.() || 0)
         );
 
@@ -139,6 +141,7 @@ export default function News() {
                         <div style={{ marginBottom: "10px" }}>
                           <span style={{ fontSize: "11px", fontWeight: 700, color: "#aaa" }}>{dayStr}</span>
                           {n.type === "weeklyMock" && <span style={{ marginLeft: "8px", fontSize: "10px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.08em" }}>Weekly Mock</span>}
+                          {n.type === "risers" && <span style={{ marginLeft: "8px", fontSize: "10px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.08em" }}>Draft Risers</span>}
                           {isSiteUpdate(n) && <span style={{ marginLeft: "8px", fontSize: "10px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.08em" }}>Site Update</span>}
                         </div>
                       )}

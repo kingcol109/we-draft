@@ -14,6 +14,10 @@ import { db } from "../firebase";
 import { fetchEspnSeason } from "../components/PlayerStatsCard";
 import { loadNflFollows } from "./nflFollows";
 import { ESPN_TEAM_IDS } from "./nflRoster";
+import { lastGameOf } from "./espnRecent";
+// Recent games (ESPN game logs) live in espnRecent.js — no Firestore, so
+// scripts can use them too; re-exported here for the pages that import them.
+export { recentGamesOf, lastGameOf, sumGames, gameScore, bestRecentLine, lastGameLine } from "./espnRecent";
 
 // site.web.api — site.api.espn.com fails CORS in the browser.
 const SITE = "https://site.web.api.espn.com/apis/site/v2/sports/football";
@@ -99,26 +103,13 @@ export const nflTeamSnapshot = (abbr) => (ESPN_TEAM_IDS[abbr] ? teamSnapshot("nf
 // his 2026 season line and his most recent game.
 export async function playerSnapshot(espnId) {
   if (!espnId) return null;
-  const [ath, season, log] = await Promise.all([
+  const [ath, season, lastGame] = await Promise.all([
     getJson(`${WEB}/${espnId}`),
     fetchEspnSeason(espnId).catch(() => null),
-    getJson(`${WEB}/${espnId}/gamelog`),
+    lastGameOf(espnId),
   ]);
   const team = ath?.athlete?.team;
   const teamSnap = team?.id ? await teamSnapshot("college-football", team.id) : null;
-  // Most recent game: the log's newest event and his line in it.
-  let lastGame = null;
-  if (log?.events) {
-    const ev = Object.values(log.events).sort((a, b) => new Date(b.gameDate) - new Date(a.gameDate))[0];
-    const row = (log.seasonTypes || []).flatMap((t) => (t.categories || []).flatMap((c) => c.events || [])).find((e) => e.eventId === ev?.id);
-    if (ev && row) {
-      lastGame = {
-        date: ev.gameDate, at: ev.atVs, opp: ev.opponent?.abbreviation || "", oppLogo: ev.opponent?.logo || "",
-        result: ev.gameResult, score: ev.score, line: (log.labels || []).map((l, i) => [l, row.stats?.[i]]),
-        groups: (log.categories || []).map((c) => [c.name, c.count]),
-      };
-    }
-  }
   return { team: teamSnap, season, lastGame, position: ath?.athlete?.position?.abbreviation || "" };
 }
 
@@ -135,31 +126,6 @@ export function seasonHeadline(pos, s) {
   if (["OL", "OT", "OG", "C", "IOL"].includes(p)) return [];
   if (["DB", "CB", "S", "FS", "SS"].includes(p)) return [["Tkl", n(def.TOT)], ["PBU", n(def.PD)], ["INT", n(ints.INT)]];
   return [["Tkl", n(def.TOT)], ["TFL", Number(def.TFL || 0).toLocaleString()], ["Sacks", Number(def.SACKS || 0).toLocaleString()]];
-}
-
-// A last-game line, short: "10 rec, 83 yds, 1 TD" — the nonzero headline
-// stats of the categories that matter for his position.
-export function lastGameLine(pos, g) {
-  if (!g) return "";
-  const get = (label, group) => {
-    let i = 0;
-    for (const [name, count] of g.groups) {
-      if (name === group) {
-        const at = g.line.slice(i, i + count).findIndex(([l]) => l === label);
-        return at >= 0 ? g.line[i + at][1] : null;
-      }
-      i += count;
-    }
-    return null;
-  };
-  const p = (pos || "").toUpperCase();
-  const bits = [];
-  const add = (v, unit) => { if (v != null && v !== "" && Number(String(v).replace(/,/g, "")) !== 0) bits.push(`${v} ${unit}`); };
-  if (p === "QB") { add(get("CMP", "passing") && `${get("CMP", "passing")}/${get("ATT", "passing")}`, "pass"); add(get("YDS", "passing"), "pass yds"); add(get("TD", "passing"), "TD"); add(get("INT", "passing"), "INT"); }
-  if (p === "RB" || p === "FB" || p === "QB") { add(get("YDS", "rushing"), "rush yds"); if (p !== "QB") add(get("TD", "rushing"), "rush TD"); }
-  if (p === "WR" || p === "TE" || p === "RB") { add(get("REC", "receiving"), "rec"); add(get("YDS", "receiving"), "rec yds"); add(get("TD", "receiving"), "rec TD"); }
-  if (!bits.length) { add(get("TOT", "tackles") ?? get("TOT", "defensive"), "tkl"); add(get("SACK", "tackles") ?? get("SACK", "defensive"), "sacks"); add(get("INT", "interceptions"), "INT"); add(get("PD", "interceptions") ?? get("PD", "defensive"), "PBU"); }
-  return bits.join(", ");
 }
 
 export const kickoff = (iso) => {

@@ -7,16 +7,16 @@
 // it) so the card has it when it turns over; the image is warmed too. resolvedHeadshots holds the finished lookups so a
 // card mounting after one has the photo on its first frame.
 import { useEffect, useState } from "react";
-import { doc as fsDoc, getDoc } from "firebase/firestore";
-import { db } from "../../firebase";
+import { loadPhotosDoc } from "../../utils/photoDocs";
 
 const headshots = new Map();
 const resolvedHeadshots = new Map();
 export function loadHeadshot(id) {
   if (!id) return Promise.resolve("");
   if (!headshots.has(id)) {
-    headshots.set(id, getDoc(fsDoc(db, "playerPhotos", id))
-      .then((snap) => (snap.exists() ? snap.data().headshot?.url || "" : ""))
+    // The same read as his pick graphic's placed shots (utils/photoDocs.js).
+    headshots.set(id, loadPhotosDoc(id)
+      .then((ph) => ph?.headshot?.url || "")
       .catch(() => "")
       .then((url) => {
         if (url) new Image().src = url;

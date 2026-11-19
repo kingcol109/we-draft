@@ -49,7 +49,9 @@ import {
 import { spotlightSlides, spotlightInput, spotlightCaption, spotlightImageUrls, scoutingReport, spotlightFrame, espnStats, editedStats, statsSeed, MAX_STAT_TILES, MAX_TRAITS } from "../utils/instagram/spotlight";
 import { fetchEspnCareer } from "./PlayerEspnStats";
 import { customInput, customSlides, customCaption, customImageUrls, customCutoutUrls, customPlayerIds, customTagSpots, layerBox, newLayer, blankSlide, LAYER_LABELS } from "../utils/instagram/custom";
-import { transferSlides, transferInput, transferCaption, transferImageUrls, transferFrame } from "../utils/instagram/transfer";
+import { transferSlides, transferInput, transferCaption, transferImageUrls, transferFrame, TRANSFER_DESIGNS, TRANSFER_STATS } from "../utils/instagram/transfer";
+import { firstPickAdjust } from "../utils/instagram/firstPick";
+import { STATS_SEASON, DEFAULT_STATS, statLabel, statValue, seasonKeys } from "../utils/risers";
 import { shortInput, shortFrame, shortEnd, shortImageUrls, shortDefaults, SHORT_TEXTS, SHORT_W, SHORT_H } from "../utils/instagram/short";
 import { igApi, uploadVideo, videoInfo } from "../utils/instagram/api";
 import { postToSite, siteTitle, siteShortTitle, siteSlug } from "../utils/instagram/sitePost";
@@ -1755,10 +1757,18 @@ function TransferMaker({ kind, setMsg, saved, onSaved }) {
   const [kicker, setKicker] = useState(st.kicker || "");
   const [headline, setHeadline] = useState(st.headline || "");
   const [note, setNote] = useState(st.note || "");
+  // The transfer cover's design (Mock 1 classic / Mock 2 welcome), and his season on slide 2.
+  const [design, setDesign] = useState(st.design || "welcome");
+  const [showStats, setShowStats] = useState(st.showStats !== false);
   const [slides, setSlides] = useState([]);
   // The frame to edit his highlight clip under (a transparent PNG to download).
   const [frame, setFrame] = useState("");
-  const choosePhoto = (url) => { setPhotoUrl(url); setAdjust(NO_ADJUST); };
+  // A shot placed for First Pick starts where it was placed (and stands centered).
+  const choosePhoto = (url, shot = null) => {
+    setPhotoUrl(url);
+    setAdjust(shot?.firstPick ? { ...NO_ADJUST, ...firstPickAdjust(shot.firstPick) } : NO_ADJUST);
+    if (shot?.firstPick) setFocus("center");
+  };
 
   useEffect(() => {
     getDocs(collection(db, "players")).then((snap) => setPlayers(snap.docs.map((d) => ({ id: d.id, ...d.data() }))
@@ -1777,22 +1787,31 @@ function TransferMaker({ kind, setMsg, saved, onSaved }) {
     setSearch("");
     setMsg("");
     try {
-      const [photoSnap, evalSnap, classSnap] = await Promise.all([
+      const [photoSnap, evalSnap, classSnap, cfbdSnap] = await Promise.all([
         getDoc(doc(db, "playerPhotos", p.id)),
         getDocs(collection(db, "players", p.id, "evaluations")),
         getSiteSnapshot(`class_${p.Eligible}_${p.Position}`),
+        getDocs(query(collection(db, "cfbdPlayers"), where("wedraftPlayerId", "==", p.id))).catch(() => null),
       ]);
       const ph = photoSnap.exists() ? photoSnap.data() : {};
-      const action = ph.action || [];
+      // Placed shots first: they land where they were placed.
+      const action = [...(ph.action || [])].sort((a, b) => (b?.firstPick ? 1 : 0) - (a?.firstPick ? 1 : 0));
+      // His CFBD season line (a verified link first): his position's stats, then whatever else he has.
+      const lines = (cfbdSnap?.docs || []).map((d) => d.data()).filter((d) => d.mappingStatus !== "rejected");
+      const season = (lines.find((d) => d.seasons?.[STATS_SEASON] && d.mappingStatus === "verified") || lines.find((d) => d.seasons?.[STATS_SEASON]))?.seasons?.[STATS_SEASON] || null;
+      const has = (k) => statValue(season, k) !== "";
+      const extra = seasonKeys(season).flatMap(([c, ks]) => ks.map((k) => `${c}.${k}`));
+      const keys = [...new Set([...(DEFAULT_STATS[p.Position] || []).filter(has), ...extra.filter(has)])].slice(0, TRANSFER_STATS);
+      const stats = keys.map((key) => ({ key, label: statLabel(key), value: statValue(season, key) }));
       setPlayer(p);
-      setData({ action, report: scoutingReport({ player: p, evaluations: evalSnap.docs.map((d) => d.data()), classSnap, teamNames: NFL_TEAMS }) });
+      setData({ action, stats, report: scoutingReport({ player: p, evaluations: evalSnap.docs.map((d) => d.data()), classSnap, teamNames: NFL_TEAMS }) });
       if (restore) {
         setPhotoUrl(restore.photoUrl ?? "");
         setFocus(restore.focus || "center");
         setAdjust({ ...NO_ADJUST, ...restore.adjust });
       } else {
-        choosePhoto(action[0]?.url || "");
         setFocus(focusFor(action[0]));
+        choosePhoto(action[0]?.url || "", action[0]);
         // Where his data says he's coming from and going to; both can be changed.
         // A player already resolved to a new school has it as School, the old as PriorSchool.
         const resolved = !p.InPortal && !!p.PriorSchool;
@@ -1812,9 +1831,12 @@ function TransferMaker({ kind, setMsg, saved, onSaved }) {
 
   const schoolDoc = (name) => (schools || []).find((s) => s.School === name) || {};
   const input = useMemo(() => (player && data && schools ? {
-    ...transferInput({ kind, player, from: schoolDoc(fromName), fromName, to: schoolDoc(toName), toName, photo: photoUrl ? { url: photoUrl } : null, report: data.report, carousel, kicker, headline, note, brandLogo: WdLogo, badgeLogo: WdBadge }),
+    ...transferInput({
+      kind, design, player, from: schoolDoc(fromName), fromName, to: schoolDoc(toName), toName, photo: photoUrl ? { url: photoUrl } : null, report: data.report, carousel, kicker, headline, note, brandLogo: WdLogo, badgeLogo: WdBadge,
+      stats: showStats ? data.stats : [], statsTitle: `${STATS_SEASON} season${fromName ? ` at ${fromName}` : ""}`,
+    }),
     focus, adjust,
-  } : null), [kind, player, data, schools, fromName, toName, photoUrl, carousel, kicker, headline, note, focus, adjust]); // eslint-disable-line react-hooks/exhaustive-deps
+  } : null), [kind, design, showStats, player, data, schools, fromName, toName, photoUrl, carousel, kicker, headline, note, focus, adjust]); // eslint-disable-line react-hooks/exhaustive-deps
   const cap = useCaption(saved, useMemo(() => (input ? transferCaption(input) : ""), [input]));
 
   useEffect(() => {
@@ -1875,18 +1897,34 @@ function TransferMaker({ kind, setMsg, saved, onSaved }) {
                 {[[false, "Single image"], [true, `Carousel (${isTransfer ? 2 : 3} slides)`]].map(([v, t]) => <button key={t} onClick={() => setCarousel(v)} style={{ ...btn(carousel === v), padding: "5px 12px" }}>{t}</button>)}
               </div>
             </div>
+            {isTransfer && (
+              <div>
+                <div style={label}>Design</div>
+                <div style={{ display: "flex", gap: "4px" }}>
+                  {TRANSFER_DESIGNS.map(([v, t]) => <button key={v} onClick={() => setDesign(v)} style={{ ...btn(design === v), padding: "5px 12px" }}>{t}</button>)}
+                </div>
+              </div>
+            )}
+            {carousel && (
+              <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: 800, color: "#33415a" }}>
+                <input type="checkbox" checked={showStats} onChange={(e) => setShowStats(e.target.checked)} />
+                His {STATS_SEASON} stats on slide 2{data.stats.length ? `: ${data.stats.map((x) => `${x.value} ${x.label}`).join(" · ")}` : " (none on file)"}
+              </label>
+            )}
             <div>
               <div style={label}>Photo · click to use</div>
               <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
                 {data.action.map((a, i) => (
-                  <button key={a.url} onClick={() => { choosePhoto(a.url); setFocus(focusFor(a)); }} title={`Action shot ${i + 1}${a.orientation ? ` · facing ${a.orientation}` : ""}`}
-                    style={{ border: `2px solid ${photoUrl === a.url ? BLUE : "#e3e8ef"}`, borderRadius: "8px", background: "#fff", padding: "2px", cursor: "pointer", width: "60px", height: "76px" }}>
+                  <button key={a.url} onClick={() => { setFocus(focusFor(a)); choosePhoto(a.url, a); }} title={`Action shot ${i + 1}${a.orientation ? ` · facing ${a.orientation}` : ""}${a.firstPick ? " · placed (First Pick)" : ""}`}
+                    style={{ position: "relative", border: `2px solid ${photoUrl === a.url ? BLUE : "#e3e8ef"}`, borderRadius: "8px", background: "#fff", padding: "2px", cursor: "pointer", width: "60px", height: "76px" }}>
                     <img src={sanitizeImgur(a.url) || a.url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "5px" }} />
+                    {a.firstPick && <span style={{ position: "absolute", left: 2, right: 2, bottom: 2, background: "#15803d", color: "#fff", fontSize: "8px", fontWeight: 900, letterSpacing: "0.04em", borderRadius: "0 0 5px 5px", padding: "1px 0" }}>PLACED</span>}
                   </button>
                 ))}
                 <button onClick={() => choosePhoto("")} style={{ border: `2px solid ${!photoUrl ? BLUE : "#e3e8ef"}`, borderRadius: "8px", background: "#fff", cursor: "pointer", width: "60px", height: "76px", fontSize: "10px", fontWeight: 900, color: "#5b6b84" }}>NO PHOTO</button>
               </div>
               <input value={photoUrl} onChange={(e) => choosePhoto(e.target.value)} placeholder="Or any image link…" style={{ ...field, marginTop: "6px" }} />
+              {data.action.some((a) => a.firstPick) && <div style={{ fontSize: "11px", fontWeight: 700, color: "#8a97ab", marginTop: "3px" }}>PLACED shots land where they were set for First Pick (Content → Photos) — the line hides his lower body.</div>}
             </div>
             {photoUrl && (
               <>
@@ -1895,7 +1933,7 @@ function TransferMaker({ kind, setMsg, saved, onSaved }) {
               </>
             )}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
-              <div><div style={label}>{isTransfer ? "Banner" : "Tape"}</div><input value={kicker} onChange={(e) => setKicker(e.target.value)} placeholder={isTransfer ? "TRANSFER" : "TRANSFER PORTAL"} style={field} /></div>
+              <div><div style={label}>{isTransfer ? (design === "classic" ? "Banner" : "Tag") : "Tape"}</div><input value={kicker} onChange={(e) => setKicker(e.target.value)} placeholder={isTransfer ? (design === "classic" ? "TRANSFER" : "COMMITTED") : "TRANSFER PORTAL"} style={field} /></div>
               {!isTransfer && <div><div style={label}>Headline</div><input value={headline} onChange={(e) => setHeadline(e.target.value)} placeholder="IN THE PORTAL" style={field} /></div>}
             </div>
             <div><div style={label}>Note under his name (optional)</div><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="2 YEARS OF ELIGIBILITY" style={field} /></div>
@@ -1911,7 +1949,7 @@ function TransferMaker({ kind, setMsg, saved, onSaved }) {
             )}
             <SaveBar type={kind} defaultName={`${isTransfer ? "Transfer" : "Portal"} · ${player.First} ${player.Last}`} caption={cap.caption} svgs={svgs} post={post} setPost={setPost} onSaved={onSaved} setMsg={setMsg}
               playerIds={[player.id]} subject={{ kind: "player", playerId: player.id }} hold={hold}
-              stateNow={() => ({ playerId: player.id, fromName, toName, carousel, photoUrl, focus, adjust, kicker, headline, note })} />
+              stateNow={() => ({ playerId: player.id, fromName, toName, carousel, photoUrl, focus, adjust, kicker, headline, note, design, showStats })} />
             <CaptionBox c={cap} />
           </>
         )}

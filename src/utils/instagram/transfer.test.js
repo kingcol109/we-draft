@@ -21,7 +21,8 @@ test("entered the portal: one image or a three-slide carousel", () => {
   const one = transferSlides(transferInput({ kind: "portal", player, from: auburn, report }), env);
   expect(one.map((s) => s.name)).toEqual(["portal"]);
   one.forEach((s) => valid(s.svg));
-  expect(one[0].svg).toContain("DESTINATION");
+  expect(one[0].svg).toContain("TO BE DETERMINED");
+  expect(one[0].svg).not.toContain("DESTINATION");
   expect(one[0].svg).not.toContain("LEAVING");
   expect(one[0].svg).toContain("AUBURN");
   expect(one[0].svg).toContain("ATKINS");
@@ -40,8 +41,46 @@ test("entered the portal: one image or a three-slide carousel", () => {
   expect(many[2].svg).toContain("ATKINS GO?");
 });
 
-test("transferred: the new school's colors, the old one struck, one image or two slides", () => {
-  const one = transferSlides(transferInput({ kind: "transfer", player, from: auburn, to: lsu, report }), env);
+test("transferred, Mock 2 (the default): the new school's colors, old school → new", () => {
+  const one = transferSlides(transferInput({ kind: "transfer", player, from: auburn, to: { ...lsu, Mascot: "Tigers" }, report }), env);
+  expect(one.map((s) => s.name)).toEqual(["transfer"]);
+  valid(one[0].svg);
+  expect(one[0].svg).toContain("COMMITTED");
+  expect(one[0].svg).not.toContain("WELCOME");
+  expect(one[0].svg).toContain(">LSU<");
+  expect(one[0].svg).toContain(">TIGERS<");
+  expect(one[0].svg).toContain(">ATKINS<");
+  expect(one[0].svg).toContain(">AUBURN<");
+  expect(one[0].svg).not.toContain("CLASS");
+  expect(one[0].svg).toContain(lsu.Color1);
+});
+
+test("his season leads the second slide, on both posts", () => {
+  const stats = [{ label: "Tackles", value: "88" }, { label: "TFL", value: "11.5" }, { label: "Sacks", value: "" }];
+  const t = transferSlides(transferInput({ kind: "transfer", player, from: auburn, to: lsu, report, carousel: true, stats, statsTitle: "2026 season at Auburn" }), env)[1].svg;
+  valid(t);
+  expect(t).toContain("2026 SEASON AT AUBURN");
+  expect(t).toContain(">88<");
+  expect(t).toContain("TFL");
+  // An empty stat isn't shown.
+  expect(t).not.toContain("SACKS");
+  const p = transferSlides(transferInput({ kind: "portal", player, from: auburn, report, carousel: true, stats }), env)[1].svg;
+  expect(p).toContain(">88<");
+  // No stats: no band.
+  expect(transferSlides(transferInput({ kind: "portal", player, from: auburn, report, carousel: true }), env)[1].svg).not.toContain("THIS SEASON");
+});
+
+test("a shot placed for First Pick lands where it was placed", () => {
+  const photoEnv = { ...env, images: { shot: { href: "data:image/png;base64,AA", w: 100, h: 200 } } };
+  const svg = transferSlides(transferInput({ kind: "transfer", player, from: auburn, to: lsu, photo: { url: "shot", firstPick: { x: 12, y: -30, scale: 1.2, rotate: 5 } } }), photoEnv)[0].svg;
+  expect(svg).toContain("rotate(5 540 450)");
+  expect(svg).toContain("scale(1.2)");
+  // The hard line at the split, no fade.
+  expect(svg).toContain('<rect y="855" width="1080" height="11"');
+});
+
+test("transferred, Mock 1 (classic): the new school's colors, the old one struck, one image or two slides", () => {
+  const one = transferSlides(transferInput({ kind: "transfer", design: "classic", player, from: auburn, to: lsu, report }), env);
   expect(one.map((s) => s.name)).toEqual(["transfer"]);
   valid(one[0].svg);
   // The logos say where from and where to; the words say who and what.
@@ -51,7 +90,7 @@ test("transferred: the new school's colors, the old one struck, one image or two
   // The page is the new school's color.
   expect(one[0].svg).toContain(lsu.Color1);
 
-  const many = transferSlides(transferInput({ kind: "transfer", player, from: auburn, to: lsu, report, carousel: true }), env);
+  const many = transferSlides(transferInput({ kind: "transfer", design: "classic", player, from: auburn, to: lsu, report, carousel: true }), env);
   expect(many.map((s) => s.name)).toEqual(["transfer", "what-they-get"]);
   many.forEach((s) => valid(s.svg));
   expect(many[1].svg).toContain("WHAT LSU IS GETTING");
@@ -61,10 +100,10 @@ test("on both covers, nothing is drawn over the player and no logo is faded behi
   const photoEnv = { ...env, images: { shot: { href: "data:image/png;base64,AA", w: 100, h: 200 }, "lsu-dark": { href: "data:image/png;base64,BB", w: 10, h: 10 }, "auburn-dark": { href: "data:image/png;base64,CC", w: 10, h: 10 } } };
   const textAfterPhoto = (svg) => svg.slice(svg.indexOf('href="data:image/png;base64,AA"')).match(/<text [^>]*y="([\d.]+)"/g).map((m) => Number(m.match(/y="([\d.]+)"/)[1]));
   const portal = transferSlides(transferInput({ kind: "portal", player, from: auburn, photo: { url: "shot" } }), photoEnv)[0].svg;
-  const transfer = transferSlides(transferInput({ kind: "transfer", player, from: auburn, to: lsu, photo: { url: "shot" } }), photoEnv)[0].svg;
-  // Whatever's drawn after him sits below where the photo ends.
-  textAfterPhoto(portal).forEach((y) => expect(y).toBeGreaterThan(936));
-  textAfterPhoto(transfer).forEach((y) => expect(y).toBeGreaterThan(936));
+  const transfer = transferSlides(transferInput({ kind: "transfer", design: "classic", player, from: auburn, to: lsu, photo: { url: "shot" } }), photoEnv)[0].svg;
+  const welcome = transferSlides(transferInput({ kind: "transfer", player, from: auburn, to: lsu, photo: { url: "shot" } }), photoEnv)[0].svg;
+  // Whatever's drawn after him sits below the split, where the photo ends.
+  [portal, transfer, welcome].forEach((svg) => textAfterPhoto(svg).forEach((y) => expect(y).toBeGreaterThan(860)));
   expect(portal).not.toContain('stroke-opacity="0.7"');
   // No logo drawn see-through.
   expect(transfer).not.toMatch(/<image[^>]*opacity=/);
@@ -72,7 +111,7 @@ test("on both covers, nothing is drawn over the player and no logo is faded behi
 
 test("the two posts don't share a design", () => {
   const a = transferSlides(transferInput({ kind: "portal", player, from: auburn, to: lsu }), env)[0].svg;
-  const b = transferSlides(transferInput({ kind: "transfer", player, from: auburn, to: lsu }), env)[0].svg;
+  const b = transferSlides(transferInput({ kind: "transfer", design: "classic", player, from: auburn, to: lsu }), env)[0].svg;
   expect(a).toContain("<ellipse");
   expect(b).not.toContain("<ellipse");
 });
@@ -113,6 +152,6 @@ test("the highlight frames: a clear window in each post's look", () => {
     expect(svg).toContain("ATKINS");
     expect(svg).toContain("GRADE HIM ON WE-DRAFT.COM");
   });
-  expect(transferFrame(transferInput({ kind: "portal", player, from: auburn }), env)).toContain("DESTINATION");
+  expect(transferFrame(transferInput({ kind: "portal", player, from: auburn }), env)).toContain("TO BE DETERMINED");
   expect(transferFrame(transferInput({ kind: "transfer", player, from: auburn, to: lsu }), env)).toContain("AUBURN TO LSU");
 });

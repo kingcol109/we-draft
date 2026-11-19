@@ -56,6 +56,18 @@ const lightColor = (c) => !!hex(c) && (contrastRatio("#ffffff", hex(c)) ?? 21) <
 
 // A saved placement → { x, y, scale, rotate (degrees, + clockwise) } (missing parts as laid out).
 export const FIRST_PICK_ROTATE = 45;
+
+// The shot a pick's graphic uses this week: one of his placed shots, the
+// same one all week (seeded by the week, team and pick — the server and the
+// local preview land on the same), maybe another the next. shots: his
+// placed shots, in their playerPhotos order.
+export function lockedShot(shots, weekId, team, overall) {
+  if (!shots?.length) return null;
+  const key = `${weekId || ""}|${team || ""}|${overall || ""}`;
+  let h = 2166136261;
+  for (let i = 0; i < key.length; i++) h = Math.imul(h ^ key.charCodeAt(i), 16777619);
+  return shots[(h >>> 0) % shots.length];
+}
 export const firstPickAdjust = (fp) => ({
   x: Number(fp?.x) || 0, y: Number(fp?.y) || 0, scale: Number(fp?.scale) || 1,
   rotate: Math.max(-FIRST_PICK_ROTATE, Math.min(FIRST_PICK_ROTATE, Number(fp?.rotate) || 0)),

@@ -23,6 +23,8 @@ import { db } from "../firebase";
 import { cfbdPlayerFor, setLivePlayerFollow } from "../utils/liveFollowSync";
 import { getSiteSnapshot, fetchAds, fetchCfbAds, fetchAdTeamLogos } from "../utils/siteSnapshots";
 import { loadWeeklyMockSummary, weeklyMockPlayerTitle, weeklyYearHref, hasTeamPages, WEEKLY_YEARS } from "../utils/weeklyMockNews";
+import { riserNewsItem } from "../utils/risers";
+import { portalNewsItem } from "../utils/portalNews";
 import { NflTeamPicker, useMarginAdFit } from "../components/MarginAds";
 import AdBanner, { MobileAdCard, MOBILE_AD_HEIGHT } from "../components/AdBanner";
 import { takePlayerBySlug, takeSchoolByName } from "../utils/playerPrefetch";
@@ -39,6 +41,7 @@ import PlayerEspnStats from "../components/PlayerEspnStats";
 // "Playing now" + Follow Live while the player's team is on the field.
 import PlayerLiveCard, { LivePill, usePlayerLiveGame } from "../components/PlayerLiveCard";
 import SimAdCard from "../components/draftSim/SimAdCard";
+import RisersTop5 from "../components/RisersTop5";
 import { Helmet } from "react-helmet-async";
 import ShareTextButton from "../components/ShareTextButton";
 import PlayerEvalGraphic from "../components/PlayerEvalGraphic";
@@ -2378,12 +2381,6 @@ export default function PlayerProfile() {
   const positionRank = preview ? 1 : positionRankLive;
   const classSize = preview ? (preview.classOf || classSizeLive || 1) : classSizeLive;
 
-  // ── Top 5 Trending sidebar — site-wide spotlight, same on every player
-  // page. Order is curated by drag-and-drop in the Admin Panel's Active
-  // Trends list (trends/{slug}.Order); not tied to whichever player is
-  // currently being viewed, so this only needs to fetch once. ──
-  const [trendingTop5, setTrendingTop5] = useState([]);
-  const [trendingLoaded, setTrendingLoaded] = useState(false);
 
   // ── Margin ad placement + size, measured off the content grid's real
   // gutters (shared with MarginAds.js — see useMarginAdFit). The grid has
@@ -2726,9 +2723,29 @@ export default function PlayerProfile() {
     });
     return () => { live = false; };
   }, [draftedBy, player?.id, player?.Last]);
-  // In The News: everything about him (articles, news, the weekly mocks)
-  // newest first, then his school's, newest first.
-  const newsItems = [...weeklyMockItems, ...playerNews].sort((a, b) =>
+  // His class's Draft Risers board (/risers/{year}), when he's on it — an
+  // In The News item like the weekly mocks: "2027 Draft Risers: Moore On
+  // Fire", dated the board's last save, linking to the board.
+  const [riserItems, setRiserItems] = useState([]);
+  useEffect(() => {
+    let live = true;
+    setRiserItems([]);
+    if (player?.id && player?.Eligible) riserNewsItem(player).then((it) => live && it && setRiserItems([it])).catch(() => {});
+    return () => { live = false; };
+  }, [player?.id, player?.Eligible, player?.Last]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Portal News (/portal/news, utils/portalNews.js), when he's on it — the
+  // same kind of item: "Top Transfer Portal Moves: Heintschel to Florida
+  // State", linking to his position's list (/portal/news/qb).
+  const [portalItems, setPortalItems] = useState([]);
+  useEffect(() => {
+    let live = true;
+    setPortalItems([]);
+    if (player?.id) portalNewsItem(player).then((it) => live && it && setPortalItems([it])).catch(() => {});
+    return () => { live = false; };
+  }, [player?.id, player?.Last]); // eslint-disable-line react-hooks/exhaustive-deps
+  // In The News: everything about him (articles, news, the weekly mocks,
+  // the risers board, Portal News) newest first, then his school's, newest first.
+  const newsItems = [...weeklyMockItems, ...riserItems, ...portalItems, ...playerNews].sort((a, b) =>
     ((a._priority || 1) - (b._priority || 1)) || (newsMs(b.publishedAt) - newsMs(a.publishedAt)));
 
   // ── Videos attached to this player's ID (Google Sheet "Videos" tab synced
@@ -3054,30 +3071,6 @@ useEffect(() => {
     fetch();
   }, [player]);
 
-  // ── Top 5 Trending sidebar data — same list on every player page, so this
-  // fetches once rather than re-running per player. where(Shown == true)
-  // (a single-field filter, no composite index needed) so only the shown
-  // handful is read, not the whole trends collection; the Order sort stays
-  // client-side. ──
-  useEffect(() => {
-    const fetchTrending = async () => {
-      try {
-        const snap = await getDocs(query(collection(db, "trends"), where("Shown", "==", true)));
-        const shown = snap.docs
-          .map((d) => ({ slug: d.id, ...d.data() }))
-          .filter((t) => t.Shown === true)
-          .sort((a, b) => (a.Order ?? 0) - (b.Order ?? 0))
-          .slice(0, 5);
-        setTrendingTop5(shown);
-      } catch (e) {
-        console.error("Failed to load trending players:", e);
-        setTrendingTop5([]);
-      } finally {
-        setTrendingLoaded(true);
-      }
-    };
-    fetchTrending();
-  }, []);
 
   useEffect(() => {
     const fetch = async () => {
@@ -4149,81 +4142,10 @@ useEffect(() => {
     </details>
   );
 
-  // ── Top 5 Trending sidebar — same team-colored chip pattern as
-  // PlayersMentionedList.js (whole chip fills solid on hover, name flips
-  // white, chevron slides in, "logo" grows
-  // dramatically from center), except the fill is the trend's own color
-  // (Up/Breakout/On Fire — see TREND_STYLE), not a school color, and the
-  // logo box holds the trend's own icon (▲/⚡/🔥) rather than a team logo —
-  // there's no real logo to show for a trend, so the icon just stands in
-  // for one, on the left same as everywhere else this chip shape is used.
-  // The subtitle is the trend's Notes blurb shown immediately, not hidden
-  // behind a hover reveal like this row used to do. The logo box's own
-  // un-hover timing (a beat of delay, then a fade, so it reappears as the
-  // icon finishes shrinking back down rather than snapping back under it)
-  // is copied verbatim from PlayersMentionedList.js's own tuning. ──
-  const TrendingListContent = (
-    <div style={{ display: "flex", flexDirection: "column", gap: "8px", padding: "10px" }}>
-      {trendingTop5.map((t) => {
-        const style = TREND_STYLE[(t.Trend || "").toString().trim().toLowerCase()];
-        if (!style) return null;
-        const isSelf = t.slug === player.Slug;
-        const notesList = (t.Notes || "").toString().split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
-        // iconImg (Breakout/On Fire) renders as a real image now; Up still
-        // falls back to its ▲ text glyph.
-        const iconNode = style.iconImg ? (
-          <img src={style.iconImg} alt={style.label} style={{ width: "22px", height: "22px", objectFit: "contain", display: "block" }} />
-        ) : style.icon;
-
-        const rowContent = (
-          <>
-            <div className="wd-trend2-logobox" title={style.label}>
-              {/* iconClass (On Fire only) is nested inside, not applied
-                  directly to wd-trend2-logo-icon — that element already
-                  carries the hover-triggered grow transform, and the
-                  flicker keyframe below also animates transform (jitter/
-                  scale). Two things driving the same property on one
-                  element fight; nesting them keeps the flicker running
-                  on its own inner element while the outer one still grows
-                  independently on hover. */}
-              <span className="wd-trend2-logo-icon">
-                {style.iconClass ? <span className={style.iconClass}>{iconNode}</span> : iconNode}
-              </span>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }}>
-              <span className="wd-trend2-name">
-                <span>{t.First}</span>
-                <span>{t.Last}</span>
-              </span>
-              <span className="wd-trend2-sub">
-                {notesList.length > 0 ? notesList.join(" · ") : ""}
-              </span>
-            </div>
-            <span className="wd-trend2-chevron">›</span>
-          </>
-        );
-
-        const chipClassName = "wd-trend2-chip" + (isSelf ? " wd-trend2-chip-self" : "") + " " + style.glowClass;
-        const chipStyle = { "--c1": style.badgeBg, "--c2": style.badgeBorder };
-
-        return isSelf ? (
-          <div key={t.slug} className={chipClassName} style={chipStyle}>{rowContent}</div>
-        ) : (
-          <Link key={t.slug} to={`/player/${t.slug}`} className={chipClassName} style={chipStyle}>
-            {rowContent}
-          </Link>
-        );
-      })}
-    </div>
-  );
-
-  const showTrendingSidebar = trendingLoaded && trendingTop5.length > 0;
-
-  const TrendingSidebarCard = showTrendingSidebar ? (
-    <SidebarCard title="🔥 Trending" color1={SITE_BLUE} color2={SITE_GOLD}>
-      {TrendingListContent}
-    </SidebarCard>
-  ) : null;
+  // ── Sidebar: his class's Draft Risers, the top 5 (components/
+  // RisersTop5.jsx) — where the site-wide Trending list used to be. His own
+  // trend tag (Up / Breakout / On Fire) still shows in the header. ──
+  const TrendingSidebarCard = <RisersTop5 player={player} />;
 
   // ── Videos sidebar — only rendered at all when the player has at least one
   // attached video; each row shows that video's per-slug title/thumb as a
@@ -4886,7 +4808,8 @@ useEffect(() => {
           0%, 100% { box-shadow: 0 0 6px 1px rgba(143,216,255,0.45); }
           50%      { box-shadow: 0 0 12px 3px rgba(143,216,255,0.85); }
         }
-        .wd-breakout-tag { animation: wdBreakoutTagGlow 2.4s ease-in-out infinite; }
+        /* Breakout: no animation (no glow pulse, no icon twitch) — a still tag. */
+        .wd-breakout-tag { box-shadow: 0 0 8px 2px rgba(143,216,255,0.55); }
 
         @keyframes wdTrendUpTagGlow {
           0%, 100% { box-shadow: 0 0 6px 1px rgba(74,222,128,0.45); }
@@ -4920,7 +4843,7 @@ useEffect(() => {
           72%  { transform: scale(0.96) rotate(5deg); filter: drop-shadow(0 0 3px rgba(143,216,255,0.7)); }
           100% { transform: scale(1) rotate(0deg); filter: drop-shadow(0 0 3px rgba(143,216,255,0.8)); }
         }
-        .wd-breakout-icon { display:inline-block; animation: wdBreakoutIconTwitch 0.7s steps(1, jump-end) infinite; }
+        .wd-breakout-icon { display:inline-block; filter: drop-shadow(0 0 3px rgba(143,216,255,0.8)); }
 
         @keyframes wdOnFireTagGlow {
           0%   { box-shadow: 0 0 6px 1px rgba(255,0,0,0.5), 0 0 16px 4px rgba(255,0,0,0.25); }
@@ -4969,7 +4892,7 @@ useEffect(() => {
           0%, 100% { box-shadow: 0 0 0 1px rgba(143,216,255,0.18), 0 0 6px 2px rgba(143,216,255,0.18); }
           50%      { box-shadow: 0 0 0 1px rgba(143,216,255,0.32), 0 0 10px 3px rgba(143,216,255,0.35); }
         }
-        .wd-trend2-glow-breakout { animation: wdTrend2GlowBreakout 3.2s ease-in-out infinite; }
+        .wd-trend2-glow-breakout { animation: none; }
         @keyframes wdTrend2GlowOnFire {
           0%   { box-shadow: 0 0 6px 1px rgba(255,0,0,0.45), 0 0 14px 3px rgba(255,0,0,0.22); }
           20%  { box-shadow: 0 0 9px 2px rgba(255,0,0,0.55), 0 0 18px 5px rgba(255,0,0,0.3); }

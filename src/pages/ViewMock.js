@@ -14,6 +14,11 @@
 // main class's). Each class's current week lives at /mocks/{year}
 // (WeeklyYearPage, below — its /view URL goes there); a past week's stays
 // up at /view but is noindexed and points to the current one.
+// On the main class's current week (/mocks/2027), every first-round pick
+// whose player has a placed action shot gets the card layout (CardPickRow):
+// his graphic on the left (FirstPickGraphic.jsx — a team's second first-
+// rounder gets its own, by pick number), the pick on the right. Every other
+// pick keeps the plain row.
 import { Fragment, useEffect, useState } from "react";
 import { useParams, useNavigate, Link, Navigate } from "react-router-dom";
 import { doc, getDoc, getDocs, collection, query, where, documentId } from "firebase/firestore";
@@ -35,6 +40,9 @@ import {
   ArticleHero, WeeklyByline, MakeYourOwnBanner, Breadcrumbs, breadcrumbLd, SITE_PUBLISHER, TeamMocksRail, WeeklyYearSwitch, TradeCard, tradeChip,
 } from "../components/MockDraftKit";
 import WdOutline from "../assets/Logo2.png";
+import { useFirstPickGraphic } from "../components/FirstPickGraphic";
+import { FlipCard, CardBack, FLIP_CSS, teamTheme, loadScoutBacks } from "../components/ScoutCard";
+import { STATS_SEASON } from "../utils/risers";
 
 // Phones: the Homage card goes after this pick of the round.
 const PHONE_AD_AFTER = 5;
@@ -64,6 +72,8 @@ export default function ViewMock({ mockId: shownId = "", yearPage = "" }) {
   const [currentWeekly, setCurrentWeekly] = useState(undefined);
   // When that week was published — the date its team pages and the sitemap use.
   const [currentPublishedAt, setCurrentPublishedAt] = useState(null);
+  // …and its week's id (weeklyMocks/{id}) — the cards' graphics lock to it.
+  const [currentWeekId, setCurrentWeekId] = useState("");
   // Which classes have a published Weekly Mock, for the switch: { [year]: bool }.
   const [classes, setClasses] = useState(null);
   useEffect(() => {
@@ -75,7 +85,7 @@ export default function ViewMock({ mockId: shownId = "", yearPage = "" }) {
   useEffect(() => {
     if (loading) return;
     if (!weeklyClass) { setCurrentWeekly(null); return; }
-    loadWeeklyMockSummary(weeklyClass).then((s) => { setCurrentPublishedAt(s?.publishedAt || null); setCurrentWeekly(s?.mockId || null); });
+    loadWeeklyMockSummary(weeklyClass).then((s) => { setCurrentPublishedAt(s?.publishedAt || null); setCurrentWeekId(s?.weekId || ""); setCurrentWeekly(s?.mockId || null); });
   }, [loading, weeklyClass]);
 
   useEffect(() => {
@@ -102,6 +112,11 @@ export default function ViewMock({ mockId: shownId = "", yearPage = "" }) {
   // Content → Photos): { [playerId]: url }, 30 ids a query. Community mocks
   // don't show them.
   const [headshots, setHeadshots] = useState({});
+  // …and which of them have an action shot placed for the First Pick graphic
+  // (the same read): { [playerId]: true } — null until it's in.
+  const [graphicIds, setGraphicIds] = useState(null);
+  // …their ESPN ids (the cards' season lines): { [playerId]: id }.
+  const [espnIds, setEspnIds] = useState({});
   useEffect(() => {
     if (!weeklyClass || !mock?.picks) return undefined;
     const ids = [...new Set(Object.values(mock.picks).map((p) => p.selection?.id).filter(Boolean))];
@@ -112,11 +127,33 @@ export default function ViewMock({ mockId: shownId = "", yearPage = "" }) {
     Promise.all(chunks.map((c) => getDocs(query(collection(db, "playerPhotos"), where(documentId(), "in", c))).catch(() => null))).then((snaps) => {
       if (!live) return;
       const map = {};
-      snaps.forEach((snap) => snap?.docs.forEach((d) => { const url = d.data().headshot?.url; if (url) map[d.id] = url; }));
+      const graphics = {};
+      const espn = {};
+      snaps.forEach((snap) => snap?.docs.forEach((d) => {
+        const ph = d.data();
+        if (ph.headshot?.url) map[d.id] = ph.headshot.url;
+        if (ph.headshot?.espnId) espn[d.id] = ph.headshot.espnId;
+        if ((ph.action || []).some((a) => a?.url && a.firstPick)) graphics[d.id] = true;
+      }));
       setHeadshots(map);
+      setGraphicIds(graphics);
+      setEspnIds(espn);
     });
     return () => { live = false; };
   }, [weeklyClass, mock]);
+
+  // The first-round cards' backs (ScoutCard.jsx — his profile, the
+  // community's read, his season): { [playerId]: { profile, scout, stats } }.
+  const [backs, setBacks] = useState({});
+  useEffect(() => {
+    if (!weeklyClass || !mock?.picks || !graphicIds) return undefined;
+    const list = Object.values(mock.picks).filter((p) => p.round === 1 && p.selection?.id && graphicIds[p.selection.id])
+      .map((p) => ({ id: p.selection.id, pos: p.selection.Position, espnId: espnIds[p.selection.id] }));
+    if (!list.length) return undefined;
+    let live = true;
+    loadScoutBacks(list).then((b) => live && setBacks(b)).catch(() => {});
+    return () => { live = false; };
+  }, [weeklyClass, mock, graphicIds, espnIds]);
 
   // Prerender.io's cue (public/index.html): the mock, its team branding and
   // the current-week lookup all in — or the mock not found. 8s cap, then a
@@ -203,6 +240,22 @@ export default function ViewMock({ mockId: shownId = "", yearPage = "" }) {
     }
     return cards;
   };
+  // The card layout: the main class's current week, every first-round pick
+  // whose player has a placed shot (graphicIds) — a team's first pick with
+  // its team page's graphic, a second first-rounder with its own
+  // (notFirstPicks: drawn by its pick number).
+  const cardPicks = new Set();
+  const notFirstPicks = new Set();
+  if (weekly && hasTeamPages(yearPage) && !pastWeek && graphicIds) {
+    const seen = new Set();
+    picksArray.forEach((p) => {
+      const first = !seen.has(p.currentTeam);
+      seen.add(p.currentTeam);
+      if (p.round !== 1 || !p.selection?.id || !graphicIds[p.selection.id]) return;
+      cardPicks.add(p.pickNumber);
+      if (!first) notFirstPicks.add(p.pickNumber);
+    });
+  }
   const sharePicks = roundPicks.map((p) => ({ pickNumber: p.pickNumber, currentTeam: p.currentTeam, tradedFrom: p.tradedFrom, player: p.selection }));
 
   const headline = weekly ? `${rounds}-Round ${year} NFL Mock Draft` : mock.name || "Mock Draft";
@@ -274,6 +327,7 @@ export default function ViewMock({ mockId: shownId = "", yearPage = "" }) {
         {crumbs && <script type="application/ld+json">{JSON.stringify(breadcrumbLd(crumbs))}</script>}
       </Helmet>
       <style>{MOCK_CARD_CSS}</style>
+      <style>{FLIP_CSS}</style>
 
       <MockPageShell year={mock.draftClass || "2027"} isMobile={isMobile} leftRail={weekly ? <TeamMocksRail year={teamPages ? year : MAIN_WEEKLY_YEAR} teams={teams} /> : null}>
         {weekly ? (
@@ -334,7 +388,9 @@ export default function ViewMock({ mockId: shownId = "", yearPage = "" }) {
           {roundPicks.map((pick, i) => (
             <Fragment key={pick.pickNumber}>
               {tradeCards(pick)}
-              <PickRow pick={pick} brand={teams[pick.currentTeam] || {}} isMobile={isMobile} teamMock={teamPages ? year : ""} vertical={weekly && isMobile} headshot={weekly ? headshots[pick.selection?.id] || "" : ""} />
+              {cardPicks.has(pick.pickNumber)
+                ? <CardPickRow pick={pick} brand={teams[pick.currentTeam] || {}} isMobile={isMobile} year={year} teamMock={teamPages ? year : ""} nick={nick(pick.currentTeam)} eager={i < 2} notFirst={notFirstPicks.has(pick.pickNumber)} back={backs[pick.selection?.id]} headshot={headshots[pick.selection?.id] || ""} week={currentWeekId} />
+                : <PickRow pick={pick} brand={teams[pick.currentTeam] || {}} isMobile={isMobile} teamMock={teamPages ? year : ""} vertical={weekly && isMobile} headshot={weekly ? headshots[pick.selection?.id] || "" : ""} />}
               {weekly && i === Math.min(BANNER_AFTER, roundPicks.length) - 1 && <MakeYourOwnBanner c1={BLUE} c2={GOLD} ink="#fff" isMobile={isMobile} margin="4px 0" />}
               {i === Math.min(PHONE_AD_AFTER, roundPicks.length) - 1 && <PhoneAd isMobile={isMobile} preferTeam={roundPicks[0]?.currentTeam || ""} />}
             </Fragment>
@@ -504,6 +560,136 @@ export function PickRow({ pick, brand, isMobile, sub = null, teamPage = false, c
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// A first-round pick as a card (the main class's current week — ViewMock's
+// cardPicks): his team's First Pick graphic on the left (api/first-pick.js —
+// the same image as his team's page), the pick on the right: the number in
+// the team's colors, the team, him, the write-up, the team's page. Phones:
+// the graphic across the screen, the pick under it. The graphic's box is its
+// size from the start — a placeholder in the team's colors with its logo
+// until it loads — so nothing moves. eager: one of the first on the page.
+// back: the card's scouting report data (loadScoutBacks). A team's page
+// (WeeklyTeamMock.jsx) passes teamPage: his college's logo in place of the
+// team's, sub (last week), actions (its votes), and a View more to him.
+export function CardPickRow({ pick, brand, isMobile, year, teamMock = "", nick = "", eager = false, notFirst = false, back = null, teamPage = false, collegeLogo = "", sub = null, actions = null, headshot = "", week = "" }) {
+  const player = pick.selection;
+  const c1 = brand.Color1 || BLUE;
+  const c2 = brand.Color2 || GOLD;
+  const ink = textOn(c1, c2);
+  const teamName = brand.Team ? `${brand.City || ""} ${brand.Team}`.trim() : pick.currentTeam;
+  const note = pick.note?.trim();
+  const g = useFirstPickGraphic({ pick: { player, overall: pick.pickNumber, round: pick.round }, team: pick.currentTeam, year, notFirst, week });
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => setLoaded(false), [g.src]);
+  const teamHref = `/nfl/${String(pick.currentTeam).toLowerCase()}`;
+  const darkLogo = brand.LogoDark || brand.Logo1;
+
+  // The card: the graphic, and on its back his scouting report in the team's colors.
+  const theme = teamTheme(brand);
+  const card = (
+    <FlipCard width={isMobile ? "100%" : 300} radius={isMobile ? 0 : 12} label={player ? `${player.First} ${player.Last}: flip his card` : "Flip the card"}
+      frontBg={`radial-gradient(circle at 50% 40%, ${c2} 0%, ${c1} 60%, #0b1220 100%)`}
+      front={(
+        <>
+          <div aria-hidden="true" style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", opacity: loaded ? 0 : 1, transition: "opacity .3s" }}>
+            {darkLogo && <img src={darkLogo} alt="" style={{ width: "58%", height: "58%", objectFit: "contain" }} />}
+          </div>
+          {g.src && player && (
+            <img src={g.src} srcSet={g.srcSet || undefined} sizes={isMobile ? "100vw" : "300px"} width={1080} height={1350} onError={g.onError} onLoad={() => setLoaded(true)} decoding="async"
+              loading={eager ? "eager" : "lazy"} fetchpriority={eager && pick.pickNumber === 1 ? "high" : undefined}
+              alt={`${player.First} ${player.Last}, ${player.Position}, ${player.School}: the ${nick}' ${notFirst ? "" : "first "}pick, No. ${pick.pickNumber}, in We-Draft.com's ${year} mock draft`}
+              style={{ position: "absolute", inset: 0, width: "100%", height: "100%", display: "block", objectFit: "cover", opacity: loaded ? 1 : 0, transition: "opacity .3s" }} />
+          )}
+        </>
+      )}
+      back={player && (
+        <CardBack theme={theme} number={pick.pickNumber} photo={headshot} name={`${player.First} ${player.Last}`} pos={player.Position} school={player.School}
+          logo={brand.LogoDark || brand.Logo1} logoCircle draft={`Round ${pick.round}, Pick ${pick.pickNumber}`}
+          profile={back?.profile} stats={back?.stats || []} statsTitle={`${STATS_SEASON} Season`} scout={back?.scout} year={year}
+          chip={`${nick || pick.currentTeam} · Round ${pick.round}`} footer={`We-Draft.com · ${year} Mock`} />
+      )} />
+  );
+
+  const info = (
+    <div style={{ position: "relative", flex: 1, minWidth: 0, padding: isMobile ? "12px 14px 16px" : "4px 6px 4px 0" }}>
+      {(brand.Wordmark || brand.WordmarkDark) && (
+        <img src={brand.Wordmark || brand.WordmarkDark} alt="" aria-hidden="true" style={{
+          position: "absolute", right: isMobile ? 6 : 0, top: isMobile ? 10 : 0, height: isMobile ? 46 : 70, maxWidth: "45%", objectFit: "contain", opacity: 0.1, pointerEvents: "none",
+        }} />
+      )}
+      <div style={{ position: "relative", display: "flex", alignItems: "center", gap: isMobile ? 10 : 14 }}>
+        <span style={{
+          flexShrink: 0, width: isMobile ? 54 : 68, height: isMobile ? 54 : 68, borderRadius: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+          background: `linear-gradient(160deg, ${c1} 0%, ${c1} 70%, ${c2} 100%)`, color: ink, boxShadow: `0 4px 12px ${c1}55`,
+        }}>
+          <span style={{ fontSize: 9, fontWeight: 900, letterSpacing: "0.14em", opacity: 0.8 }}>PICK</span>
+          <span style={{ fontSize: isMobile ? 22 : 30, fontWeight: 900, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>{pick.pickNumber}</span>
+        </span>
+        {teamPage ? (
+          collegeLogo && <img src={collegeLogo} alt={player?.School || ""} style={{ flexShrink: 0, width: isMobile ? 40 : 52, height: isMobile ? 40 : 52, objectFit: "contain", filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.18))" }} />
+        ) : (
+          <Link to={teamHref} title={teamName} style={{ flexShrink: 0, lineHeight: 0 }}>
+            {brand.Logo1 && <img src={brand.Logo1} alt={teamName} style={{ width: isMobile ? 40 : 52, height: isMobile ? 40 : 52, objectFit: "contain", filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.18))" }} />}
+          </Link>
+        )}
+        <div style={{ minWidth: 0, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+          {teamPage
+            ? <span style={{ fontSize: isMobile ? 11 : 12, fontWeight: 900, color: "#7a8597", letterSpacing: "0.12em", textTransform: "uppercase" }}>Round {pick.round}</span>
+            : <Link to={teamHref} style={{ fontSize: isMobile ? 11 : 12, fontWeight: 900, color: "#7a8597", letterSpacing: "0.12em", textTransform: "uppercase", textDecoration: "none" }}>{teamName}</Link>}
+          {pick.tradedFrom && (
+            <span style={{ fontSize: 9, fontWeight: 900, color: "#8a5a00", background: "#fff1d6", border: "1px solid #f6c56b", borderRadius: 999, padding: "2px 7px", letterSpacing: "0.04em", textTransform: "uppercase" }}>
+              Via {pick.tradedFrom}
+            </span>
+          )}
+        </div>
+      </div>
+      {player && (
+        <div style={{ position: "relative", marginTop: isMobile ? 10 : 14 }}>
+          {player.Slug ? (
+            <Link to={`/player/${player.Slug}`} style={{ display: "block", fontSize: isMobile ? 26 : 40, fontWeight: 900, color: BLUE, textTransform: "uppercase", lineHeight: 1, textDecoration: "underline", textDecorationThickness: 2, textUnderlineOffset: 4, overflowWrap: "anywhere" }}>
+              {player.First} {player.Last}
+            </Link>
+          ) : (
+            <span style={{ display: "block", fontSize: isMobile ? 26 : 40, fontWeight: 900, color: INK, textTransform: "uppercase", lineHeight: 1, overflowWrap: "anywhere" }}>{player.First} {player.Last}</span>
+          )}
+          <div style={{ fontSize: isMobile ? 14 : 16, fontWeight: 800, color: MUTED, fontFamily: BODY_FONT, marginTop: 6 }}>
+            {[player.Position, player.School].filter(Boolean).join(" · ")}
+          </div>
+          {sub && <div style={{ fontSize: 12, fontWeight: 700, color: "#7a8597", fontFamily: BODY_FONT, marginTop: 6 }}>{sub}</div>}
+        </div>
+      )}
+      {note && (
+        <p style={{
+          position: "relative", margin: isMobile ? "12px 0 0" : "16px 0 0", paddingTop: isMobile ? 10 : 12, borderTop: "1px solid #edf0f5",
+          fontSize: isMobile ? 15 : 16, lineHeight: 1.65, color: "#2a313d", fontFamily: "Georgia, 'Times New Roman', serif", whiteSpace: "pre-line",
+        }}>
+          <NoteText text={note} />
+        </p>
+      )}
+      {((teamPage && player?.Slug) || (!teamPage && teamMock) || actions) && (
+        <div style={{ position: "relative", marginTop: isMobile ? 10 : 14, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          {((teamPage && player?.Slug) || (!teamPage && teamMock)) && (
+            <Link to={teamPage ? `/player/${player.Slug}` : weeklyMockHref(pick.currentTeam, teamMock)} style={{
+              display: "inline-block", borderRadius: 999, padding: "7px 15px", background: c1, color: ink, fontSize: 11, fontWeight: 900,
+              letterSpacing: "0.06em", textTransform: "uppercase", textDecoration: "none",
+            }}>{teamPage ? "View more" : `View all ${brand.Team || pick.currentTeam} picks`} →</Link>
+          )}
+          {actions}
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="wd-mock-card" style={{
+      position: "relative", overflow: "hidden", borderRadius: 14, background: "#fff", boxShadow: CARD_SHADOW,
+      ...(isMobile ? { borderTop: `5px solid ${c1}` } : { display: "flex", alignItems: "stretch", gap: 22, padding: 14, borderLeft: `6px solid ${c1}` }),
+    }}>
+      {card}
+      {info}
     </div>
   );
 }

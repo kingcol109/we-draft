@@ -39,13 +39,20 @@ module.exports = async function handler(req, res) {
     const { getFirestore } = require("../scripts/firebaseAdmin");
     const { firstPickPng } = await import("../server/firstPickImage.mjs");
     const width = String(req.query?.w || "") === "600" ? 600 : 1080;
-    const out = await firstPickPng(getFirestore(), team, year, { width });
+    // &pick=23: that pick of the team's (one of its other first-rounders, for
+    // the full mock's cards) — it has to be the team's, or there's no graphic.
+    const overall = /^\d{1,3}$/.test(String(req.query?.pick || "")) ? Number(req.query.pick) : 0;
+    const out = await firstPickPng(getFirestore(), team, year, { width, overall });
     // None this week: checked again soon (a shot may be placed any time).
     if (!out) return notFound(res, "public, max-age=300, s-maxage=600");
     res.setHeader("Content-Type", "image/png");
-    // Half an hour at the edge (then another of his shots may be drawn),
-    // ten minutes in a browser; a stale copy served while it redraws.
-    res.setHeader("Cache-Control", "public, max-age=600, s-maxage=1800, stale-while-revalidate=600");
+    // &v={weekId} (the pages send it): that week's image never changes — its
+    // shot is locked for the week — so it's cached for good; a new week is a
+    // new v. Without one (the permanent URL the sitemap lists): half an hour
+    // at the edge, ten minutes in a browser, a stale copy while it redraws.
+    res.setHeader("Cache-Control", req.query?.v
+      ? "public, max-age=31536000, s-maxage=31536000, immutable"
+      : "public, max-age=600, s-maxage=1800, stale-while-revalidate=600");
     return res.status(200).send(out.png);
   } catch (e) {
     console.error("first-pick:", e);

@@ -7,7 +7,7 @@
 // PortalCommittedAt, PriorSchool → School) and withdrawn (PortalWithdrawnAt,
 // still at School — the same logo in From and To).
 //
-// /portal/updates — the moves themselves, newest first: entered, committed,
+// /portal/news/updates (was /portal/updates) — the moves themselves, newest first: entered, committed,
 // withdrew (view="updates"; same data, no extra reads).
 //
 // /portal/:team(/:tab) — every FBS team (utils/portalTeams.js, slug from the
@@ -229,7 +229,10 @@ function FitLine({ text, max, min = 12, style }) {
   return <div ref={ref} style={{ ...style, fontSize: size, whiteSpace: "nowrap", overflow: "hidden" }}>{text}</div>;
 }
 
-export default function TransferPortal({ view = "board" }) {
+// embedded (Portal News's Latest Moves tab — pages/PortalNews.jsx, at
+// /portal/news/updates): the updates feed alone — its move filters and the
+// feed — inside that page's own layout; no hero, rails or SEO tags here.
+export default function TransferPortal({ view = "board", embedded = false }) {
   const isUpdates = view === "updates";
   const { isAdmin } = useIsAdmin();
   const isMobile = useIsMobile();
@@ -1033,7 +1036,7 @@ export default function TransferPortal({ view = "board" }) {
   const Sidebars = !loading && all.length > 0 && (
     <>
       {!isUpdates && (
-        <SideCard title="Latest Moves" to="/portal/updates">
+        <SideCard title="Latest Moves" to="/portal/news/updates">
           {latest.map((m, i) => {
             const st = MOVE_STYLE[m.kind];
             return (
@@ -1068,7 +1071,7 @@ export default function TransferPortal({ view = "board" }) {
     </>
   );
 
-  // /portal/updates: every move, newest first, under day headers.
+  // /portal/news/updates: every move, newest first, under day headers.
   const moveCounts = MOVES.reduce((c, [k]) => ({ ...c, [k]: k ? moves.filter((m) => m.kind === k).length : moves.length }), {});
   const shownMoves = moves.filter((m) => (!move || m.kind === move)
     && (!search.trim() || [fullName(m.p), m.p.from, m.p.to].some((x) => String(x || "").toLowerCase().includes(search.trim().toLowerCase()))));
@@ -1782,7 +1785,7 @@ export default function TransferPortal({ view = "board" }) {
       };
     }
     if (isUpdates) return {
-      url: `${base}/updates`, title: `${SEASON} Transfer Portal Updates: Latest Entries, Commitments and Withdrawals | We-Draft.com`,
+      url: `${base}/news/updates`, title: `${SEASON} Transfer Portal Updates: Latest Entries, Commitments and Withdrawals | We-Draft.com`,
       description: `The latest ${SEASON} college football transfer portal moves, newest first: who entered, who committed and where, and who withdrew, with transfer star ratings.`,
     };
     const what = posLabel ? `${posLabel} ` : "";
@@ -1793,6 +1796,15 @@ export default function TransferPortal({ view = "board" }) {
     };
   })();
 
+  if (embedded && isUpdates) {
+    return (
+      <>
+        <style>{BOARD_MODERN_STYLE}</style>
+        {CardModal}
+        <div className="wdb" style={{ fontFamily: "'Arial Black', Arial, sans-serif" }}>{MoveBar}{Feed}</div>
+      </>
+    );
+  }
   return (
     <>
       <Helmet>

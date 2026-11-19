@@ -21,6 +21,7 @@ import LoadingSpinner from "../components/LoadingSpinner";
 import { topProspects, gradeLabel } from "../utils/communityGrades";
 import { fetchRecentPublicEvals } from "../utils/recentEvaluations";
 import { loadWeeklyMockNews } from "../utils/weeklyMockNews";
+import { loadRiserNews } from "../utils/risers";
 import { communityAverage } from "../utils/gradeWindow";
 import { isSiteUpdate } from "../utils/siteUpdates";
 
@@ -396,7 +397,8 @@ export default function HomeInSeason() {
   }, []);
 
   // The published Weekly Mocks, as news items (utils/weeklyMockNews.js).
-  useEffect(() => { loadWeeklyMockNews(6).then(setWeeklyMocks); }, []);
+  // …and the Draft Risers editions (utils/risers.js).
+  useEffect(() => { Promise.all([loadWeeklyMockNews(6), loadRiserNews(6)]).then(([w, r]) => setWeeklyMocks([...w, ...r])); }, []);
 
   // Videos — same fetch shape CommunityBoard.js's own sidebar uses
   // (GenTitle/GenThumb over an items[0] fallback), real data, not dummy.

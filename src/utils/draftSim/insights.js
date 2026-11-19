@@ -27,6 +27,14 @@
 //                                  first-round picks of him, of: all its
 //                                  first-round picks; with no order or no
 //                                  picks by its team, the slot's own)
+//       teamMocks: { [team]: [{ overall, round, id, n, of }] } — each
+//                                  team's average 7-round mock from user
+//                                  picks only (teamMock): every pick it
+//                                  holds in the current order, the player
+//                                  users take most for it around that slot
+//                                  (id null: no user picks near it yet; n:
+//                                  his picks near it, of: all its picks
+//                                  near it)
 //     } } },
 //     players: { [id]: { F, L, pos, s, sl } } — everyone named above }
 // week: the last WEEK_DAYS days (Eastern time). Board spots are the sim
@@ -84,12 +92,18 @@ function yearInsights(teamDocs, pickDocs, ranks = {}, favoriteMin = FAVORITE_MIN
   const slots = {};
   // Each team's first-round picks: { [team]: { [id]: { [overall]: n } } }.
   const byTeam = {};
+  // The same, every round (the team mocks).
+  const allByTeam = {};
   pickDocs.forEach((d) => Object.entries(d.p || {}).forEach(([key, n]) => {
     const [overall, id] = [Number(key.slice(0, key.indexOf("_"))), key.slice(key.indexOf("_") + 1)];
     players[id] = (players[id] || 0) + n;
     if (ranks[id] != null) {
       const e = (early[id] = early[id] || {});
       e[ranks[id] - overall] = (e[ranks[id] - overall] || 0) + n;
+    }
+    if (d.team && overall >= 1) {
+      const t = ((allByTeam[d.team] = allByTeam[d.team] || {})[id] = allByTeam[d.team][id] || {});
+      t[overall] = (t[overall] || 0) + n;
     }
     if (overall >= 1 && overall <= FIRST_ROUND) {
       const slot = (slots[overall] = slots[overall] || {});
@@ -108,7 +122,44 @@ function yearInsights(teamDocs, pickDocs, ranks = {}, favoriteMin = FAVORITE_MIN
       .filter((f) => f.n >= favoriteMin && f.median > 0)
       .sort((a, b) => b.median - a.median || b.n - a.n).slice(0, TOP_FAVORITES),
     firstRound: order.length ? teamRound(order, byTeam, slots, positions) : communityRound(slots),
+    teamMocks: teamMocks(order, allByTeam, positions),
   };
+}
+
+// Each team's average mock, from user picks only: every pick it holds in
+// the current order (all rounds), in order, takes the player users take
+// most for it around that slot — picks within MOCK_WINDOW of it, a pick
+// SLOT_PULL away counting half — that it hasn't already taken. A position
+// it's already taken counts half again for each (never a second QB). A
+// slot with no user picks near it is left open (id null). Teams with no
+// user picks at all are left out.
+const MOCK_WINDOW = 32;
+function teamMocks(order, allByTeam, positions = {}) {
+  const out = {};
+  Object.entries(allByTeam).forEach(([team, mine]) => {
+    const held = order.filter((p) => (p.Traded || p.Team) === team).sort((a, b) => a.Pick - b.Pick);
+    if (!held.length) return;
+    const taken = new Set();
+    const had = {};
+    const mock = held.map((p) => {
+      const near = Object.entries(mine).map(([id, at]) => {
+        const close = Object.entries(at).filter(([o]) => Math.abs(o - p.Pick) <= MOCK_WINDOW);
+        return [id, close.reduce((a, [, n]) => a + n, 0), close.reduce((a, [o, n]) => a + n / (1 + Math.abs(o - p.Pick) / SLOT_PULL), 0)];
+      }).filter(([, n]) => n > 0);
+      const of = near.reduce((a, [, n]) => a + n, 0);
+      const best = near
+        .filter(([id]) => !taken.has(id) && !(positions[id] === "QB" && had.QB))
+        .map(([id, n, score]) => [id, n, score * 0.5 ** (had[positions[id]] || 0)])
+        .sort((a, b) => b[2] - a[2] || b[1] - a[1])[0];
+      const round = Number(p.Round) || Math.ceil(p.Pick / FIRST_ROUND);
+      if (!best) return { overall: p.Pick, round, id: null, n: 0, of };
+      taken.add(best[0]);
+      if (positions[best[0]]) had[positions[best[0]]] = (had[positions[best[0]]] || 0) + 1;
+      return { overall: p.Pick, round, id: best[0], n: best[1], of };
+    });
+    if (mock.some((m) => m.id)) out[team] = mock;
+  });
+  return out;
 }
 
 // The community's first round on the current order, tied to teams, not
@@ -194,6 +245,7 @@ export function buildSimInsights({ teams = [], picks = [], daily = [], years, bo
 // Every player an insights doc names.
 export const playerIds = (insights) => [...new Set(Object.values(insights.years).flatMap((y) => ["all", "week"].flatMap((k) => [
   ...y[k].players.map((p) => p.id), ...y[k].favorites.map((p) => p.id), ...y[k].firstRound.map((p) => p.id),
+  ...Object.values(y[k].teamMocks || {}).flatMap((m) => m.map((p) => p.id).filter(Boolean)),
 ])))];
 
 // players docs ({ id, First, Last, Position, School, Slug }) → the doc's names.

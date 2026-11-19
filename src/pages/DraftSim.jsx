@@ -233,7 +233,7 @@ export default function DraftSim({ page = null }) {
       <SubTabs views={PROFILE_VIEWS} view={v} onView={onView} />
       {v === "drafts" ? <SavedSims branding={setup.branding} isMobile={isMobile} /> : <SimProfile branding={setup.branding} names={names.teamName} isMobile={isMobile} />}
     </>
-  ) : <SimCommunity view={v} onView={onView} branding={setup.branding} names={names.teamName} order={setup.order} orderYear={setup.year} isMobile={isMobile} />);
+  ) : <SimCommunity view={v} onView={onView} branding={setup.branding} names={names.teamName} nickname={names.nickname} order={setup.order} orderYear={setup.year} isMobile={isMobile} />);
   const doneAway = doneTab && doneTab !== "new";
 
   const names = teamNamer(setup?.branding || {});

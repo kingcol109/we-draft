@@ -4,7 +4,8 @@
 // analysts.js) as a social timeline, newest on top, plus the desk lineup
 // with anyone not live yet marked "coming soon". We-Draft.com's pick posts
 // carry the pick as a graphic in the picking team's colors (ProfileShot).
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useSimPickCard, useHasPlacedShot } from "../FirstPickGraphic";
 import { ANALYSTS } from "../../utils/draftSim/analysts";
 import { gradeLook } from "../../utils/communityGrades";
 import { useHeadshot } from "./simHeadshots";
@@ -163,10 +164,55 @@ function ProfileShot({ card, brand = {} }) {
   );
 }
 
+// A user's pick as his pick graphic (FirstPickGraphic.jsx — drawn in the
+// browser, nothing on the server), tap for full size. A player without a
+// placed shot keeps the usual card. With one, the card's room is held from
+// the start (the team's colors and its dark logo) and the graphic fades in —
+// drawn only once the post is near the screen, one at a time.
+function UserPickShot({ card, brand, year }) {
+  const has = useHasPlacedShot(card.id);
+  const box = useRef(null);
+  const [near, setNear] = useState(false);
+  useEffect(() => {
+    const el = box.current;
+    if (!el || near) return undefined;
+    if (typeof IntersectionObserver === "undefined") { setNear(true); return undefined; }
+    const io = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) setNear(true); }, { rootMargin: "600px 0px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [has, near]);
+  const src = useSimPickCard(has ? { ...card, year: card.year || year } : null, near);
+  const [loaded, setLoaded] = useState(false);
+  const [big, setBig] = useState(false);
+  if (has !== true) return <ProfileShot card={card} brand={brand} />;
+  const c1 = brand?.Color1 || SITE_BLUE;
+  const c2 = brand?.Color2 || GOLD;
+  return (
+    <>
+      <button ref={box} type="button" onClick={() => src && setBig(true)} title={src ? "See the card full size" : undefined} style={{
+        position: "relative", display: "block", width: "100%", marginTop: 8, padding: 0, border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, overflow: "hidden",
+        cursor: src ? "zoom-in" : "default", boxShadow: "0 6px 18px rgba(0,0,0,0.35)", aspectRatio: "1080 / 1350",
+        background: `radial-gradient(circle at 50% 40%, ${c2} 0%, ${c1} 60%, #0b1220 100%)`,
+      }}>
+        {(brand?.LogoDark || brand?.Logo1) && <img src={brand.LogoDark || brand.Logo1} alt="" aria-hidden="true" style={{ position: "absolute", left: "50%", top: "50%", transform: "translate(-50%, -50%)", width: "58%", height: "58%", objectFit: "contain", opacity: loaded ? 0 : 1, transition: "opacity .35s" }} />}
+        {src && <img src={src} alt={`${card.first} ${card.last}, ${card.teamName || card.team}'s pick — No. ${card.pick}`} onLoad={() => setLoaded(true)}
+          style={{ position: "absolute", inset: 0, width: "100%", height: "100%", display: "block", objectFit: "cover", opacity: loaded ? 1 : 0, transition: "opacity .35s" }} />}
+      </button>
+      {big && (
+        <div role="dialog" aria-label={`${card.first} ${card.last}, the pick`} onClick={() => setBig(false)} style={{ position: "fixed", inset: 0, zIndex: 20000, background: "rgba(0,0,0,0.82)", display: "grid", placeItems: "center", padding: 16, cursor: "zoom-out" }}>
+          <img src={src} alt="" style={{ maxWidth: "min(540px, 100%)", maxHeight: "92vh", borderRadius: 12, display: "block", boxShadow: "0 20px 50px rgba(0,0,0,0.5)" }} />
+        </div>
+      )}
+    </>
+  );
+}
+
 // branding: the teams' (data.branding) — each pick card is in its team's colors.
+// cardPick: { teams, year } — the user's teams: each of their picks' posts
+// shows his pick graphic (UserPickShot).
 // filters: [key, label] tabs (default All / My Picks / Trades — the Portal
 // Sim passes its own; "mine" = posts flagged userInvolved).
-export default function SimFeed({ feed, height, isMobile, branding = {}, filters = FILTERS }) {
+export default function SimFeed({ feed, height, isMobile, branding = {}, filters = FILTERS, cardPick = null }) {
   const [filter, setFilter] = useState("all");
   const shown = feed.filter((p) => filter === "all" || (filter === "mine" ? p.userInvolved : p.kind === "trade"));
 
@@ -225,7 +271,9 @@ export default function SimFeed({ feed, height, isMobile, branding = {}, filters
                       {p.lines.join(" ")}
                     </div>
                   )}
-                  <ProfileShot card={p.card} brand={branding[p.card.team]} />
+                  {(cardPick?.teams || []).includes(p.card.team)
+                    ? <UserPickShot card={p.card} brand={branding[p.card.team]} year={cardPick.year} />
+                    : <ProfileShot card={p.card} brand={branding[p.card.team]} />}
                 </>
               ) : (
                 <div style={{ marginTop: 4, color: p.lines ? "#fff" : "#dbe4f0", fontSize: 13.5, fontWeight: p.lines ? 800 : 400, lineHeight: 1.5, fontFamily: "Arial, sans-serif", whiteSpace: "pre-line", overflowWrap: "anywhere" }}>

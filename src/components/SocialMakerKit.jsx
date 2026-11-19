@@ -73,8 +73,37 @@ export function loadDataImage(url) {
 // edges ignored, no padding) rather than to every opaque pixel.
 const FEATURE_MAX = 1400;
 const featureCache = {};
+// An imgur action shot, prepared once on the server (api/cutout.js — the same
+// work as below, cached for good): just loaded, nothing to scan or re-encode
+// here. The live site only (local dev has no api/); null when it can't be had,
+// and the shot's prepared here instead.
+const PREPARED = typeof window !== "undefined" && !/^(localhost|127\.0\.0\.1)$/.test(window.location.hostname);
+async function preparedShot(url) {
+  const direct = sanitizeImgur(url) || url;
+  if (!PREPARED || !/^https:\/\/i\.imgur\.com\/[A-Za-z0-9]+\.(png|jpe?g|webp)$/i.test(direct)) return null;
+  const r = await fetch(`/api/cutout?u=${encodeURIComponent(direct)}`).catch(() => null);
+  if (!r?.ok) return null;
+  const w = Number(r.headers.get("X-Image-Width"));
+  const h = Number(r.headers.get("X-Image-Height"));
+  const blob = await r.blob();
+  if (!w || !h || !blob.size) return null;
+  const href = await new Promise((resolve) => { const fr = new FileReader(); fr.onload = () => resolve(fr.result); fr.onerror = () => resolve(""); fr.readAsDataURL(blob); });
+  return href ? { href, w, h } : null;
+}
+
 export function loadFeatureImage(url, cutout, { ink = false } = {}) {
   const key = `${cutout ? 1 : 0}${ink ? "i" : ""}|${url}`;
+  if (!featureCache[key] && cutout && !ink) {
+    featureCache[key] = preparedShot(url).catch(() => null).then((ready) => ready || loadFeatureImageHere(url, cutout, { ink }));
+  }
+  if (!featureCache[key]) featureCache[key] = loadFeatureImageHere(url, cutout, { ink });
+  return featureCache[key];
+}
+// The photo prepared here in the browser: decoded, its backdrop out, trimmed.
+const hereCache = {};
+function loadFeatureImageHere(url, cutout, { ink = false } = {}) {
+  const key = `${cutout ? 1 : 0}${ink ? "i" : ""}|${url}`;
+  const featureCache = hereCache;
   if (!featureCache[key]) {
     featureCache[key] = fetch(sanitizeImgur(url) || url, { mode: "cors" }).then((r) => (r.ok ? r.blob() : null)).then(async (blob) => {
       if (!blob) return null;

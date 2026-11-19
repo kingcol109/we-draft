@@ -35,10 +35,11 @@ import {
 import { WEEKLY_ROUNDS_BY_YEAR } from "../utils/draftSim/weeklyMock";
 import { getSiteSnapshot } from "../utils/siteSnapshots";
 import { textOn } from "../utils/teamColors";
-import { PickRow } from "./ViewMock";
+import { PickRow, CardPickRow } from "./ViewMock";
 import ShareLinkButton from "../components/ShareLinkButton";
 import PickVotes, { pickVoteKey, loadPickVotes } from "../components/PickVotes";
-import { useFirstPickGraphic, FirstPickImage } from "../components/FirstPickGraphic";
+import { useFirstPickGraphic } from "../components/FirstPickGraphic";
+import { FLIP_CSS, loadScoutBacks } from "../components/ScoutCard";
 import {
   BLUE, CARD_SHADOW, BODY_FONT, MOCK_CARD_CSS, useIsMobile, MockPageShell, ArticleHero, WeeklyByline, MakeYourOwnBanner, TradeCard, tradeChip,
   Breadcrumbs, breadcrumbLd, SITE_PUBLISHER, TeamMocksRail, WeeklyYearSwitch, PhoneAd,
@@ -108,6 +109,10 @@ export default function WeeklyTeamMock({ team, year = MAIN_WEEKLY_YEAR }) {
   // → Content → Photos): { [playerId]: url }, 30 ids a query. A pick
   // without one keeps his college logo.
   const [headshots, setHeadshots] = useState({});
+  // …and from the same read, who has a First Pick shot placed ({ [id]: true },
+  // null until it's in) and their ESPN ids (the cards' season lines).
+  const [graphicIds, setGraphicIds] = useState(null);
+  const [espnIds, setEspnIds] = useState({});
   useEffect(() => {
     const ids = [...new Set((weeks?.[0]?.picks || []).filter((p) => p.owner === team && p.player?.id).map((p) => p.player.id))];
     if (!ids.length) return undefined;
@@ -117,11 +122,40 @@ export default function WeeklyTeamMock({ team, year = MAIN_WEEKLY_YEAR }) {
     Promise.all(chunks.map((c) => getDocs(query(collection(db, "playerPhotos"), where(documentId(), "in", c))).catch(() => null))).then((snaps) => {
       if (!live) return;
       const map = {};
-      snaps.forEach((snap) => snap?.docs.forEach((d) => { const url = d.data().headshot?.url; if (url) map[d.id] = url; }));
+      const graphics = {};
+      const espn = {};
+      snaps.forEach((snap) => snap?.docs.forEach((d) => {
+        const ph = d.data();
+        if (ph.headshot?.url) map[d.id] = ph.headshot.url;
+        if (ph.headshot?.espnId) espn[d.id] = ph.headshot.espnId;
+        if ((ph.action || []).some((a) => a?.url && a.firstPick)) graphics[d.id] = true;
+      }));
       setHeadshots(map);
+      setGraphicIds(graphics);
+      setEspnIds(espn);
     });
     return () => { live = false; };
   }, [weeks, team]);
+
+  // The card picks (ViewMock.js CardPickRow — his graphic, flipping to his
+  // scouting report): the team's first-round picks, or its first pick when
+  // it has none in the first round — each with a placed shot. A card that
+  // isn't the team's first pick draws its graphic by its number (notFirst).
+  const cardSlots = useMemo(() => {
+    const mine = (weeks?.[0] ? teamWeek(weeks[0], null, team).picks : []).filter((p) => p.player?.id).sort((a, b) => a.overall - b.overall);
+    if (!graphicIds || !mine.length) return new Map();
+    const chosen = mine.some((p) => p.round === 1) ? mine.filter((p) => p.round === 1) : [mine[0]];
+    return new Map(chosen.filter((p) => graphicIds[p.player.id]).map((p) => [p.slot, { notFirst: p !== mine[0] }]));
+  }, [weeks, team, graphicIds]);
+  // Their backs' data (ScoutCard.jsx loadScoutBacks).
+  const [backs, setBacks] = useState({});
+  useEffect(() => {
+    const mine = (weeks?.[0] ? teamWeek(weeks[0], null, team).picks : []).filter((p) => cardSlots.has(p.slot));
+    if (!mine.length) return undefined;
+    let live = true;
+    loadScoutBacks(mine.map((p) => ({ id: p.player.id, pos: p.player.Position, espnId: espnIds[p.player.id] }))).then((b) => live && setBacks(b)).catch(() => {});
+    return () => { live = false; };
+  }, [weeks, team, cardSlots, espnIds]);
 
   // Up / down vote counts for the team's picks (PickVotes): { [key]: { up, down } }.
   const [votes, setVotes] = useState({});
@@ -133,10 +167,10 @@ export default function WeeklyTeamMock({ team, year = MAIN_WEEKLY_YEAR }) {
   }, [weeks, team]);
 
   // The First Pick graphic: the team's first pick this week, drawn when he
-  // has an action shot placed for it (FirstPickGraphic.jsx) — in the header
-  // on desktop, over the pick on phones.
+  // has an action shot placed for it (FirstPickGraphic.jsx) — on his card
+  // (cardSlots, below); here for the page's main image and the snapshot.
   const firstPick = useMemo(() => (weeks?.[0] ? teamWeek(weeks[0], null, team).picks.find((p) => p.player?.id) || null : null), [weeks, team]);
-  const fpg = useFirstPickGraphic({ pick: firstPick, team, year });
+  const fpg = useFirstPickGraphic({ pick: firstPick, team, year, week: weeks?.[0]?.id || "" });
 
   // Prerender.io (public/index.html, middleware.js) snapshots the page for
   // crawlers once prerenderReady is true: here when the weeks and team
@@ -346,13 +380,13 @@ export default function WeeklyTeamMock({ team, year = MAIN_WEEKLY_YEAR }) {
         <script type="application/ld+json">{JSON.stringify(breadcrumbLd(crumbs))}</script>
       </Helmet>
       <style>{MOCK_CARD_CSS}</style>
+      <style>{FLIP_CSS}</style>
 
       <MockPageShell year={year} isMobile={isMobile} adTeam={team} videoPlayerIds={picks.map((p) => p.player?.id).filter(Boolean)} leftRail={<TeamMocksRail current={team} year={year} teams={teams || {}} full={fullMock} />}>
         <Breadcrumbs items={crumbs} />
         <ArticleHero hero={heroTeam} isMobile={isMobile} kicker={`Weekly Mock Draft · ${year}`}
           headline={headline} dek={intro} date={updated ? <time dateTime={publishedIso}>Updated {updated}</time> : ""}
-          byline={latest && <WeeklyByline />} actions={switcher}
-          aside={fpg.src && <FirstPickImage g={fpg} pick={firstPick} nick={nick(team)} year={year} sizes="300px" style={{ borderRadius: 12, boxShadow: "0 8px 24px rgba(0,0,0,0.35)" }} />} />
+          byline={latest && <WeeklyByline />} actions={switcher} />
 
         {!latest ? (
           <div style={{ background: "#fff", borderRadius: 14, boxShadow: CARD_SHADOW, padding: 24, textAlign: "center", fontFamily: BODY_FONT, color: "#2a313d" }}>
@@ -379,18 +413,19 @@ export default function WeeklyTeamMock({ team, year = MAIN_WEEKLY_YEAR }) {
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {roundItems(r).map((it) => (it.card ? <Fragment key={`trade-${it.n}`}>{it.card}</Fragment> : (
                     <Fragment key={it.pick.slot}>
-                    {/* Phones: the team's first pick's graphic over it (desktop has it in the header). */}
-                    {isMobile && fpg.src && it.pick.slot === firstPick?.slot && (
-                      <div style={{ margin: "4px 0 10px" }}>
-                        <FirstPickImage g={fpg} pick={firstPick} nick={nick(team)} year={year} sizes="100vw" style={{ borderRadius: 14, boxShadow: "0 6px 22px rgba(10,20,40,0.18)" }} />
-                      </div>
-                    )}
-                    <PickRow isMobile={isMobile} vertical={isMobile} brand={brand} sub={subOf(it.pick)} teamPage collegeLogo={it.pick.player?.logo || logos[it.pick.player?.id] || ""} headshot={headshots[it.pick.player?.id] || ""}
-                      actions={(() => {
-                        const key = pickVoteKey(latest?.year, it.pick);
-                        return key && <PickVotes key={key} voteKey={key} year={latest.year} team={team} playerId={it.pick.player.id} counts={votes[key]} />;
-                      })()}
-                      pick={{ pickNumber: it.pick.overall, round: it.pick.round, currentTeam: it.pick.owner, tradedFrom: it.pick.original !== it.pick.owner ? it.pick.original : null, selection: it.pick.player, note: it.pick.note || "" }} />
+                    {(() => {
+                      const key = pickVoteKey(latest?.year, it.pick);
+                      const actions = key && <PickVotes key={key} voteKey={key} year={latest.year} team={team} playerId={it.pick.player.id} counts={votes[key]} />;
+                      const asPick = { pickNumber: it.pick.overall, round: it.pick.round, currentTeam: it.pick.owner, tradedFrom: it.pick.original !== it.pick.owner ? it.pick.original : null, selection: it.pick.player, note: it.pick.note || "" };
+                      const collegeLogo = it.pick.player?.logo || logos[it.pick.player?.id] || "";
+                      const card = cardSlots.get(it.pick.slot);
+                      return card ? (
+                        <CardPickRow isMobile={isMobile} brand={brand} year={year} nick={nick(team)} teamPage collegeLogo={collegeLogo} sub={subOf(it.pick)} actions={actions}
+                          notFirst={card.notFirst} eager={it.pick.slot === firstPick?.slot} back={backs[it.pick.player?.id]} headshot={headshots[it.pick.player?.id] || ""} week={weeks?.[0]?.id || ""} pick={asPick} />
+                      ) : (
+                        <PickRow isMobile={isMobile} vertical={isMobile} brand={brand} sub={subOf(it.pick)} teamPage collegeLogo={collegeLogo} headshot={headshots[it.pick.player?.id] || ""} actions={actions} pick={asPick} />
+                      );
+                    })()}
                     </Fragment>
                   )))}
                 </div>

@@ -48,7 +48,7 @@ const LABEL_STYLE = {
 const n = (v) => Number(v) || 0;
 const avg = (xs) => xs.reduce((t, x) => t + x, 0) / xs.length;
 
-function percentiles(values) {
+export function percentiles(values) {
   const sorted = [...values].sort((a, b) => a - b);
   return (v) => {
     if (sorted.length <= 1) return 0.5;
@@ -58,11 +58,45 @@ function percentiles(values) {
   };
 }
 
-function labelFor(c) {
+export function labelFor(c) {
   if (c.latest.g >= 80 && c.latest.g - c.rec.g >= 8) return "Breakout";
   if (c.recentAvg >= 80 && rankPct(c.rec) >= 0.75) return "On Fire";
   if (c.delta >= 4 && c.recentAvg >= 68) return "Up";
   return null;
+}
+
+// Every player (with a Slug and PFF grades) as a heat candidate: { p, rec,
+// games, latest, recentAvg, delta, v7, v30, momentum, label } — label is
+// labelFor's (null: not heating up). Shared with the Draft Risers
+// suggester (AdminRisers.jsx).
+export async function scanHeat(players) {
+  const [pff, cfbdSnap, analyticsSnap] = await Promise.all([
+    loadPffByCfbdId(),
+    getDocs(query(collection(db, "cfbdPlayers"), where("mappingStatus", "in", ["verified", "suggested"]))),
+    getDocs(collection(db, "analytics")),
+  ]);
+  const cfbdByWd = new Map();
+  cfbdSnap.docs.forEach((d) => { if (d.data().wedraftPlayerId) cfbdByWd.set(d.data().wedraftPlayerId, d.id); });
+  const views = new Map();
+  analyticsSnap.docs.forEach((d) => { const x = d.data(); if (!x.type || x.type === "player") views.set(d.id, x.pageViews || {}); });
+
+  const all = [];
+  players.forEach((p) => {
+    const rec = pff.get(cfbdByWd.get(p.id));
+    if (!p.Slug || rec?.rk == null) return;
+    const games = (rec.rg || (rec.w ? [rec.w] : [])).filter((x) => rec.cat === "kicking" || rec.cat === "punting" || x.sn >= MIN_GAME_SNAPS);
+    if (!games.length) return;
+    const recentAvg = avg(games.slice(0, 2).map((x) => x.g));
+    const pv = views.get(p.Slug) || {};
+    const v7 = n(pv.last7Days), v30 = n(pv.last30Days);
+    const pace = v30 > 0 ? (v30 / 30) * 7 : 0;
+    all.push({
+      p, rec, games, latest: games[0], recentAvg, delta: recentAvg - rec.g,
+      v7, v30, momentum: pace > 0 ? v7 / pace : v7 > 0 ? 2 : null,
+    });
+  });
+  all.forEach((c) => { c.label = labelFor(c); });
+  return all;
 }
 
 export default function TrendSuggester({ players, trendsMap, onPick, onApplyAll, onClose }) {
@@ -102,34 +136,13 @@ export default function TrendSuggester({ players, trendsMap, onPick, onApplyAll,
     setRunning(true);
     setError("");
     try {
-      const [pff, cfbdSnap, analyticsSnap] = await Promise.all([
-        loadPffByCfbdId(),
-        getDocs(query(collection(db, "cfbdPlayers"), where("mappingStatus", "in", ["verified", "suggested"]))),
-        getDocs(collection(db, "analytics")),
-      ]);
-      const cfbdByWd = new Map();
-      cfbdSnap.docs.forEach((d) => { if (d.data().wedraftPlayerId) cfbdByWd.set(d.data().wedraftPlayerId, d.id); });
-      const views = new Map();
-      analyticsSnap.docs.forEach((d) => { const x = d.data(); if (!x.type || x.type === "player") views.set(d.id, x.pageViews || {}); });
-
-      const all = [];
-      players.forEach((p) => {
-        const rec = pff.get(cfbdByWd.get(p.id));
-        if (!p.Slug || rec?.rk == null) return;
-        const games = (rec.rg || (rec.w ? [rec.w] : [])).filter((x) => rec.cat === "kicking" || rec.cat === "punting" || x.sn >= MIN_GAME_SNAPS);
-        if (!games.length) return;
-        const recentAvg = avg(games.slice(0, 2).map((x) => x.g));
-        const pv = views.get(p.Slug) || {};
-        const v7 = n(pv.last7Days), v30 = n(pv.last30Days);
-        const pace = v30 > 0 ? (v30 / 30) * 7 : 0;
-        all.push({
-          p, rec, games, latest: games[0], recentAvg, delta: recentAvg - rec.g,
-          v7, v30, momentum: pace > 0 ? v7 / pace : v7 > 0 ? 2 : null,
-          trend: trendsMap.get(p.Slug)?.Trend || "",
-        });
+      // (Already trending: no suggested label — the list shows his current one.)
+      const all = (await scanHeat(players)).map((c) => {
+        const trend = trendsMap.get(c.p.Slug)?.Trend || "";
+        return { ...c, trend, label: trend ? null : c.label };
       });
 
-      const hot = all.filter((c) => !c.trend).map((c) => ({ ...c, label: labelFor(c) })).filter((c) => c.label);
+      const hot = all.filter((c) => !c.trend && c.label);
       // Already trending, but his grades have dropped off.
       const isCooling = (c) => c.delta <= -8 || c.recentAvg < 60;
       // The current trends still holding up, scored on the same scale as the suggestions (for the top 5).
