@@ -1633,6 +1633,7 @@
     <loc>https://we-draft.com/mocks/den</loc>
     <lastmod>2026-11-17</lastmod>
     <priority>0.7</priority>
+    <image:image><image:loc>https://we-draft.com/api/first-pick?team=den&amp;year=2027</image:loc></image:image>
   </url>
   <url>
     <loc>https://we-draft.com/mocks/det</loc>
@@ -1773,26 +1774,31 @@
     <loc>https://we-draft.com/mocks/ari/2028</loc>
     <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
+    <image:image><image:loc>https://we-draft.com/api/first-pick?team=ari&amp;year=2028</image:loc></image:image>
   </url>
   <url>
     <loc>https://we-draft.com/mocks/atl/2028</loc>
     <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
+    <image:image><image:loc>https://we-draft.com/api/first-pick?team=atl&amp;year=2028</image:loc></image:image>
   </url>
   <url>
     <loc>https://we-draft.com/mocks/bal/2028</loc>
     <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
+    <image:image><image:loc>https://we-draft.com/api/first-pick?team=bal&amp;year=2028</image:loc></image:image>
   </url>
   <url>
     <loc>https://we-draft.com/mocks/buf/2028</loc>
     <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
+    <image:image><image:loc>https://we-draft.com/api/first-pick?team=buf&amp;year=2028</image:loc></image:image>
   </url>
   <url>
     <loc>https://we-draft.com/mocks/car/2028</loc>
     <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
+    <image:image><image:loc>https://we-draft.com/api/first-pick?team=car&amp;year=2028</image:loc></image:image>
   </url>
   <url>
     <loc>https://we-draft.com/mocks/chi/2028</loc>
@@ -1803,66 +1809,79 @@
     <loc>https://we-draft.com/mocks/cin/2028</loc>
     <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
+    <image:image><image:loc>https://we-draft.com/api/first-pick?team=cin&amp;year=2028</image:loc></image:image>
   </url>
   <url>
     <loc>https://we-draft.com/mocks/cle/2028</loc>
     <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
+    <image:image><image:loc>https://we-draft.com/api/first-pick?team=cle&amp;year=2028</image:loc></image:image>
   </url>
   <url>
     <loc>https://we-draft.com/mocks/dal/2028</loc>
     <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
+    <image:image><image:loc>https://we-draft.com/api/first-pick?team=dal&amp;year=2028</image:loc></image:image>
   </url>
   <url>
     <loc>https://we-draft.com/mocks/den/2028</loc>
     <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
+    <image:image><image:loc>https://we-draft.com/api/first-pick?team=den&amp;year=2028</image:loc></image:image>
   </url>
   <url>
     <loc>https://we-draft.com/mocks/det/2028</loc>
     <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
+    <image:image><image:loc>https://we-draft.com/api/first-pick?team=det&amp;year=2028</image:loc></image:image>
   </url>
   <url>
     <loc>https://we-draft.com/mocks/gb/2028</loc>
     <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
+    <image:image><image:loc>https://we-draft.com/api/first-pick?team=gb&amp;year=2028</image:loc></image:image>
   </url>
   <url>
     <loc>https://we-draft.com/mocks/hou/2028</loc>
     <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
+    <image:image><image:loc>https://we-draft.com/api/first-pick?team=hou&amp;year=2028</image:loc></image:image>
   </url>
   <url>
     <loc>https://we-draft.com/mocks/ind/2028</loc>
     <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
+    <image:image><image:loc>https://we-draft.com/api/first-pick?team=ind&amp;year=2028</image:loc></image:image>
   </url>
   <url>
     <loc>https://we-draft.com/mocks/jax/2028</loc>
     <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
+    <image:image><image:loc>https://we-draft.com/api/first-pick?team=jax&amp;year=2028</image:loc></image:image>
   </url>
   <url>
     <loc>https://we-draft.com/mocks/kc/2028</loc>
     <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
+    <image:image><image:loc>https://we-draft.com/api/first-pick?team=kc&amp;year=2028</image:loc></image:image>
   </url>
   <url>
     <loc>https://we-draft.com/mocks/lv/2028</loc>
     <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
+    <image:image><image:loc>https://we-draft.com/api/first-pick?team=lv&amp;year=2028</image:loc></image:image>
   </url>
   <url>
     <loc>https://we-draft.com/mocks/lac/2028</loc>
     <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
+    <image:image><image:loc>https://we-draft.com/api/first-pick?team=lac&amp;year=2028</image:loc></image:image>
   </url>
   <url>
     <loc>https://we-draft.com/mocks/lar/2028</loc>
     <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
+    <image:image><image:loc>https://we-draft.com/api/first-pick?team=lar&amp;year=2028</image:loc></image:image>
   </url>
   <url>
     <loc>https://we-draft.com/mocks/mia/2028</loc>
@@ -1874,6 +1893,7 @@
     <loc>https://we-draft.com/mocks/min/2028</loc>
     <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
+    <image:image><image:loc>https://we-draft.com/api/first-pick?team=min&amp;year=2028</image:loc></image:image>
   </url>
   <url>
     <loc>https://we-draft.com/mocks/ne/2028</loc>
@@ -1884,21 +1904,25 @@
     <loc>https://we-draft.com/mocks/no/2028</loc>
     <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
+    <image:image><image:loc>https://we-draft.com/api/first-pick?team=no&amp;year=2028</image:loc></image:image>
   </url>
   <url>
     <loc>https://we-draft.com/mocks/nyg/2028</loc>
     <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
+    <image:image><image:loc>https://we-draft.com/api/first-pick?team=nyg&amp;year=2028</image:loc></image:image>
   </url>
   <url>
     <loc>https://we-draft.com/mocks/nyj/2028</loc>
     <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
+    <image:image><image:loc>https://we-draft.com/api/first-pick?team=nyj&amp;year=2028</image:loc></image:image>
   </url>
   <url>
     <loc>https://we-draft.com/mocks/phi/2028</loc>
     <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
+    <image:image><image:loc>https://we-draft.com/api/first-pick?team=phi&amp;year=2028</image:loc></image:image>
   </url>
   <url>
     <loc>https://we-draft.com/mocks/pit/2028</loc>
@@ -1909,26 +1933,31 @@
     <loc>https://we-draft.com/mocks/sf/2028</loc>
     <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
+    <image:image><image:loc>https://we-draft.com/api/first-pick?team=sf&amp;year=2028</image:loc></image:image>
   </url>
   <url>
     <loc>https://we-draft.com/mocks/sea/2028</loc>
     <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
+    <image:image><image:loc>https://we-draft.com/api/first-pick?team=sea&amp;year=2028</image:loc></image:image>
   </url>
   <url>
     <loc>https://we-draft.com/mocks/tb/2028</loc>
     <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
+    <image:image><image:loc>https://we-draft.com/api/first-pick?team=tb&amp;year=2028</image:loc></image:image>
   </url>
   <url>
     <loc>https://we-draft.com/mocks/ten/2028</loc>
     <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
+    <image:image><image:loc>https://we-draft.com/api/first-pick?team=ten&amp;year=2028</image:loc></image:image>
   </url>
   <url>
     <loc>https://we-draft.com/mocks/was/2028</loc>
     <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
+    <image:image><image:loc>https://we-draft.com/api/first-pick?team=was&amp;year=2028</image:loc></image:image>
   </url>
   <url>
     <loc>https://we-draft.com/mocks/2028</loc>
@@ -1939,6 +1968,41 @@
     <loc>https://we-draft.com/mocks/2029</loc>
     <lastmod>2026-11-03</lastmod>
     <priority>0.65</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/risers/2027</loc>
+    <lastmod>2026-11-19</lastmod>
+    <priority>0.75</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/risers/2028</loc>
+    <lastmod>2026-11-19</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/risers/2029</loc>
+    <lastmod>2026-11-19</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/news</loc>
+    <lastmod>2026-11-19</lastmod>
+    <priority>0.75</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/news/in</loc>
+    <lastmod>2026-11-19</lastmod>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/news/lb</loc>
+    <lastmod>2026-11-19</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/news/lb/in</loc>
+    <lastmod>2026-11-19</lastmod>
+    <priority>0.55</priority>
   </url>
   <url>
     <loc>https://we-draft.com/staff/aaron-glenn</loc>
@@ -4993,41 +5057,6 @@
   <url>
     <loc>https://we-draft.com/player/daylan-mccutcheon-2028-wr</loc>
     <lastmod>2026-08-26</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/daylen-everette-2026-db</loc>
-    <lastmod>2026-11-19</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/daymion-sanford-2027-lb</loc>
-    <lastmod>2026-11-19</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/dean-connors-2026-rb</loc>
-    <lastmod>2026-11-19</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/deandre-moore-jr-2027-wr</loc>
-    <lastmod>2026-08-26</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/decarlos-nicholson-2026-db</loc>
-    <lastmod>2026-11-19</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/decker-degraaf-2027-te</loc>
-    <lastmod>2026-08-27</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/declan-williams-2026-lb</loc>
-    <lastmod>2026-11-19</lastmod>
     <priority>0.7</priority>
   </url>
 </urlset>
