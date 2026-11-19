@@ -46,6 +46,8 @@ import AdminResearch from "../components/AdminResearch";
 import AdminProspectResearch from "../components/AdminProspectResearch";
 import AdminPhotos from "../components/AdminPhotos";
 import AdminSideGraphics from "../components/AdminSideGraphics";
+import AdminProDayIcons from "../components/AdminProDayIcons";
+import AdminEvents from "../components/AdminEvents";
 import AdminYouTubeGraphics from "../components/AdminYouTubeGraphics";
 import AdminThumbAnalytics from "../components/AdminThumbAnalytics";
 import AdminInstagram from "../components/AdminInstagram";
@@ -372,6 +374,8 @@ const SECTIONS = [
   { key: "analytics", label: "Analytics", icon: "📊", ready: true },
   { key: "coaches", label: "Coach History", icon: "📋", ready: true },
   { key: "cfbschedule", label: "CFB Schedule", icon: "📅", ready: true },
+  // Draft-season events: participants, Combine results, pro days (components/AdminEvents.jsx).
+  { key: "events", label: "Events", icon: "🗓️", ready: true },
   { key: "requests", label: "Requests", icon: "📥", ready: true },
   { key: "users", label: "Users", icon: "👤", ready: true },
   { key: "sim", label: "Football Sim", icon: "🧪", ready: true },
@@ -12509,6 +12513,7 @@ const BRANDING_TABS = [
   { key: "teams", label: "Teams" },
   { key: "misc", label: "Misc" },
   { key: "trivia", label: "Trivia" },
+  { key: "proday", label: "Pro Day" },
 ];
 
 // "High School" sits alongside CFB/NFL in the same league toggle, but isn't
@@ -12577,6 +12582,7 @@ function BrandingSection() {
 
       {brandingTab === "misc" && <MiscBrandingSection />}
       {brandingTab === "trivia" && <TriviaBrandingPane />}
+      {brandingTab === "proday" && <AdminProDayIcons />}
     </div>
   );
 }
@@ -15384,6 +15390,7 @@ export default function AdminPanel() {
             {activeSection === "analytics" && <AnalyticsSection />}
             {activeSection === "coaches" && <AdminCoachHistory />}
             {activeSection === "cfbschedule" && <CFBScheduleSection />}
+            {activeSection === "events" && <AdminEvents />}
             {activeSection === "requests" && <RequestsSection />}
             {activeSection === "users" && <UsersSection />}
             {activeSection === "sim" && <SimLabPane />}

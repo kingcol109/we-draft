@@ -45,6 +45,7 @@ const HUB_TABS = [
 const BETA_ITEMS = [
   { to: "/sim", icon: "🎮", title: "Football Sim", blurb: "Call plays against live defenses and run full drives in the Football Simulation Lab." },
   { to: "/portalsim", icon: "🔁", title: "Transfer Portal Sim", blurb: "Run a transfer portal cycle — entries, offers, and commitments across every window." },
+  { to: "/recruitsim", icon: "📋", title: "Recruit Sim", blurb: "Run a recruiting season — scout 3,000 prospects, manage a board and NIL, and sign a class." },
 ];
 const SIM_VIEWS = [["profile", "Profile"], ["drafts", "My Drafts"]];
 

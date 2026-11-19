@@ -38,6 +38,15 @@ jobs:
         env:
           GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
 
+      # The interactive maps (/map/draft, /map/{team}) — draftees by school
+      # and every FBS school's recruits by class (CFBD recruiting, ~18 calls).
+      # scripts/buildMapSnapshots.mjs.
+      - name: Build map snapshots
+        run: node scripts/buildMapSnapshots.mjs
+        env:
+          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
+          CFBD_API_KEY: ${{ secrets.CFBD_API_KEY }}
+
       # ESPN's college football national award winners (Heisman, Doak
       # Walker, …) for the player page's Career Path — server/awards/
       # nationalAwards.js. No API key; a few dozen ESPN calls. Weekly so the

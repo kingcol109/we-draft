@@ -321,6 +321,14 @@ for (const doc of allTeams) {
     { path: "/boards", priority: 0.8, lastmod: today },
     { path: "/comparison", priority: 0.7, lastmod: today },
     { path: "/draftorder", priority: 0.8, lastmod: today },
+    // Draft events: the calendar and each event's page (utils/events.js).
+    { path: "/events", priority: 0.75, lastmod: today },
+    ...["combine", "senior-bowl", "east-west-bowl", "pro-days"].flatMap((ev) => [
+      { path: `/events/${ev}/2027`, priority: 0.7, lastmod: today },
+      { path: `/events/${ev}/2027/participants`, priority: 0.6, lastmod: today },
+    ]),
+    { path: "/events/combine/2027/results", priority: 0.65, lastmod: today },
+    ...["qb", "rb", "wr", "te", "ol", "edge", "dl", "lb", "db"].map((pos) => ({ path: `/events/combine/2027/results/${pos}`, priority: 0.5, lastmod: today })),
     // Draft Sim, both classes (the team pages are with each team below).
     { path: "/draftsim", priority: 0.8, lastmod: today },
     { path: "/draftsim/2028", priority: 0.65, lastmod: today },
@@ -328,6 +336,11 @@ for (const doc of allTeams) {
     { path: "/portalsim", priority: 0.8, lastmod: today },
     { path: "/portalsim/community", priority: 0.55, lastmod: today },
     { path: "/portalsim/recent", priority: 0.5, lastmod: today },
+    // Transfer Portal board, updates feed and position boards (team pages
+    // are with portalPages below). Released 2026-11-18.
+    { path: "/portal", priority: 0.8, lastmod: today },
+    { path: "/portal/updates", priority: 0.6, lastmod: today },
+    ...["qb", "rb", "wr", "te", "ol", "edge", "dl", "lb", "db", "k", "p"].map((pos) => ({ path: `/portal/${pos}`, priority: 0.55, lastmod: today })),
     { path: "/mocks", priority: 0.7, lastmod: today },
     { path: "/profile", priority: 0.6, lastmod: today },
     // We-Pick lives inside We-Draft Live now (/live/we-pick…); the old
@@ -469,7 +482,24 @@ for (const doc of allTeams) {
   // Everything — the NFL team, staff and Weekly Mock pages too (they were
   // built but left out of this list until 2026-10-26).
   const portalSimPages = Object.keys(portalSimTeams).map((slug) => ({ path: `/portalsim/${slug}`, priority: 0.6, lastmod: today }));
-  const allUrls = [...staticPages, ...communityBoardPages, ...teamPages, ...nflPages, ...portalSimPages, ...weeklyMockPages, ...staffPages, ...playerPages, ...comparisonPages, ...newsPages, ...gamePages];
+  // Interactive maps: the directory, the draft map, every FBS school's recruiting map.
+  // Admin-only for now (user, 2026-11-18) — flip MAPS_RELEASED to list them.
+  const MAPS_RELEASED = false;
+  const mapPages = [
+    { path: "/map", priority: 0.6, lastmod: today },
+    { path: "/map/draft", priority: 0.7, lastmod: today },
+  ];
+  // Transfer Portal team pages (/portal/{slug}, utils/portalTeams.js) and their tabs.
+  const { buildPortalTeams } = await import("../src/utils/portalTeams.js");
+  const portalTeamSlugs = Object.keys(buildPortalTeams(allTeams.map((d) => d.data())));
+  portalTeamSlugs.forEach((slug) => mapPages.push({ path: `/map/${slug}`, priority: 0.5, lastmod: today }));
+  const portalPages = portalTeamSlugs.flatMap((slug) => [
+    { path: `/portal/${slug}`, priority: 0.6, lastmod: today },
+    { path: `/portal/${slug}/roster`, priority: 0.5, lastmod: today },
+    { path: `/portal/${slug}/needs`, priority: 0.45, lastmod: today },
+    { path: `/portal/${slug}/targets`, priority: 0.5, lastmod: today },
+  ]);
+  const allUrls = [...staticPages, ...communityBoardPages, ...teamPages, ...nflPages, ...portalSimPages, ...portalPages, ...(MAPS_RELEASED ? mapPages : []), ...weeklyMockPages, ...staffPages, ...playerPages, ...comparisonPages, ...newsPages, ...gamePages];
   const chunks = [];
   
   for (let i = 0; i < allUrls.length; i += chunkSize) {
@@ -509,6 +539,8 @@ console.log(
   - ${teamPages.length} team pages
   - ${nflPages.length} NFL team pages
   - ${portalSimPages.length} Transfer Portal Sim team pages
+  - ${portalPages.length} Transfer Portal team pages (all tabs)
+  - ${MAPS_RELEASED ? mapPages.length : 0} map pages
   - ${weeklyMockPages.length} Weekly Mock pages
   - ${staffPages.length} staff pages
   - ${playerPages.length} player pages

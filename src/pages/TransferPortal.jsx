@@ -47,6 +47,7 @@
 // and the schools' branding (useSchools, batched). A team page adds its
 // own snapshot, and Targets the admin's recommendations.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import PortalWindowBar from "../components/PortalWindowBar";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { Helmet } from "react-helmet-async";
@@ -1596,6 +1597,7 @@ export default function TransferPortal({ view = "board" }) {
       {!team ? <LoadingSpinner label="Loading" size={40} minHeight="300px" /> : (
         <>
           {TeamHero}
+          <PortalWindowBar isMobile={isMobile} />
           {TeamTabs}
           {TeamBody}
         </>
@@ -1604,6 +1606,7 @@ export default function TransferPortal({ view = "board" }) {
   ) : (
     <div style={{ fontFamily: "'Arial Black', Arial, sans-serif" }}>
       {Hero}
+      <PortalWindowBar isMobile={isMobile} />
       {isUpdates ? <>{MoveBar}{Feed}</> : <>{Filters}{ViewBar}{statsView ? StatsTable : List}</>}
     </div>
   );
@@ -1804,8 +1807,6 @@ export default function TransferPortal({ view = "board" }) {
         <meta name="twitter:card" content="summary" />
         <meta name="twitter:title" content={seo.title} />
         <meta name="twitter:description" content={seo.description} />
-        {/* In development — indexable once it's released. */}
-        <meta name="robots" content="noindex, nofollow" />
       </Helmet>
       <style>{BOARD_MODERN_STYLE}</style>
       <style>{"@container (max-width: 265px) { .tp-chip-stars { display: none !important; } }"

@@ -43,6 +43,7 @@ import { stopSpan, championSeasons } from "../utils/careerStops";
 import { stateName, STATE_ABBR } from "../utils/highSchoolMatch";
 import { useAccoladeIcons, accoladeIcon } from "../utils/accoladeIcons";
 import { draftLogo, PORTAL_LOGO } from "../utils/draftLogos";
+import { useEventYear, playerEvents } from "../utils/events";
 import { useIsAdmin } from "../utils/prospectYears";
 import { usePreviewMode } from "../utils/previewLinks";
 
@@ -351,7 +352,12 @@ export function useCareerPath(player, espnId, draft) {
   // transfer's new school leads until CFBD's stops catch up.
   const stops = saved.length ? [...saved].reverse() : player?.School ? [{ School: player.School }] : [];
   if (saved.length && player?.School && stops[0].School !== player.School && !player.InPortal) stops.unshift({ School: player.School });
-  const brands = useSchools(stops.filter((s) => s.Level !== "JUCO").map((s) => s.School));
+  // Draft-season events he took part in (utils/events.js — the Combine, the
+  // all-star games, his pro day), once he's declared or been drafted.
+  const eventYear = player?.Declared || draft ? Number(player?.Eligible) || null : null;
+  const eventData = useEventYear(eventYear);
+  const eventRows = playerEvents(eventData, player?.id, eventYear);
+  const brands = useSchools([...stops.filter((s) => s.Level !== "JUCO").map((s) => s.School), ...eventRows.map((r) => r.school).filter(Boolean)]);
   const { hs, silhouette } = useHighSchool(player?.HighSchool, player?.State);
   const stillInSchool = Number(player?.Eligible) >= Number(currentDraftClass());
   // A promoted recruit still in high school: the college is where they're
@@ -416,6 +422,10 @@ export function useCareerPath(player, espnId, draft) {
       key: "draft", name: `${draftYear} NFL Draft`, brand: draftLogo(draftYear) ? { Logo1: draftLogo(draftYear) } : null,
       fallback: "NFL", span: "Declared", accolades: [],
     }] : []),
+    ...eventRows.map((r) => ({
+      key: `event-${r.slug}`, name: r.name, brand: r.logo ? { Logo1: r.logo } : brands[r.school] || null, fallback: "PD",
+      span: r.span, sub: r.sub, to: r.to, accolades: r.results ? [{ key: "results", text: r.results }] : [],
+    })),
     ...(player?.InPortal ? [{ key: "portal", name: "Transfer Portal", brand: { Logo1: PORTAL_LOGO }, span: "Entered", accolades: [] }] : []),
     ...stops.map((s, i) => ({
       key: `${s.School}-${s.From}`, name: s.School, label: s.Level === "JUCO" ? "JUCO" : null, brand: s.Level === "JUCO" ? null : brands[s.School],

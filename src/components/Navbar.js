@@ -648,6 +648,10 @@ export default function Navbar() {
                         style={{ color: "#fff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.06em", textDecoration: "underline", whiteSpace: "nowrap" }}>
                         Draft Order →
                       </Link>
+                      <Link to="/events" onClick={() => setNflOpen(false)}
+                        style={{ color: "#fff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.06em", textDecoration: "underline", whiteSpace: "nowrap" }}>
+                        Draft Calendar →
+                      </Link>
                       <Link to="/nfl" onClick={() => setNflOpen(false)}
                         style={{ color: "rgba(255,255,255,0.8)", fontSize: "11px", fontWeight: 800, letterSpacing: "0.06em", textDecoration: "underline", whiteSpace: "nowrap" }}>
                         View All →

@@ -538,6 +538,12 @@ service cloud.firestore {
       let after = request.resource.data.get(field, 0);
       return after is int && (after == before || after == before + 1);
     }
+    // Draft-season event participants + Combine results, one doc per year
+    // (utils/events.js) — public pages read it, Admin → Events writes it.
+    match /events/{year} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
     match /config/{doc} {
       allow read: if true;
       allow write: if isAdmin();

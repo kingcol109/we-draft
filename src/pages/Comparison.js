@@ -47,6 +47,7 @@ import { cssRect } from "../utils/pageZoom";
 import { PROSPECT_YEARS, isUnreleasedYear } from "../utils/prospectYears";
 import NflFitView from "../components/NflFitView";
 import { communityAverage } from "../utils/gradeWindow";
+import { useHeadshot } from "../components/draftSim/simHeadshots";
 
 const BLUE = "#0055a5";
 const NAVY = "#00305c";
@@ -633,6 +634,10 @@ export default function Comparison() {
   const [searchRect, setSearchRect] = useState(null);
 
   const [loadedPlayer, setLoadedPlayer] = useState(null); // the full player doc, for header/link-back
+  // His headshot (playerPhotos) stands on the hero's left, the player page's
+  // way; the logo then moves to the right (and a drafted prospect's college
+  // logo drops out, as on the player page).
+  const headshot = useHeadshot(loadedPlayer?.id || "");
   // The loaded prospect's draft round — actual if drafted, else projected
   // from community grade. Only nudges ranking (findComps' subjectRound).
   const [subjectRound, setSubjectRound] = useState(null);
@@ -1489,14 +1494,14 @@ export default function Comparison() {
               80 / 60px phone; undrafted: school logo 135px / 70px. */}
           {loadedPlayer && heroLogo && (() => {
             const wrapStyle = {
-              position: "absolute", top: "50%", left: isMobile ? "4%" : "3%", transform: "translateY(-50%)",
-              height: drafted ? (isMobile ? "80px" : "164px") : (isMobile ? "70px" : "135px"), zIndex: 2, display: "flex", alignItems: "center",
+              position: "absolute", top: "50%", [headshot ? "right" : "left"]: isMobile ? "4%" : "3%", transform: "translateY(-50%)",
+              height: drafted ? (isMobile ? (headshot ? "60px" : "80px") : "164px") : (isMobile ? (headshot ? "56px" : "70px") : "135px"), zIndex: 2, display: "flex", alignItems: "center",
             };
             const img = (
               <img
                 src={sanitizeUrl(heroLogo)} alt={loadedPlayer.School}
                 className="wd-hero-logo-img"
-                style={{ height: "100%", width: "auto", maxWidth: isMobile ? "90px" : "220px", objectFit: "contain", filter: "drop-shadow(0 4px 14px rgba(0,0,0,0.45))" }}
+                style={{ height: "100%", width: "auto", maxWidth: isMobile ? (headshot ? "64px" : "90px") : "220px", objectFit: "contain", filter: "drop-shadow(0 4px 14px rgba(0,0,0,0.45))" }}
                 onError={(e) => { e.currentTarget.style.display = "none"; }}
               />
             );
@@ -1514,7 +1519,20 @@ export default function Comparison() {
           {/* Drafted prospect: college logo pinned right — a smaller second
               background layer opposite the NFL logo, same sizing as
               PlayerProfile.js's heroCollegeLogo. */}
-          {loadedPlayer && drafted && schoolLogo && (() => {
+          {/* The headshot (a transparent cutout) stands on the band's bottom
+              edge on the left, behind the name row. */}
+          {loadedPlayer && headshot && (
+            <img
+              src={sanitizeUrl(headshot)} alt={`${loadedPlayer.First || ""} ${loadedPlayer.Last || ""}`.trim()}
+              style={{
+                position: "absolute", bottom: 0, left: isMobile ? "1%" : "2%",
+                height: isMobile ? "78%" : "88%", maxHeight: isMobile ? "150px" : "250px", width: "auto", maxWidth: isMobile ? "130px" : "260px",
+                objectFit: "contain", objectPosition: "bottom", zIndex: 1, pointerEvents: "none",
+              }}
+              onError={(e) => { e.currentTarget.style.display = "none"; }}
+            />
+          )}
+          {loadedPlayer && drafted && schoolLogo && !headshot && (() => {
             const wrapStyle = {
               position: "absolute", top: "50%", right: isMobile ? "4%" : "3%", transform: "translateY(-50%)",
               height: isMobile ? "60px" : "129px", zIndex: 2, display: "flex", alignItems: "center",

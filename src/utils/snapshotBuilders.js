@@ -96,6 +96,7 @@
 // scripts/buildGradeSnapshots.mjs (buildGradeSnapshotDocs below) so
 // community grades don't wait for the weekly full build.
 import { buildPortalTeams } from "./portalTeams.js";
+import { buildCombineSnapshotDocs } from "./combineData.js";
 import {
   COMP_SNAPSHOT_VERSION, encodeCompSnapshotRows, draftedPlayersAsHistorical,
   communityTraits, isGraded, positionPercentileTables,
@@ -471,6 +472,10 @@ export function buildSiteSnapshotDocs({ historical, players, draftOrder, evalsBy
 
   // FBS teams for the Transfer Portal's team pages (utils/portalTeams.js).
   docs.push({ id: "_cfbTeams", data: { version, teams: buildPortalTeams(schools) } });
+
+  // Combine results by year + the all-time index (utils/combineData.js —
+  // /events/combine and /events/combine/{year}).
+  docs.push(...buildCombineSnapshotDocs({ historical, players, latestDraftYear, version }));
 
   const gradedComps = Object.values(positionSummary).reduce((a, s) => a + s.graded, 0);
   docs.push({

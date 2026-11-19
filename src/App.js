@@ -61,6 +61,8 @@ const StaffPage = lazy(() => import("./pages/StaffPage"));
 const HighSchoolTeamPage = lazy(() => import("./pages/HighSchoolTeamPage"));
 // /portalsim (/portalsim/:team) — the Transfer Portal Sim. Public (user, 2026-11-18: out of beta).
 const PortalSim = lazy(() => import("./pages/PortalSim"));
+// /recruitsim — Recruit Sim (recruiting season game). Beta: admins + Sim Beta users (SimRoute).
+const RecruitSim = lazy(() => import("./pages/RecruitSim"));
 // /portal, /portal/:position, /portal/updates, /portal/:team(/:tab) — the Transfer Portal.
 const TransferPortal = lazy(() => import("./pages/TransferPortal"));
 // /hs/rankings — the high school leaderboards (also unlisted; admin link).
@@ -90,6 +92,12 @@ const DraftTracker = lazy(() => import("./pages/DraftTracker"));
 // NFL Hub
 const NFLPage = lazy(() => import("./pages/NFLPage"));
 const DraftOrderPage = lazy(() => import("./pages/DraftOrderPage"));
+// /events (was /calendar) — key pre-draft dates (utils/draftCalendar.js);
+// /events/{event}/{year} — each event's page (utils/events.js).
+const DraftCalendar = lazy(() => import("./pages/DraftCalendar"));
+const EventPage = lazy(() => import("./pages/EventPage"));
+// /map, /map/draft, /map/{team} — interactive 3D maps (deck.gl; utils/mapData.js).
+const MapPage = lazy(() => import("./pages/MapPage"));
 
 // Articles
 const ArticlePage = lazy(() => import("./pages/ArticlePage"));
@@ -204,6 +212,17 @@ function MainLayout() {
             <Route path="/nfl" element={<NFLPage />} />
             {/* The upcoming drafts' full projected order. */}
             <Route path="/draftorder" element={<DraftOrderPage />} />
+            <Route path="/events" element={<DraftCalendar />} />
+            {/* Admin-only until released (user, 2026-11-18): no sitemap, no links. */}
+            <Route path="/map" element={<AdminRoute><MapPage /></AdminRoute>} />
+            <Route path="/map/:team" element={<AdminRoute><MapPage /></AdminRoute>} />
+            <Route path="/calendar" element={<Navigate to="/events" replace />} />
+            {/* The transfer window has no event page — the portal is its page. */}
+            <Route path="/events/portal/*" element={<Navigate to="/portal" replace />} />
+            {/* The Combine's all-time hub (averages, every year); other events → their current year. */}
+            <Route path="/events/combine" element={<EventPage hub />} />
+            <Route path="/events/:event" element={<EventLatestYear />} />
+            <Route path="/events/:event/:year/:tab?/:pos?" element={<EventPage />} />
             <Route path="/news" element={<News />} />
             <Route path="/news/:id" element={<NewsArticle />} />
             {/* Same gate as the year/position routes (it passes the
@@ -231,6 +250,7 @@ function MainLayout() {
             <Route path="/portalsim/community" element={<PortalSim page="community" />} />
             <Route path="/portalsim/recent" element={<PortalSim page="recent" />} />
             <Route path="/portalsim/:team" element={<><PortalSimMeta /><PortalSim /></>} />
+            <Route path="/recruitsim" element={<SimRoute signInPrompt><RecruitSim /></SimRoute>} />
             <Route path="/portal" element={<TransferPortal />} />
             <Route path="/portal/updates" element={<TransferPortal view="updates" />} />
             <Route path="/portal/:position" element={<TransferPortal />} />
@@ -350,6 +370,12 @@ function UnreleasedGate({ children }) {
   if (!hidden || isAdmin || preview.status === "ok") return wrap(children);
   if (!authReady || preview.status === "checking") return <LoadingSpinner size={48} minHeight="calc(60vh / var(--pz, 1))" />;
   return <RouteNotFound />;
+}
+
+// /events/{event} → that event's current year.
+function EventLatestYear() {
+  const { event } = useParams();
+  return <Navigate to={`/events/${event}/2027`} replace />;
 }
 
 // Redirect /player2/:slug → /player/:slug
