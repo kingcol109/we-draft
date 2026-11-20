@@ -2,1578 +2,1908 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
 
   <url>
+    <loc>https://we-draft.com/portal/iowa/targets</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/iowa-state</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/iowa-state/roster</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/iowa-state/needs</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.45</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/iowa-state/targets</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/jacksonville-state</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/jacksonville-state/roster</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/jacksonville-state/needs</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.45</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/jacksonville-state/targets</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/james-madison</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/james-madison/roster</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/james-madison/needs</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.45</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/james-madison/targets</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/kansas</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/kansas/roster</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/kansas/needs</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.45</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/kansas/targets</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/kansas-state</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/kansas-state/roster</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/kansas-state/needs</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.45</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/kansas-state/targets</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/kennesaw-state</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/kennesaw-state/roster</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/kennesaw-state/needs</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.45</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/kennesaw-state/targets</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/kent-state</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/kent-state/roster</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/kent-state/needs</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.45</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/kent-state/targets</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/kentucky</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/kentucky/roster</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/kentucky/needs</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.45</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/kentucky/targets</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/lsu</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/lsu/roster</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/lsu/needs</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.45</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/lsu/targets</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/liberty</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/liberty/roster</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/liberty/needs</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.45</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/liberty/targets</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/louisiana</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/louisiana/roster</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/louisiana/needs</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.45</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/louisiana/targets</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/louisiana-tech</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/louisiana-tech/roster</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/louisiana-tech/needs</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.45</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/louisiana-tech/targets</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/louisiana-monroe</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/louisiana-monroe/roster</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/louisiana-monroe/needs</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.45</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/louisiana-monroe/targets</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/louisville</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/louisville/roster</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/louisville/needs</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.45</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/louisville/targets</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/marshall</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/marshall/roster</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/marshall/needs</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.45</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/marshall/targets</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/maryland</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/maryland/roster</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/maryland/needs</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.45</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/maryland/targets</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/portal/memphis</loc>
+    <lastmod>2026-11-20</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
     <loc>https://we-draft.com/portal/memphis/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/memphis/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/memphis/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/miami</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/miami/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/miami/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/miami/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/miami-oh</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/miami-oh/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/miami-oh/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/miami-oh/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/michigan</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/michigan/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/michigan/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/michigan/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/michigan-state</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/michigan-state/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/michigan-state/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/michigan-state/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/middle-tennessee</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/middle-tennessee/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/middle-tennessee/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/middle-tennessee/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/minnesota</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/minnesota/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/minnesota/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/minnesota/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/mississippi-state</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/mississippi-state/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/mississippi-state/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/mississippi-state/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/missouri</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/missouri/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/missouri/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/missouri/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/missouri-state</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/missouri-state/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/missouri-state/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/missouri-state/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/nc-state</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/nc-state/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/nc-state/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/nc-state/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/navy</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/navy/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/navy/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/navy/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/nebraska</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/nebraska/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/nebraska/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/nebraska/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/nevada</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/nevada/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/nevada/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/nevada/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/new-mexico</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/new-mexico/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/new-mexico/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/new-mexico/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/new-mexico-state</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/new-mexico-state/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/new-mexico-state/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/new-mexico-state/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/north-carolina</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/north-carolina/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/north-carolina/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/north-carolina/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/north-dakota-state</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/north-dakota-state/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/north-dakota-state/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/north-dakota-state/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/north-texas</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/north-texas/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/north-texas/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/north-texas/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/northern-illinois</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/northern-illinois/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/northern-illinois/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/northern-illinois/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/northwestern</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/northwestern/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/northwestern/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/northwestern/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/notre-dame</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/notre-dame/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/notre-dame/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/notre-dame/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/ohio</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/ohio/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/ohio/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/ohio/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/ohio-state</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/ohio-state/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/ohio-state/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/ohio-state/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/oklahoma</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/oklahoma/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/oklahoma/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/oklahoma/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/oklahoma-state</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/oklahoma-state/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/oklahoma-state/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/oklahoma-state/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/old-dominion</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/old-dominion/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/old-dominion/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/old-dominion/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/ole-miss</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/ole-miss/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/ole-miss/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/ole-miss/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/oregon</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/oregon/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/oregon/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/oregon/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/oregon-state</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/oregon-state/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/oregon-state/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/oregon-state/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/penn-state</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/penn-state/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/penn-state/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/penn-state/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/pittsburgh</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/pittsburgh/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/pittsburgh/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/pittsburgh/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/purdue</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/purdue/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/purdue/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/purdue/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/rice</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/rice/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/rice/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/rice/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/rutgers</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/rutgers/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/rutgers/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/rutgers/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/smu</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/smu/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/smu/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/smu/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/sacramento-state</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/sacramento-state/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/sacramento-state/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/sacramento-state/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/sam-houston-state</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/sam-houston-state/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/sam-houston-state/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/sam-houston-state/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/san-diego-state</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/san-diego-state/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/san-diego-state/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/san-diego-state/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/san-jose-state</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/san-jose-state/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/san-jose-state/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/san-jose-state/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/south-alabama</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/south-alabama/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/south-alabama/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/south-alabama/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/south-carolina</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/south-carolina/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/south-carolina/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/south-carolina/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/south-florida</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/south-florida/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/south-florida/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/south-florida/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/southern-miss</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/southern-miss/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/southern-miss/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/southern-miss/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/stanford</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/stanford/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/stanford/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/stanford/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/syracuse</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/syracuse/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/syracuse/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/syracuse/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/tcu</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/tcu/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/tcu/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/tcu/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/temple</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/temple/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/temple/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/temple/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/tennessee</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/tennessee/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/tennessee/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/tennessee/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/texas</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/texas/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/texas/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/texas/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/texas-am</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/texas-am/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/texas-am/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/texas-am/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/texas-state</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/texas-state/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/texas-state/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/texas-state/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/texas-tech</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/texas-tech/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/texas-tech/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/texas-tech/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/toledo</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/toledo/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/toledo/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/toledo/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/troy</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/troy/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/troy/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/troy/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/tulane</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/tulane/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/tulane/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/tulane/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/tulsa</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/tulsa/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/tulsa/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/tulsa/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/uab</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/uab/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/uab/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/uab/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/ucf</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/ucf/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/ucf/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/ucf/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/ucla</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/ucla/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/ucla/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/ucla/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/uconn</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/uconn/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/uconn/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/uconn/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/umass</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/umass/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/umass/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/umass/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/unlv</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/unlv/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/unlv/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/unlv/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/usc</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/usc/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/usc/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/usc/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/utep</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/utep/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/utep/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/utep/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/utsa</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/utsa/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/utsa/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/utsa/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/utah</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/utah/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/utah/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/utah/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/utah-state</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/utah-state/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/utah-state/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/utah-state/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/vanderbilt</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/vanderbilt/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/vanderbilt/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/vanderbilt/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/virginia</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/virginia/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/virginia/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/virginia/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/virginia-tech</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/virginia-tech/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/virginia-tech/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/virginia-tech/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/wake-forest</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/wake-forest/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/wake-forest/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/wake-forest/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/washington</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/washington/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/washington/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/washington/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/washington-state</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/washington-state/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/washington-state/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/washington-state/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/west-virginia</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/west-virginia/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/west-virginia/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/west-virginia/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/western-kentucky</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/western-kentucky/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/western-kentucky/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/western-kentucky/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/western-michigan</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/western-michigan/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/western-michigan/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/western-michigan/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/wisconsin</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/wisconsin/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/wisconsin/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/wisconsin/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/wyoming</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/wyoming/roster</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/wyoming/needs</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.45</priority>
   </url>
   <url>
     <loc>https://we-draft.com/portal/wyoming/targets</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
@@ -3266,27 +3596,27 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/aamil-wagner-2026-ol</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/aaron-anderson-2026-wr</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/aaron-flowers-2027-db</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/aaron-graves-2026-dl</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/aaron-hall-2026-dl</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3306,12 +3636,12 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/adam-randall-2026-rb</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/adam-trick-2027-edge</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3321,12 +3651,12 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/adon-shuler-2027-db</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/ahmaad-moses-2026-db</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3346,7 +3676,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/ahmari-harvey-2026-db</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3361,7 +3691,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/aidan-hubbard-2026-edge</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3371,7 +3701,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/aiden-fisher-2026-lb</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3396,12 +3726,12 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/aj-harris-2027-db</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/aj-haulcy-2026-db</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3411,7 +3741,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/aj-pena-2026-edge</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3426,12 +3756,12 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/alan-herron-2026-ol</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/albert-regis-2026-dl</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3446,12 +3776,12 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/alex-harkey-2026-ol</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/alex-january-2027-dl</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3466,7 +3796,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/alex-wollschlaeger-2026-ol</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3476,7 +3806,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/alzillion-hamilton-2026-db</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3486,12 +3816,12 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/amare-campbell-2027-lb</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/amare-ferrell-2027-db</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3511,12 +3841,12 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/amarion-peterson-2026-rb</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/amaris-williams-2027-edge</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3526,12 +3856,12 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/andre-fuller-2026-db</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/andre-jordan-jr-2027-db</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3551,7 +3881,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/andrew-sprague-2027-ol</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3561,7 +3891,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/anez-cooper-2026-ol</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3571,12 +3901,12 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/anterio-thompson-2026-dl</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/anthonie-knapp-2027-ol</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3611,7 +3941,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/anthony-lucas-2026-edge</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3621,17 +3951,17 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/anthony-smith-2027-dl</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/anto-saka-2027-edge</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/antoine-deslauriers-2028-lb</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3641,17 +3971,17 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/antonio-kite-2027-db</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/antonio-watts-2027-lb</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/antonio-williams-2026-wr</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3676,7 +4006,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/armaj-reed-adams-2026-ol</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3691,7 +4021,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/ashlynd-barker-2027-db</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3716,22 +4046,22 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/ashton-stamps-2027-db</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/athan-kaliakmanis-2026-qb</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/austin-barber-2026-ol</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/austin-brown-2026-db</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3741,12 +4071,12 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/austin-romaine-2027-lb</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/austin-siereveld-2027-ol</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3766,7 +4096,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/avery-smith-2026-db</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3786,7 +4116,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/barion-brown-2026-wr</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3796,12 +4126,12 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/bauer-sharp-2026-te</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/bear-alexander-2027-dl</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3821,22 +4151,22 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/beau-stephens-2026-ol</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/behren-morton-2026-qb</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/ben-bell-2026-edge</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/ben-murawski-2027-ol</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3851,22 +4181,22 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/billy-schrauth-2026-ol</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/bishop-fitzgerald-2026-db</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/bishop-thomas-2027-dl</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/blake-herold-2027-dl</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3876,7 +4206,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/blake-shapen-2026-qb</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3891,7 +4221,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/bobby-jamison-travis-2026-dl</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3901,12 +4231,12 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/body-schoonover-2027-dl</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/boo-carter-2027-db</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3916,7 +4246,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/boubacar-traore-2027-edge</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3936,22 +4266,22 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/braden-turner-2027-db</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/braelin-moore-2027-ol</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/bralan-womack-2029-db</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/brandon-arrington-2029-db</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3966,17 +4296,17 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/brandon-cleveland-2026-dl</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/brandon-finney-jr-2028-db</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/brandon-frazier-2026-te</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3996,17 +4326,17 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/bray-hubbard-2027-db</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/brayden-jacobs-2028-ol</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/braylan-lovelace-2027-lb</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4016,7 +4346,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/braylon-braxton-2026-qb</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4026,7 +4356,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/brendan-bett-2027-dl</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4041,12 +4371,12 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/brenen-thompson-2026-wr</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/brent-austin-2026-db</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4056,7 +4386,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/brett-norfleet-2027-te</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4066,12 +4396,12 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/brian-parker-ii-2026-ol</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/brice-pollock-2027-db</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4086,7 +4416,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/bruce-mitchell-2027-ol</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4096,12 +4426,12 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/bruno-fina-2026-ol</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/bryan-thomas-jr-2026-edge</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4111,7 +4441,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/bryce-boettcher-2026-lb</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4126,12 +4456,12 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/bryce-fitzgerald-2028-db</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/bryce-lance-2026-wr</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4141,7 +4471,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/bryce-thornton-2027-db</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4156,7 +4486,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/bryson-eason-2026-dl</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4176,7 +4506,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/cade-klubnik-2026-qb</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4186,12 +4516,12 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/caden-barnett-2026-ol</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/caden-curry-2026-edge</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4201,7 +4531,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/caden-fordham-2026-lb</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4226,7 +4556,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/caleb-douglas-2026-wr</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4251,7 +4581,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/caleb-tiernan-2026-ol</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4281,12 +4611,12 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/cam-miller-2026-db</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/cam-smith-2026-db</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4296,12 +4626,12 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/camden-brown-2026-wr</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/cameron-ball-2026-dl</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4311,7 +4641,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/cameron-lindsey-2027-lb</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4321,7 +4651,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/carlos-allen-jr-2026-dl</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4336,17 +4666,17 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/carsen-ryan-2026-te</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/carson-beck-2026-qb</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/carson-hinzman-2027-ol</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4356,17 +4686,17 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/carter-meadows-2029-edge</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/carter-smith-2027-ol</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/carver-willis-2026-ol</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4376,12 +4706,12 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/caullin-lacy-2026-wr</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/cayden-green-2027-ol</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4396,7 +4726,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/ceyair-wright-2026-db</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4406,32 +4736,32 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/chamon-metayer-2026-te</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/champ-westbrooks-2027-ol</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/chandler-morris-2026-qb</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/chandler-rivers-2026-db</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/charles-demmings-2026-db</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/charles-jagusah-2026-ol</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4456,7 +4786,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/chase-roberts-2026-wr</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4471,32 +4801,32 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/chaz-coleman-2028-edge</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/chiddi-obiazor-2027-edge</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/chip-trayanum-2026-rb</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/chris-adams-2026-ol</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/chris-bell-2026-wr</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/chris-brazzell-ii-2026-wr</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4521,7 +4851,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/chris-hilton-2026-wr</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4551,7 +4881,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/chris-mcclellan-2026-dl</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4566,17 +4896,17 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/christian-garrett-2028-dl</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/christian-gray-2027-db</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/christian-pierce-2027-db</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4591,7 +4921,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/cian-slone-2026-lb</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4616,17 +4946,17 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/cj-daniels-2026-wr</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/cj-donaldson-2026-rb</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/cj-fite-2027-dl</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4636,7 +4966,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/cj-williams-2026-wr</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4651,17 +4981,17 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/cody-sigler-2027-dl</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/colbie-young-2026-wr</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/cole-payton-2026-qb</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4671,17 +5001,17 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/cole-wisniewski-2026-db</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/coleman-bennett-2026-rb</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/coleton-price-2027-ol</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4701,7 +5031,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/collin-wright-2026-db</loc>
-    <lastmod>2026-11-19</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4726,337 +5056,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/connor-lew-2026-ol</loc>
-    <lastmod>2026-11-19</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/cooper-barkate-2027-wr</loc>
-    <lastmod>2026-08-26</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/cooper-catalano-2028-lb</loc>
-    <lastmod>2026-10-12</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/cooper-cousins-2027-ol</loc>
-    <lastmod>2026-11-19</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/cooper-perry-2028-wr</loc>
-    <lastmod>2026-08-26</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/corey-myrick-2027-db</loc>
-    <lastmod>2026-11-19</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/corey-robinson-ii-2026-ol</loc>
-    <lastmod>2026-11-19</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/cormani-mcclain-2027-db</loc>
-    <lastmod>2026-11-19</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/cortez-harris-2028-edge</loc>
-    <lastmod>2026-10-25</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/courtland-guillory-2028-db</loc>
-    <lastmod>2026-10-14</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/coy-eakin-2027-wr</loc>
-    <lastmod>2026-08-26</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/coy-okeson-2027-ol</loc>
-    <lastmod>2026-10-25</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/craig-dandridge-2029-wr</loc>
-    <lastmod>2026-10-12</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/cristian-alvarez-2029-ol</loc>
-    <lastmod>2026-11-13</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/cruce-brookins-2027-db</loc>
-    <lastmod>2026-11-19</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/cutter-boley-2027-qb</loc>
-    <lastmod>2026-08-26</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/cyrus-allen-2026-wr</loc>
-    <lastmod>2026-11-19</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/daeden-hopkins-2028-edge</loc>
-    <lastmod>2026-11-17</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/daequan-wright-2027-te</loc>
-    <lastmod>2026-08-23</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/dakorien-moore-2028-wr</loc>
-    <lastmod>2026-08-26</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/dakyus-brinkley-2027-edge</loc>
-    <lastmod>2026-11-19</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/dallas-walker-iv-2027-dl</loc>
-    <lastmod>2026-11-19</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/dallas-wilson-2028-wr</loc>
-    <lastmod>2026-08-26</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/dallen-bentley-2026-te</loc>
-    <lastmod>2026-11-19</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/dalton-johnson-2026-db</loc>
-    <lastmod>2026-11-19</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/damari-brown-2027-db</loc>
-    <lastmod>2026-11-19</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/dametrious-crownover-2026-ol</loc>
-    <lastmod>2026-11-19</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/damon-ferguson-jr-2029-rb</loc>
-    <lastmod>2026-10-18</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/damon-wilson-ii-2027-edge</loc>
-    <lastmod>2026-10-10</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/damonic-williams-2026-dl</loc>
-    <lastmod>2026-11-19</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/dan-villari-2026-te</loc>
-    <lastmod>2026-11-19</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/dane-key-2026-wr</loc>
-    <lastmod>2026-11-19</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/dangelo-ponds-2026-db</loc>
-    <lastmod>2026-08-26</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/dani-dennis-sutton-2026-edge</loc>
-    <lastmod>2026-11-19</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/daniel-bray-2028-rb</loc>
-    <lastmod>2026-11-12</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/daniel-hill-2027-rb</loc>
-    <lastmod>2026-08-26</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/daniel-lyons-2027-dl</loc>
-    <lastmod>2026-11-19</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/daniel-sparks-2027-p</loc>
-    <lastmod>2026-10-25</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/daniel-wingate-2027-lb</loc>
-    <lastmod>2026-11-19</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/danny-odem-iii-2029-db</loc>
-    <lastmod>2026-11-19</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/danny-scudero-2027-wr</loc>
-    <lastmod>2026-08-26</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/dante-atton-2027-p</loc>
-    <lastmod>2026-09-02</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/dante-dowdell-2027-rb</loc>
-    <lastmod>2026-08-26</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/dante-moore-2027-qb</loc>
-    <lastmod>2026-08-26</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/dantre-robinson-2027-dl</loc>
-    <lastmod>2026-10-28</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/darian-mensah-2027-qb</loc>
-    <lastmod>2026-08-26</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/dariel-djabome-2026-lb</loc>
-    <lastmod>2026-11-19</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/darius-gray-2029-ol</loc>
-    <lastmod>2026-09-07</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/darius-taylor-2027-rb</loc>
-    <lastmod>2026-08-26</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/darrell-jackson-jr-2026-dl</loc>
-    <lastmod>2026-11-19</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/dasan-mccullough-2026-edge</loc>
-    <lastmod>2026-11-19</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/dashawn-spears-2027-db</loc>
-    <lastmod>2026-11-19</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/dashawn-womack-2027-edge</loc>
-    <lastmod>2026-11-19</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/daune-morris-2028-rb</loc>
-    <lastmod>2026-11-12</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/daunte-bacheyie-2028-te</loc>
-    <lastmod>2026-10-25</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/david-bailey-2026-edge</loc>
-    <lastmod>2026-08-26</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/david-blay-jr-2026-dl</loc>
-    <lastmod>2026-11-19</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/david-gusta-2026-dl</loc>
-    <lastmod>2026-11-19</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/david-mccomb-2028-qb</loc>
-    <lastmod>2026-10-25</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/david-olano-2027-k</loc>
-    <lastmod>2026-10-25</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/david-sanders-jr-2028-ol</loc>
-    <lastmod>2026-11-19</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/david-santiago-2027-edge</loc>
-    <lastmod>2026-11-13</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/david-stone-2027-dl</loc>
-    <lastmod>2026-11-19</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/davis-warren-2027-qb</loc>
-    <lastmod>2026-08-30</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/davison-igbinosun-2026-db</loc>
-    <lastmod>2026-08-26</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/davon-booth-2026-rb</loc>
-    <lastmod>2026-11-19</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/daylan-mccutcheon-2028-wr</loc>
-    <lastmod>2026-08-26</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <priority>0.7</priority>
   </url>
 </urlset>
