@@ -339,7 +339,7 @@ export function CombinePositionProfile({ ev, pos, profiles, performers, isMobile
         <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 12 : 18, minWidth: 0 }}>
           <div style={{
             width: isMobile ? 64 : 88, height: isMobile ? 64 : 88, flexShrink: 0, borderRadius: 18, background: "rgba(0,0,0,0.22)", border: `3px solid ${GOLD}`,
-            display: "grid", placeItems: "center", fontSize: pos.length > 2 ? (isMobile ? 22 : 30) : (isMobile ? 30 : 40), fontWeight: 900,
+            display: "grid", placeItems: "center", fontSize: pos.length > 3 ? (isMobile ? 16 : 22) : pos.length > 2 ? (isMobile ? 20 : 28) : (isMobile ? 30 : 40), fontWeight: 900, letterSpacing: pos.length > 3 ? "-0.02em" : 0,
           }}>{pos}</div>
           <div style={{ minWidth: 0 }}>
             <div style={kicker(GOLD)}>All-time player rankings</div>
