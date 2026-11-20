@@ -94,6 +94,21 @@ const PAGE_TYPES = [
   // College football: the /cfb hub, schedule (and each week), stats (and
   // each category) — /cfb/schedule/Week 1 → "schedule-week-1".
   { type: "cfb", prefix: "/cfb", hub: true, parse: words },
+  // Transfer Portal: the /portal hub, Portal News (/portal/news,
+  // /portal/news/updates, /portal/news/qb/in → "news-qb-in"), and each
+  // position's or team's portal page with its tabs summed (/portal/qb,
+  // /portal/ohio-state/roster → "ohio-state").
+  {
+    type: "portal", prefix: "/portal", hub: true,
+    parse: (segs) => (segs[0] === "news" ? words(segs) : segs[0] ? segs[0].toLowerCase() : null),
+  },
+  // Transfer Portal Sim: the hub, classes / community / recent, each team's
+  // sim (/portalsim/ohio-state). "/portalsim" isn't under "/portal/" so it
+  // never matches the entry above.
+  { type: "portalsim", prefix: "/portalsim", hub: true, parse: words },
+  // Draft Risers: each class (/risers/2027 → "2027") and edition
+  // (/risers/2027/week-3 → "2027-week-3").
+  { type: "risers", prefix: "/risers", hub: true, parse: words },
 ];
 
 const FIRESTORE_BATCH_LIMIT = 500; // Firestore's hard cap on ops per batch

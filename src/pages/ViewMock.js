@@ -33,7 +33,7 @@ import { textOn } from "../utils/teamColors";
 import {
   loadWeeklyMockSummary, weeklyMockDate, weeklyMockHref, weeklyYearHref, carriedTradeOf, WEEKLY_YEARS, MAIN_WEEKLY_YEAR, hasTeamPages,
 } from "../utils/weeklyMockNews";
-import { NFL_TEAMS } from "../utils/coachHistory";
+import { NFL_TEAMS, NFL_TEAM_ABBRS } from "../utils/coachHistory";
 import {
   BLUE, GOLD, INK, MUTED, CARD_SHADOW, BODY_FONT, MOCK_CARD_CSS,
   useIsMobile, MockPageShell, MockHero, heroPill, chip, button, PhoneAd,
@@ -374,6 +374,8 @@ export default function ViewMock({ mockId: shownId = "", yearPage = "" }) {
           </div>
         )}
 
+        {/* Phone, the weekly mock: jump to a team's own mock (user, 2026-11-19) — right above the rounds. */}
+        {weekly && isMobile && <TeamMockSelect year={teamPages ? year : MAIN_WEEKLY_YEAR} />}
         {availableRounds.length > 1 && (
           <div role="tablist" style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 18 }}>
             {availableRounds.map((r) => (
@@ -433,6 +435,28 @@ export function NoteText({ text }) {
 // page) on the full mock.
 // actions: shown at the right end of the card's bottom row (a team page's
 // up / down votes, components/PickVotes.jsx).
+// The weekly mock's team picker (phone): "Select team" until one's picked,
+// then that team's weekly mock (/mocks/{abbr} — weeklyMockHref).
+function TeamMockSelect({ year }) {
+  const navigate = useNavigate();
+  const teams = [...NFL_TEAM_ABBRS].sort((a, b) => (NFL_TEAMS[a] || a).localeCompare(NFL_TEAMS[b] || b));
+  return (
+    <label style={{ display: "block", position: "relative", marginBottom: 10 }}>
+      <span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}>View a team's {year} mock draft</span>
+      <select value="" onChange={(e) => { if (e.target.value) navigate(weeklyMockHref(e.target.value, year)); }}
+        style={{
+          width: "100%", appearance: "none", WebkitAppearance: "none", padding: "12px 40px 12px 14px", borderRadius: 10,
+          border: `2px solid ${BLUE}`, background: "#fff", color: BLUE, fontFamily: BODY_FONT, fontSize: 15, fontWeight: 900,
+          letterSpacing: "0.04em", textTransform: "uppercase", boxShadow: CARD_SHADOW, cursor: "pointer",
+        }}>
+        <option value="">Select team</option>
+        {teams.map((t) => <option key={t} value={t}>{NFL_TEAMS[t] || t}</option>)}
+      </select>
+      <span aria-hidden="true" style={{ position: "absolute", right: 14, top: "50%", transform: "translateY(-50%)", color: BLUE, fontSize: 14, fontWeight: 900, pointerEvents: "none" }}>▾</span>
+    </label>
+  );
+}
+
 export function PickRow({ pick, brand, isMobile, sub = null, teamPage = false, collegeLogo = "", headshot = "", teamMock = "", vertical = false, actions = null }) {
   const player = pick.selection;
   const c1 = brand.Color1 || BLUE;

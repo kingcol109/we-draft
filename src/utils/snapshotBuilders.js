@@ -213,7 +213,7 @@ const byDocId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
  * @param {string}   input.latestDraftYear  e.g. "2026"
  * @param {string[]} input.activeYears  e.g. ["2027","2028","2029"]
  */
-export function buildSiteSnapshotDocs({ historical, players, draftOrder, evalsByPlayerId, schools, ads, nflTeams = [], coaches = null, latestDraftYear, activeYears }) {
+export function buildSiteSnapshotDocs({ historical, players, draftOrder, evalsByPlayerId, schools, ads, nflTeams = [], coaches = null, combineInvites = null, latestDraftYear, activeYears }) {
   const docs = [];
   const version = COMP_SNAPSHOT_VERSION;
   const evalsOf = (id) => evalsByPlayerId[id] || [];
@@ -475,7 +475,10 @@ export function buildSiteSnapshotDocs({ historical, players, draftOrder, evalsBy
 
   // Combine results by year + the all-time index (utils/combineData.js —
   // /events/combine and /events/combine/{year}).
-  docs.push(...buildCombineSnapshotDocs({ historical, players, latestDraftYear, version }));
+  // combineInvites: { [year]: [InviteRow] } — every invite, drafted or not.
+  const latestPicks = Object.fromEntries(draftOrder.filter((d) => typeof d.Selection === "string" && d.Selection)
+    .map((d) => [d.Selection, { round: Number(d.Round) || null, pick: Number(d.Pick) || null, team: NFL_TEAMS[d.Team] || d.Team || "" }]));
+  docs.push(...buildCombineSnapshotDocs({ historical, players, invites: combineInvites, latestPicks, schools, latestDraftYear, version }));
 
   const gradedComps = Object.values(positionSummary).reduce((a, s) => a + s.graded, 0);
   docs.push({

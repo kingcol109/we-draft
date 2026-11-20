@@ -66,7 +66,7 @@ const RecruitSim = lazy(() => import("./pages/RecruitSim"));
 // /portal, /portal/:position, /portal/news/updates, /portal/:team(/:tab) — the Transfer Portal.
 // (The updates feed moved from /portal/updates to /portal/news/updates — user, 2026-11-19; the old URL redirects, here and in vercel.json.)
 const TransferPortal = lazy(() => import("./pages/TransferPortal"));
-// /portal/news (+ /in, /out, /{pos}, /{pos}/in|out, /updates) — Portal News (utils/portalNews.js): the portal's editorial pages; an empty page is noindexed.
+// /portal/news (+ /in, /out, /{pos}, /{pos}/in|out, /updates) — Portal News (utils/portalNews.js): the portal's editorial pages; all indexable.
 const PortalNews = lazy(() => import("./pages/PortalNews"));
 // /hs/rankings — the high school leaderboards (also unlisted; admin link).
 const HighSchoolRankings = lazy(() => import("./pages/HighSchoolRankings"));
@@ -99,6 +99,8 @@ const DraftOrderPage = lazy(() => import("./pages/DraftOrderPage"));
 // /events/{event}/{year} — each event's page (utils/events.js).
 const DraftCalendar = lazy(() => import("./pages/DraftCalendar"));
 const EventPage = lazy(() => import("./pages/EventPage"));
+// The Combine hub's position profiles (/events/combine/{pos}).
+const COMBINE_PROFILE_POSITIONS = ["QB", "RB", "WR", "TE", "OL", "EDGE", "DL", "LB", "DB"];
 // /risers/{year} — Draft Risers (utils/risers.js; Admin → Content → Rising Page).
 const Risers = lazy(() => import("./pages/Risers"));
 // /map, /map/draft, /map/{team} — interactive 3D maps (deck.gl; utils/mapData.js).
@@ -226,6 +228,13 @@ function MainLayout() {
             <Route path="/events/portal/*" element={<Navigate to="/portal" replace />} />
             {/* The Combine's all-time hub (averages, every year); other events → their current year. */}
             <Route path="/events/combine" element={<EventPage hub />} />
+            {/* Its tabs: each position's profile (/events/combine/qb — static, so
+                they win over /events/:event/:year), each drill's ranking at it
+                (/events/combine/qb/40-yard-dash), and every year. */}
+            {COMBINE_PROFILE_POSITIONS.map((p) => (
+              <Route key={p} path={`/events/combine/${p.toLowerCase()}/:drill?`} element={<EventPage hub section="averages" hubPos={p} />} />
+            ))}
+            <Route path="/events/combine/years" element={<EventPage hub section="years" />} />
             <Route path="/events/:event" element={<EventLatestYear />} />
             <Route path="/events/:event/:year/:tab?/:pos?" element={<EventPage />} />
             <Route path="/risers" element={<Navigate to="/risers/2027" replace />} />

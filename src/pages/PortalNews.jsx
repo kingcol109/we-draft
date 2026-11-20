@@ -227,8 +227,9 @@ export default function PortalNews({ view = "news" }) {
         <title>{title}</title>
         <meta name="description" content={description} />
         <link rel="canonical" href={url} />
-        {/* Unreleased: out of search until the board is published for real. */}
-        {!isUpdates && (news?.simulated || empty || !ready || !ranked.length) && <meta name="robots" content="noindex, follow" />}
+        {/* Live and indexable (user, 2026-11-19). Only the SIMULATED preview
+            board (localhost / ?sim=1) stays out of search — it's fake data. */}
+        {!isUpdates && news?.simulated && <meta name="robots" content="noindex, follow" />}
         <meta property="og:type" content="website" />
         <meta property="og:title" content={title} />
         <meta property="og:description" content={description} />

@@ -330,6 +330,13 @@ for (const doc of allTeams) {
     ]),
     { path: "/events/combine/2027/results", priority: 0.65, lastmod: today },
     ...["qb", "rb", "wr", "te", "ol", "edge", "dl", "lb", "db"].map((pos) => ({ path: `/events/combine/2027/results/${pos}`, priority: 0.5, lastmod: today })),
+    // The Combine hub: all-time position averages + records, each position's profile, every year.
+    { path: "/events/combine", priority: 0.7, lastmod: today },
+    { path: "/events/combine/years", priority: 0.5, lastmod: today },
+    ...["qb", "rb", "wr", "te", "ol", "edge", "dl", "lb", "db"].map((pos) => ({ path: `/events/combine/${pos}`, priority: 0.6, lastmod: today })),
+    // Each drill's all-time ranking at each position (components/events/CombineProfiles.jsx DRILL_PAGES).
+    ...["qb", "rb", "wr", "te", "ol", "edge", "dl", "lb", "db"].flatMap((pos) => ["40-yard-dash", "vertical-jump", "broad-jump", "bench-press", "3-cone-drill", "20-yard-shuttle"]
+      .map((d) => ({ path: `/events/combine/${pos}/${d}`, priority: 0.5, lastmod: today }))),
     // Draft Sim, both classes (the team pages are with each team below).
     { path: "/draftsim", priority: 0.8, lastmod: today },
     { path: "/draftsim/2028", priority: 0.65, lastmod: today },
@@ -472,7 +479,7 @@ for (const doc of allTeams) {
      PORTAL NEWS — /portal/news and its IN / OUT and position pages, like the
      Risers: only once a board is published (portalNews/current has players),
      dated to its last Save, and only the pages that have someone on them
-     (an empty position page is noindexed on the page, so it's left out here).
+     (an empty position page has nothing to rank, so it's left out here).
   ========================= */
   const portalNewsPages = [];
   {

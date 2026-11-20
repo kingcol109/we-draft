@@ -48,7 +48,7 @@ async function main() {
   const db = getFirestore();
   const t0 = Date.now();
 
-  const [histSnap, playerSnap, orderSnap, schoolSnap, adSnap, nflSnap, coachSnap] = await Promise.all([
+  const [histSnap, playerSnap, orderSnap, schoolSnap, adSnap, nflSnap, coachSnap, inviteSnap] = await Promise.all([
     db.collection("historical").get(),
     db.collection("players").get(),
     db.collection("draftOrder").get(),
@@ -56,6 +56,7 @@ async function main() {
     db.collection("ads").get(),
     db.collection("nfl").get(),
     db.collection("coaches").where("Status", "==", "current").get(),
+    db.collection("combineInvites").get(),
   ]);
   const players = playerSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
   console.log(`Read historical ${histSnap.size}, players ${players.length}, draftOrder ${orderSnap.size}, schools ${schoolSnap.size}, ads ${adSnap.size}, coaches ${coachSnap.size}`);
@@ -78,6 +79,7 @@ async function main() {
     ads: adSnap.docs.map((d) => d.data()),
     nflTeams: nflSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
     coaches: coachSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+    combineInvites: Object.fromEntries(inviteSnap.docs.map((d) => [d.id, d.data().rows || []])),
     latestDraftYear: LATEST_DRAFT_YEAR,
     activeYears: ACTIVE_YEARS,
   });

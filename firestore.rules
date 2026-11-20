@@ -297,6 +297,24 @@ service cloud.firestore {
     // Precomputed per-position comparison data (one doc per position +
     // _meta) — read by the public Comparison.js page, rebuilt from the
     // admin Historical tab (AdminPanel.js's CompSnapshotRebuild).
+    // Every NFL Combine invite since 2000, one doc per year (the nflverse
+    // file, scripts/importCombineInvites.mjs) — read by the snapshot rebuild.
+    match /combineInvites/{doc} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    // Admin → Content → Combine (components/AdminCombine.jsx): the all-time
+    // best performer graphics' settings, and the photos uploaded for them.
+    // Readable by anyone — each position page draws its graphic
+    // (components/events/CombineGraphic.jsx).
+    match /combineGraphics/{doc} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /combineShots/{doc} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
     match /compSnapshots/{doc} {
       allow read: if true;
       allow write: if isAdmin();

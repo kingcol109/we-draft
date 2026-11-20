@@ -47,6 +47,7 @@ import AdminResearch from "../components/AdminResearch";
 import AdminProspectResearch from "../components/AdminProspectResearch";
 import AdminPhotos from "../components/AdminPhotos";
 import AdminRisers from "../components/AdminRisers";
+import AdminCombine from "../components/AdminCombine";
 import AdminSideGraphics from "../components/AdminSideGraphics";
 import AdminProDayIcons from "../components/AdminProDayIcons";
 import AdminEvents from "../components/AdminEvents";
@@ -401,6 +402,8 @@ const CONTENT_SECTION_TABS = [
   { key: "calendar", label: "Content Calendar" },
   { key: "photos", label: "Photos" },
   { key: "risers", label: "Rising Page" },
+  // All-time Combine leader graphics (components/AdminCombine.jsx).
+  { key: "combine", label: "Combine" },
   { key: "instagram", label: "Instagram" },
   { key: "instagramAnalytics", label: "Instagram Analytics" },
   { key: "x", label: "X Posts" },
@@ -451,6 +454,7 @@ function ContentSection({ initialTab }) {
       {tab === "calendar" && <ContentCalendarManager onOpenPost={(platform, what) => openIn(platform === "x" ? "x" : "instagram", what)} />}
       {tab === "photos" && <AdminPhotos />}
       {tab === "risers" && <AdminRisers />}
+      {tab === "combine" && <AdminCombine />}
       {tab === "instagram" && <AdminInstagram openPostId={opening?.tab === "instagram" ? opening.id : null} onOpenInX={(id) => openIn("x", { id })} />}
       {tab === "instagramAnalytics" && <AdminInstagramAnalytics />}
       {tab === "x" && <AdminX open={opening?.tab === "x" ? opening : null} />}
@@ -3877,13 +3881,15 @@ function CompSnapshotRebuild({ records }) {
     setMessage("");
     try {
       setMessage("Reading players…");
-      const [playerSnap, orderSnap, schoolSnap, adSnap, nflSnap, coachSnap] = await Promise.all([
+      const [playerSnap, orderSnap, schoolSnap, adSnap, nflSnap, coachSnap, inviteSnap] = await Promise.all([
         getDocs(collection(db, "players")),
         getDocs(collection(db, "draftOrder")),
         getDocs(collection(db, "schools")),
         getDocs(collection(db, "ads")),
         getDocs(collection(db, "nfl")),
         getDocs(query(collection(db, "coaches"), where("Status", "==", "current"))),
+        // Every Combine invite (scripts/importCombineInvites.mjs); null if unreadable.
+        getDocs(collection(db, "combineInvites")).catch(() => null),
       ]);
       const players = playerSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
       const evalsByPlayerId = {};
@@ -3903,6 +3909,7 @@ function CompSnapshotRebuild({ records }) {
         ads: adSnap.docs.map((d) => d.data()),
         nflTeams: nflSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
         coaches: coachSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+        combineInvites: inviteSnap ? Object.fromEntries(inviteSnap.docs.map((d) => [d.id, d.data().rows || []])) : null,
         latestDraftYear: LATEST_DRAFT_YEAR,
         // Unreleased classes (utils/prospectYears.js) stay out of the public snapshots.
         activeYears: ACTIVE_YEARS.filter((y) => !isUnreleasedYear(y)),
@@ -9889,6 +9896,9 @@ const CONTENT_TABS = [
   { key: "live", label: "Live" },
   { key: "team", label: "College Teams" },
   { key: "cfb", label: "CFB" },
+  { key: "portal", label: "Portal" },
+  { key: "portalsim", label: "Portal Sim" },
+  { key: "risers", label: "Draft Risers" },
 ];
 
 function AnalyticsSection() {
@@ -10820,6 +10830,35 @@ async function fetchCfbRows() {
   });
 }
 
+// Transfer Portal / Portal Sim / Draft Risers — slugs per
+// syncGoogleAnalytics.js: portal "news-qb-in", "qb", "ohio-state";
+// portalsim "ohio-state"; risers "2027", "2027-week-3".
+const PORTALSIM_PAGES = { hub: "Transfer Portal Sim", classes: "Portal Sim classes", community: "Portal Sim community", recent: "Recent portal sims" };
+// /portal/{position} pages (TransferPortal.jsx POSITIONS); anything else is a team.
+const isPortalPos = (s) => ["qb", "rb", "wr", "te", "ol", "edge", "dl", "lb", "db", "k", "p"].includes(s);
+function portalTitle(slug) {
+  if (slug === "hub") return "Transfer Portal";
+  if (slug === "news") return "Portal News";
+  if (slug.startsWith("news-")) return `Portal News · ${slug.slice(5).split("-").map((w) => (w.length <= 3 ? w.toUpperCase() : titleWords(w))).join(" ")}`;
+  return isPortalPos(slug) ? `${slug.toUpperCase()} Transfer Portal` : `${titleWords(slug)} Portal`;
+}
+const portalSimTitle = (slug) => PORTALSIM_PAGES[slug] || `${titleWords(slug)} Portal Sim`;
+function risersTitle(slug) {
+  if (slug === "hub") return "Draft Risers";
+  const [year, ...rest] = slug.split("-");
+  return `${year} Draft Risers${rest.length ? ` · ${titleWords(rest.join("-"))}` : ""}`;
+}
+function seenRows(type, prefix, titleOf, subtitleOf) {
+  return async () => [...(await fetchSeen(type))].map(([slug, path]) => ({
+    slug, title: titleOf(slug), subtitle: subtitleOf(slug),
+    href: path || (slug === "hub" ? prefix : `${prefix}/${slug}`), dateMs: 0,
+  }));
+}
+const fetchPortalRows = seenRows("portal", "/portal", portalTitle,
+  (s) => (s === "hub" ? "Page" : s.startsWith("news") ? "Portal News" : isPortalPos(s) ? "Position" : "Team"));
+const fetchPortalSimRows = seenRows("portalsim", "/portalsim", portalSimTitle, (s) => (PORTALSIM_PAGES[s] ? "Page" : "Team sim"));
+const fetchRisersRows = seenRows("risers", "/risers", risersTitle, (s) => (s === "hub" ? "Page" : s.includes("-") ? "Edition" : "Class"));
+
 // ── Top Pages (Overview): every page the sync tracks, all sections in one
 // ranking. Players' names come from the players collection (one read);
 // every other title is built from the slug — the section tabs have the
@@ -10851,6 +10890,9 @@ function pageTitleOf({ type, slug }, names) {
     case "board": return slug === "hub" ? "Community Board" : b ? `${a} ${b.toUpperCase()} board` : `${a} big board`;
     case "live": return slug === "hub" ? "We-Draft Live" : titleWords(slug);
     case "cfb": return slug === "hub" ? "College Football" : titleWords(slug);
+    case "portal": return portalTitle(slug);
+    case "portalsim": return portalSimTitle(slug);
+    case "risers": return risersTitle(slug);
     default: return titleWords(slug);
   }
 }
@@ -10982,6 +11024,9 @@ const CONTENT_ANALYTICS_CONFIG = {
   live: { label: "Live", noun: "page", publicPrefix: "/live/", fetchRows: fetchLiveRows },
   team: { label: "College Teams", noun: "team", publicPrefix: "/team/", fetchRows: fetchCollegeTeamRows },
   cfb: { label: "CFB", noun: "page", publicPrefix: "/cfb/", fetchRows: fetchCfbRows },
+  portal: { label: "Portal", noun: "page", publicPrefix: "/portal/", fetchRows: fetchPortalRows },
+  portalsim: { label: "Portal Sim", noun: "page", publicPrefix: "/portalsim/", fetchRows: fetchPortalSimRows },
+  risers: { label: "Draft Risers", noun: "page", publicPrefix: "/risers/", fetchRows: fetchRisersRows },
 };
 
 // ── Games/Articles page-view table — one reusable component driven by

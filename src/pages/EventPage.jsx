@@ -5,7 +5,9 @@
 // Shrine Bowl and Pro Days.
 // The Combine also has every past year we have results for
 // (/events/combine/2015 — utils/combineData.js) and an all-time hub at
-// /events/combine (<EventPage hub />): averages by position, every year.
+// /events/combine (<EventPage hub />): tabs for position averages (each
+// position's profile at /events/combine/{pos}) and every year
+// (/events/combine/years).
 //   (no tab)       Overview — dates, countdown to the first day, the schedule,
 //                  who's there. Pro Days: the schedule, school by school.
 //   participants   Everyone taking part, by position (/participants/qb), by
@@ -26,7 +28,8 @@ import {
   EVENT_PAGES, EVENT_YEARS, EVENT_POSITIONS, eventPath, eventDates, proDaySchedule, participantsOf, playerHref, schoolHref, useEventYear,
   fetchCombineIndex, fetchCombineYear, isPastCombineYear, useAsync,
 } from "../utils/events";
-import { formatCombine, COMBINE_EVENT_YEAR, COMBINE_FIRST_YEAR, COMBINE_KEYS } from "../utils/combineData";
+import { formatCombine, COMBINE_EVENT_YEAR, COMBINE_FIRST_YEAR } from "../utils/combineData";
+import { PositionTabs, CombineAllPositions, CombinePositionProfile, useCombineProfiles, PROFILE_POSITIONS, POSITION_NAMES, combinePosPath, combineDrillPath, combineHeadline, drillFromSlug, DRILL_PAGES } from "../components/events/CombineProfiles";
 import {
   NAVY, GOLD, BODY_FONT, WEEKDAYS, MONTHS, MON, BadgeFont, Icon, ProDayBadge, startOfToday, sameDay, rangeLabel,
   Countdown, useNow, CombineSchedule, SectionHead, useProDayBadges,
@@ -52,7 +55,7 @@ function useIsMobile() {
   return m;
 }
 
-export default function EventPage({ hub = false }) {
+export default function EventPage({ hub = false, section = "", hubPos = "" }) {
   const params = useParams();
   const event = hub ? "combine" : params.event;
   const { year: yearParam, tab = "", pos: posParam } = params;
@@ -71,7 +74,7 @@ export default function EventPage({ hub = false }) {
   const contentRef = useRef(null);
   const badgeFor = useProDayBadges(event === "pro-days");
 
-  if (hub) return <CombineHub index={combineIndex} isMobile={isMobile} now={now} />;
+  if (hub) return <CombineHub index={combineIndex} isMobile={isMobile} now={now} section={section} pos={hubPos} drillSlug={hub ? params.drill : undefined} />;
   if (!ev || (!EVENT_YEARS.includes(year) && !past)) return <Navigate to={isCombine ? "/events/combine" : "/events"} replace />;
   if (past && combineIndex !== undefined && !isPastCombineYear(year, combineIndex)) return <Navigate to="/events/combine" replace />;
   if (!tabs.some(([k]) => k === tab) || (pos && (!tab || !EVENT_POSITIONS.includes(pos)))) return <Navigate to={eventPath(event, year)} replace />;
@@ -112,7 +115,7 @@ export default function EventPage({ hub = false }) {
     ? `Every ${pos ? `${posName.toLowerCase()} ` : ""}result from the ${base}: 40-yard dash, vertical, broad jump, bench, 3-cone, shuttle and measurements, sortable by event.`
     : tab === "participants"
       ? `Every ${pos ? `${posName.toLowerCase()} ` : "player "}at the ${base}${event === "pro-days" ? ", school by school" : ""}, with links to each prospect's We-Draft.com profile.`
-      : past ? `The ${base}: every drafted player's 40-yard dash, vertical, broad jump, bench, 3-cone, shuttle and measurements, plus the top performers in each drill.`
+      : past ? `The ${base}: every player's 40-yard dash, vertical, broad jump, bench, 3-cone, shuttle and measurements — drafted and undrafted — plus the top performers in each drill.`
         : `${ev.about} ${start ? `${rangeLabel({ start, finish: end || start })}${ev.location ? ` · ${ev.location}` : ""}.` : ""}`;
   const url = `${SITE}${eventPath(event, year, tab, pos)}`;
   const jsonLd = !tab && start && event !== "pro-days" ? {
@@ -189,7 +192,7 @@ export default function EventPage({ hub = false }) {
 }
 
 // ── Hero: logo, name, dates, countdown to the first day ──
-function Hero({ ev, year, start, end, now, isMobile, count, schools, past, title, kicker, note }) {
+function Hero({ ev, year, start, end, now, isMobile, count, schools, past, title, kicker, note, titleAs = "h1" }) {
   const today = startOfToday();
   const over = end && today > end;
   const live = start && !over && now >= start;
@@ -205,9 +208,9 @@ function Hero({ ev, year, start, end, now, isMobile, count, schools, past, title
         </div>
         <div style={{ flex: 1, minWidth: 0, alignSelf: "stretch", display: "flex", flexDirection: "column", justifyContent: "center" }}>
           <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.16em", textTransform: "uppercase", color: GOLD }}>{kicker || (past ? `${year} NFL Draft Class` : `Road to the ${year} NFL Draft`)}</div>
-          <FitTitle text={title || `${year} ${ev.name}`} max={isMobile ? 28 : 38} min={isMobile ? 16 : 22} />
+          <FitTitle text={title || `${year} ${ev.name}`} max={isMobile ? 28 : 38} min={isMobile ? 16 : 22} as={titleAs} />
           <div style={{ fontSize: isMobile ? 13 : 15, fontWeight: 800, color: "rgba(255,255,255,0.92)", fontFamily: BODY_FONT }}>
-            {note || (past ? "Results for the class's drafted players" : `${start ? rangeLabel({ start, finish: end || start }) : "Dates to come"}${ev.location ? ` · ${ev.location}` : ""}`)}
+            {note || (past ? "Every player tested, drafted and undrafted" : `${start ? rangeLabel({ start, finish: end || start }) : "Dates to come"}${ev.location ? ` · ${ev.location}` : ""}`)}
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10, justifyContent: isMobile ? "center" : "flex-start" }}>
             {count > 0 && <Pill>{count} {ev.slug === "combine" && !past ? "invited" : "players"}</Pill>}
@@ -232,7 +235,7 @@ function Hero({ ev, year, start, end, now, isMobile, count, schools, past, title
 // The event's name on one line: as big as max, shrunk to the room its
 // column has ("2027 NFL Scouting Combine" would otherwise stack).
 let measureCtx = null;
-function FitTitle({ text, max, min }) {
+function FitTitle({ text, max, min, as: Tag = "h1" }) {
   const ref = useRef(null);
   const [size, setSize] = useState(max);
   useLayoutEffect(() => {
@@ -251,9 +254,9 @@ function FitTitle({ text, max, min }) {
     return () => { window.removeEventListener("resize", fit); window.removeEventListener("pagezoomchange", fit); };
   }, [text, max, min]);
   return (
-    <h1 ref={ref} style={{ margin: "4px 0 6px", fontSize: size, fontWeight: 900, color: "#fff", textTransform: "uppercase", lineHeight: 1.05, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+    <Tag ref={ref} style={{ margin: "4px 0 6px", fontSize: size, fontWeight: 900, color: "#fff", textTransform: "uppercase", lineHeight: 1.05, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
       {text}
-    </h1>
+    </Tag>
   );
 }
 const Pill = ({ children }) => <span style={{ padding: "4px 11px", borderRadius: 999, background: "rgba(255,255,255,0.16)", color: "#fff", fontSize: 11, fontWeight: 900, letterSpacing: "0.05em", textTransform: "uppercase" }}>{children}</span>;
@@ -417,7 +420,8 @@ function PositionTiles({ ev, year, people, tab, isMobile }) {
 }
 
 // ── Participants ──
-function PosChips({ ev, year, tab, pos, people }) {
+// onPick: pick in place (buttons) instead of linking to each position's tab page.
+function PosChips({ ev, year, tab, pos, people, onPick }) {
   const present = EVENT_POSITIONS.filter((p) => people.some((x) => x.position === p));
   const chip = (on) => ({
     padding: "6px 12px", borderRadius: 999, fontSize: 12, fontWeight: 900, letterSpacing: "0.04em", textDecoration: "none",
@@ -425,8 +429,17 @@ function PosChips({ ev, year, tab, pos, people }) {
   });
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
-      <Link to={eventPath(ev.slug, year, tab)} style={chip(!pos)}>All</Link>
-      {(present.length ? present : EVENT_POSITIONS).map((p) => <Link key={p} to={eventPath(ev.slug, year, tab, p)} style={chip(pos === p)}>{p}</Link>)}
+      {onPick ? (
+        <>
+          <button type="button" onClick={() => onPick("")} aria-pressed={!pos} style={{ ...chip(!pos), cursor: "pointer", fontFamily: "inherit" }}>All</button>
+          {(present.length ? present : EVENT_POSITIONS).map((p) => <button key={p} type="button" onClick={() => onPick(p)} aria-pressed={pos === p} style={{ ...chip(pos === p), cursor: "pointer", fontFamily: "inherit" }}>{p}</button>)}
+        </>
+      ) : (
+        <>
+          <Link to={eventPath(ev.slug, year, tab)} style={chip(!pos)}>All</Link>
+          {(present.length ? present : EVENT_POSITIONS).map((p) => <Link key={p} to={eventPath(ev.slug, year, tab, p)} style={chip(pos === p)}>{p}</Link>)}
+        </>
+      )}
     </div>
   );
 }
@@ -573,7 +586,7 @@ function ProDaySchedule({ ev, year, people, schedule, isMobile, badgeFor }) {
 
 // ── Combine results ──
 const hasVal = (v) => v !== "" && v != null && Number.isFinite(toNumber(v));
-function Results({ ev, year, people, pos, isMobile, past }) {
+function Results({ ev, year, people, pos, isMobile, past, onPick }) {
   const [sort, setSort] = useState({ key: "forty", dir: 0 });
   const metric = RESULT_COLS.find((m) => m.key === sort.key);
   const asc = sort.dir ? sort.dir > 0 : !!metric?.lowerIsBetter;
@@ -590,7 +603,7 @@ function Results({ ev, year, people, pos, isMobile, past }) {
   const th = (on) => ({ padding: "9px 8px", fontSize: 11, fontWeight: 900, letterSpacing: "0.04em", textTransform: "uppercase", color: on ? "#fff" : "#5a6475", background: on ? ev.color : "#f1f4f8", cursor: "pointer", whiteSpace: "nowrap", textAlign: "center", userSelect: "none" });
   return (
     <>
-      <PosChips ev={ev} year={year} tab="results" pos={pos} people={people} />
+      <PosChips ev={ev} year={year} tab="results" pos={pos} people={people} onPick={onPick} />
       {!rows.length ? (
         <Empty ev={ev}>
           {pos ? `No ${POS_NAMES[pos]?.toLowerCase() || pos} results ${past ? "on file" : "yet"}. ` : `No results ${past ? "on file" : "yet"}. `}
@@ -636,7 +649,7 @@ function Results({ ev, year, people, pos, isMobile, past }) {
                     <td style={{ padding: "8px", textAlign: "center", fontSize: 12, fontWeight: 900, color: "#3a4352" }}>{p.position}</td>
                     {past && (
                       <td style={{ padding: "8px", textAlign: "center", fontSize: 11, fontWeight: 800, color: "#3a4352", whiteSpace: "nowrap" }}>
-                        {p.round ? `Rd ${p.round}${p.pick ? ` · #${p.pick}` : ""}` : "—"}
+                        {p.round ? `Rd ${p.round}${p.pick ? ` · #${p.pick}` : ""}` : p.undrafted ? <span style={{ color: "#8a94a6" }}>Undrafted</span> : "—"}
                         {p.team && <div style={{ fontSize: 10, fontWeight: 700, color: "#8a94a6" }}>{p.team}</div>}
                       </td>
                     )}
@@ -678,6 +691,7 @@ function YearSwitch({ ev, year, tab, pos, index }) {
 // A past Combine's overview: the best in each drill, then who's on file by position.
 const DRILLS = ["forty", "vertical", "broad", "bench", "threeCone", "shuttle"];
 function PastCombineOverview({ ev, year, people, isMobile }) {
+  const [pos, setPos] = useState("");
   const top = (key) => {
     const m = RESULT_COLS.find((x) => x.key === key);
     return people.filter((p) => p.results?.[key] != null)
@@ -686,7 +700,7 @@ function PastCombineOverview({ ev, year, people, isMobile }) {
   return (
     <>
       <p style={{ margin: "0 0 4px", fontSize: isMobile ? 14 : 16, fontWeight: 600, color: "#3a4352", lineHeight: 1.6, fontFamily: BODY_FONT }}>
-        Combine results and measurements from the {year} draft class — the players who were drafted, with where they went.
+        Every result and measurement from the {year} Combine — drafted and undrafted players, with where each one went.
       </p>
       <SectionHead icon="stopwatch" title="Top Performers" isMobile={isMobile} color={ev.color} />
       {people.length ? (
@@ -718,29 +732,66 @@ function PastCombineOverview({ ev, year, people, isMobile }) {
         </div>
       ) : <Empty ev={ev}>No results on file for {year} yet.</Empty>}
       <SectionHead icon="users" title="Results by Position" isMobile={isMobile} color={ev.color} />
-      <PositionTiles ev={ev} year={year} people={people} tab="results" isMobile={isMobile} />
+      {/* The whole table, filtered by position right here. */}
+      <Results ev={ev} year={year} people={people} pos={pos} isMobile={isMobile} past onPick={setPos} />
     </>
   );
 }
 
 // ── /events/combine — the all-time hub ──
-function CombineHub({ index, isMobile, now }) {
+// One link to the current Combine, then two tabs: Position Averages (All, or
+// a position's profile — components/events/CombineProfiles.jsx) and Every
+// Combine (each year with results).
+const HUB_TABS = [["", "Position Averages", "/events/combine"], ["years", "Every Combine", "/events/combine/years"]];
+function CombineHub({ index, isMobile, now, section, pos, drillSlug }) {
   const ev = EVENT_PAGES.combine;
   const contentRef = useRef(null);
+  const data = useCombineProfiles(index);
+  const profiles = data?.profiles;
   const next = eventDates("combine");
   const years = Object.entries(index?.years || {}).map(([y, v]) => ({ year: Number(y), ...v })).sort((a, b) => b.year - a.year);
   const firstYear = years.length ? years[years.length - 1].year : null;
   const latestPast = years[0]?.year;
-  const avg = index?.averages || {};
-  const positions = [...EVENT_POSITIONS.filter((p) => avg[p]), ...Object.keys(avg).filter((p) => !EVENT_POSITIONS.includes(p)).sort()];
-  const cols = COMBINE_KEYS.filter((k) => positions.some((p) => avg[p]?.[k]));
-  const title = `NFL Combine Results, Averages and History${firstYear ? ` (${firstYear}–${COMBINE_EVENT_YEAR})` : ""}`;
-  const description = `Every NFL Scouting Combine we have on file${firstYear ? ` since ${firstYear}` : ""}: year-by-year results, average 40 times, verticals, broad jumps and measurements by position, and the ${COMBINE_EVENT_YEAR} Combine schedule and invites.`;
-  const url = `${SITE}/events/combine`;
+  const span = firstYear ? `${firstYear}–${latestPast}` : "";
+  // Years inside the span with nothing on file (2012, today).
+  const gaps = firstYear ? Array.from({ length: latestPast - firstYear + 1 }, (_, i) => firstYear + i).filter((y) => !index?.years?.[y]) : [];
+  const playersOnFile = years.reduce((t, y) => t + (y.players || 0), 0);
+  // Until the snapshots are rebuilt with combineInvites, drafted players only.
+  const withUndrafted = years.some((y) => y.undrafted > 0);
+  const tab = section === "years" ? "years" : "";
+  if (section === "averages" && !PROFILE_POSITIONS.includes(pos)) return <Navigate to="/events/combine" replace />;
+  // A drill ranking: /events/combine/qb/40-yard-dash (an unknown slug → the position's page).
+  const drill = drillSlug ? drillFromSlug(drillSlug) : null;
+  if (pos && drillSlug && !drill) return <Navigate to={combinePosPath(pos)} replace />;
+
+  const posName = pos ? POSITION_NAMES[pos] : "";
+  const since = firstYear ? ` since ${firstYear}` : "";
+  // Position pages and drill rankings: "Best Quarterback Combine Performances | All Time Player Rankings".
+  const ranking = !!pos;
+  const title = tab === "years" ? `Every NFL Combine: Results by Year${span ? ` (${span})` : ""}`
+    : pos ? `${combineHeadline(pos, drill)} | All Time Player Rankings`
+      : `NFL Combine Averages and Records by Position${span ? ` (${span})` : ""}`;
+  const plural = posName ? (/ Line$/.test(posName) ? posName.replace(/ Line$/, " linemen") : `${posName}s`).toLowerCase() : "";
+  const description = tab === "years"
+    ? `Every NFL Scouting Combine we have on file${since}: each year's 40 times, jumps, bench and measurements for every player tested, plus the ${COMBINE_EVENT_YEAR} Combine.`
+    : pos && drill ? `The ${DRILL_PAGES[drill].what} by ${plural} in NFL Combine history — the all-time top 10, with each player's school, year and where he was drafted. Every Combine${since}.`
+      : pos ? `The best ${posName.toLowerCase()} Combine performances of all time, ranked by Combine score — plus the all-time top 10 ${plural} in the 40-yard dash, vertical, broad jump, bench, 3-cone and shuttle, and the average ${posName.toLowerCase()}'s measurements. Every Combine${since}.`
+        : `Average NFL Combine results by position — 40 times, verticals, broad jumps, bench and measurements — and the best ever at every position in every drill${firstYear ? `, since ${firstYear}` : ""}.`;
+  const url = `${SITE}${tab === "years" ? "/events/combine/years" : pos && drill ? combineDrillPath(pos, drill) : pos ? combinePosPath(pos) : "/events/combine"}`;
+  // The ranking itself, for search: the drill's all-time top 10, or the position's best performers.
+  const rankList = !ranking || !data ? [] : drill ? (data.profiles?.[pos]?.[drill]?.top || []) : (data.performers?.[pos] || []);
+  const jsonLd = rankList.length ? {
+    "@context": "https://schema.org", "@type": "ItemList", name: combineHeadline(pos, drill), url, numberOfItems: rankList.length,
+    itemListElement: rankList.map((p, i) => ({
+      "@type": "ListItem", position: i + 1,
+      item: { "@type": "Person", name: p.name, ...(p.slug ? { url: `${SITE}/player/${p.slug}` } : {}), ...(p.school ? { affiliation: { "@type": "CollegeOrUniversity", name: p.school } } : {}) },
+    })),
+  } : null;
   return (
     <>
       <Helmet>
-        <title>{`${title} | We-Draft.com`}</title>
+        {/* The ranking pages' titles stand as written (no " | We-Draft.com"). */}
+        <title>{ranking ? title : `${title} | We-Draft.com`}</title>
         <meta name="description" content={description} />
         <link rel="canonical" href={url} />
         <meta property="og:type" content="website" />
@@ -750,75 +801,114 @@ function CombineHub({ index, isMobile, now }) {
         <meta property="og:site_name" content="We-Draft.com" />
         <meta property="og:image" content={`${SITE}${ev.logo}`} />
         <meta name="twitter:card" content="summary" />
+        <meta name="twitter:title" content={title} />
+        <meta name="twitter:description" content={description} />
+        {jsonLd && <script type="application/ld+json">{JSON.stringify(jsonLd)}</script>}
       </Helmet>
       <MarginAds contentRef={contentRef} isMobile={isMobile} horizontalPadding={24} />
       <div ref={contentRef} style={{ maxWidth: COLUMN_WIDTH, margin: "0 auto", padding: isMobile ? "12px 10px 60px" : "24px 24px 60px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
-        <nav style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 11, fontWeight: 900, letterSpacing: "0.06em", textTransform: "uppercase", color: "#8a94a6", marginBottom: 10 }}>
-          <Link to="/events" style={{ color: ev.color, textDecoration: "none" }}>Events</Link><span>›</span><span style={{ color: "#5a6475" }}>Combine</span>
+        <nav style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 11, fontWeight: 900, letterSpacing: "0.06em", textTransform: "uppercase", color: "#8a94a6", marginBottom: 10, flexWrap: "wrap" }}>
+          <Link to="/events" style={{ color: ev.color, textDecoration: "none" }}>Events</Link><span>›</span>
+          {tab || pos ? <><Link to="/events/combine" style={{ color: ev.color, textDecoration: "none" }}>Combine</Link><span>›</span>
+            {pos && drill ? <><Link to={combinePosPath(pos)} style={{ color: ev.color, textDecoration: "none" }}>{pos}</Link><span>›</span><span style={{ color: "#5a6475" }}>{DRILL_PAGES[drill].name}</span></>
+              : <span style={{ color: "#5a6475" }}>{tab === "years" ? "Every Combine" : pos}</span>}</>
+            : <span style={{ color: "#5a6475" }}>Combine</span>}
         </nav>
-        <Hero ev={ev} year={COMBINE_EVENT_YEAR} start={next.start} end={next.end} now={now} isMobile={isMobile}
+        {/* On a ranking page the position header holds the page's h1. */}
+        <Hero ev={ev} year={COMBINE_EVENT_YEAR} start={next.start} end={next.end} now={now} isMobile={isMobile} titleAs={ranking ? "div" : "h1"}
           title="NFL Scouting Combine" kicker={firstYear ? `Every Combine since ${firstYear}` : "Every Combine"}
-          note={`Next: ${COMBINE_EVENT_YEAR} Combine · ${next.start ? rangeLabel({ start: next.start, finish: next.end }) : ""} · ${ev.location}`} />
+          note={`Averages, records and results by position${span ? ` · ${span}` : ""}`} />
 
-        <SectionHead icon="calendar" title={`The ${COMBINE_EVENT_YEAR} Combine`} isMobile={isMobile} color={ev.color} />
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <Link to={eventPath("combine", COMBINE_EVENT_YEAR)} style={ctaStyle(ev)}>Schedule & key dates →</Link>
-          <Link to={eventPath("combine", COMBINE_EVENT_YEAR, "participants")} style={{ ...ctaStyle(ev), background: ev.dark }}>Invites →</Link>
-          <Link to={eventPath("combine", COMBINE_EVENT_YEAR, "results")} style={{ ...ctaStyle(ev), background: ev.accent }}>Results →</Link>
+        <NextCombineLink ev={ev} start={next.start} end={next.end} isMobile={isMobile} />
+
+        {/* Tabs */}
+        <div style={{ display: "flex", gap: 6, margin: "18px 0 14px", boxShadow: "inset 0 -2px 0 #e2e7ef", overflowX: "auto", overflowY: "hidden", scrollbarWidth: "none" }}>
+          {HUB_TABS.map(([k, label, to]) => {
+            const on = k === tab;
+            return (
+              <Link key={k || "averages"} to={to} style={{
+                padding: isMobile ? "9px 12px" : "10px 18px", fontSize: isMobile ? 12 : 13, fontWeight: 900, letterSpacing: "0.06em", textTransform: "uppercase",
+                textDecoration: "none", whiteSpace: "nowrap", color: on ? ev.color : "#5a6475", borderBottom: `3px solid ${on ? ev.color : "transparent"}`,
+              }}>{label}</Link>
+            );
+          })}
         </div>
 
-        <SectionHead icon="stopwatch" title="Average Results by Position" isMobile={isMobile} color={ev.color} />
-        {!positions.length ? <Empty ev={ev}>All-time averages are being compiled.</Empty> : (
+        {tab === "years" ? (
           <>
-            <div style={{ background: "#fff", border: "1px solid #e2e7ef", borderRadius: 14, overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: BODY_FONT, minWidth: 720 }}>
-                <thead>
-                  <tr style={{ background: "#f1f4f8" }}>
-                    <th style={{ padding: "9px 10px", fontSize: 11, fontWeight: 900, textTransform: "uppercase", color: "#5a6475", textAlign: "left" }}>Pos</th>
-                    {cols.map((k) => <th key={k} style={{ padding: "9px 8px", fontSize: 11, fontWeight: 900, textTransform: "uppercase", color: "#5a6475", whiteSpace: "nowrap" }}>{SHORT_LABEL[k]}</th>)}
-                  </tr>
-                </thead>
-                <tbody>
-                  {positions.map((p) => (
-                    <tr key={p} style={{ borderTop: "1px solid #eef1f5" }}>
-                      <td style={{ padding: "8px 10px", fontSize: 13, fontWeight: 900 }}>
-                        {latestPast && EVENT_POSITIONS.includes(p)
-                          ? <Link to={eventPath("combine", latestPast, "results", p)} style={{ color: ev.color, textDecoration: "none" }}>{p}</Link> : p}
-                      </td>
-                      {cols.map((k) => (
-                        <td key={k} title={avg[p]?.[k] ? `Average of ${avg[p][k].n}` : ""} style={{ padding: "8px", textAlign: "center", fontSize: 13, fontWeight: 700, color: "#1c2330", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
-                          {avg[p]?.[k] ? formatCombine(k, avg[p][k].avg) : "—"}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(3, minmax(0, 1fr))" : "repeat(auto-fill, minmax(118px, 1fr))", gap: 8 }}>
+              <Link to={eventPath("combine", COMBINE_EVENT_YEAR)} style={{ textDecoration: "none", background: ev.color, borderRadius: 12, padding: "12px 8px", textAlign: "center", color: "#fff" }}>
+                <div style={{ fontSize: 22, fontWeight: 900 }}>{COMBINE_EVENT_YEAR}</div>
+                <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", opacity: 0.85 }}>Upcoming</div>
+              </Link>
+              {years.map((y) => (
+                <Link key={y.year} to={eventPath("combine", y.year)} style={{ textDecoration: "none", background: "#fff", border: "1px solid #e2e7ef", borderRadius: 12, padding: "12px 8px", textAlign: "center" }}>
+                  <div style={{ fontSize: 22, fontWeight: 900, color: ev.color }}>{y.year}</div>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: "#8a94a6", fontFamily: BODY_FONT }}>{y.players} players</div>
+                </Link>
+              ))}
             </div>
-            <div style={{ marginTop: 6, fontSize: 12, fontWeight: 600, fontStyle: "italic", color: "#8a94a6", fontFamily: BODY_FONT }}>
-              Averages of every drafted player's results on file{firstYear ? `, ${firstYear}–${latestPast}` : ""}.
-            </div>
+            {index !== undefined && !years.length && <div style={{ marginTop: 8 }}><Empty ev={ev}>Past Combines are being compiled.</Empty></div>}
+          </>
+        ) : (
+          <>
+            <PositionTabs ev={ev} pos={pos} isMobile={isMobile} />
+            {span && <DataCoverage ev={ev} span={span} gaps={gaps} players={playersOnFile} years={years.length} withUndrafted={withUndrafted} isMobile={isMobile} />}
+            {data === undefined ? (
+              <div style={{ padding: 30, textAlign: "center", color: "#8a94a6", fontWeight: 800 }}>Loading…</div>
+            ) : !Object.keys(profiles).length ? (
+              <Empty ev={ev}>All-time averages are being compiled.</Empty>
+            ) : pos ? (
+              <CombinePositionProfile ev={ev} pos={pos} profiles={profiles} performers={data.performers} isMobile={isMobile} span={span} drill={drill} />
+            ) : (
+              <CombineAllPositions ev={ev} profiles={profiles} performers={data.performers} isMobile={isMobile} span={span} />
+            )}
           </>
         )}
-
-        <SectionHead icon="calendar" title="Every Combine" isMobile={isMobile} color={ev.color} />
-        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(3, minmax(0, 1fr))" : "repeat(auto-fill, minmax(118px, 1fr))", gap: 8 }}>
-          <Link to={eventPath("combine", COMBINE_EVENT_YEAR)} style={{ textDecoration: "none", background: ev.color, borderRadius: 12, padding: "12px 8px", textAlign: "center", color: "#fff" }}>
-            <div style={{ fontSize: 22, fontWeight: 900 }}>{COMBINE_EVENT_YEAR}</div>
-            <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", opacity: 0.85 }}>Upcoming</div>
-          </Link>
-          {years.map((y) => (
-            <Link key={y.year} to={eventPath("combine", y.year)} style={{ textDecoration: "none", background: "#fff", border: "1px solid #e2e7ef", borderRadius: 12, padding: "12px 8px", textAlign: "center" }}>
-              <div style={{ fontSize: 22, fontWeight: 900, color: ev.color }}>{y.year}</div>
-              <div style={{ fontSize: 10, fontWeight: 800, color: "#8a94a6", fontFamily: BODY_FONT }}>{y.players} players</div>
-            </Link>
-          ))}
-        </div>
-        {!years.length && <div style={{ marginTop: 8 }}><Empty ev={ev}>Past Combines are being compiled.</Empty></div>}
 
         <MoreEvents current="combine" year={COMBINE_EVENT_YEAR} isMobile={isMobile} />
       </div>
     </>
+  );
+}
+
+// What the averages and records are built from: which Combines, and who.
+function DataCoverage({ ev, span, gaps, players, years, withUndrafted, isMobile }) {
+  return (
+    <div style={{
+      display: "flex", alignItems: isMobile ? "flex-start" : "center", gap: 10, margin: "-4px 0 16px", padding: isMobile ? "9px 12px" : "9px 14px",
+      background: "#f4f8fd", border: "1px solid #d6e3f2", borderRadius: 12, fontSize: isMobile ? 12 : 13, fontWeight: 700, color: "#3a4352", fontFamily: BODY_FONT, lineHeight: 1.45,
+    }}>
+      <Icon name="calendar" size={16} stroke={2.4} style={{ color: ev.color, marginTop: isMobile ? 1 : 0 }} />
+      <span>
+        <b style={{ color: ev.dark }}>Data: the {span} Combines</b>
+        {gaps.length ? ` (${gaps.join(", ")} not on file)` : ""} · {years} Combines, {players.toLocaleString()} players
+        {withUndrafted
+          ? <> · drafted and undrafted · arm and hand sizes for drafted players only</>
+          : <> · drafted players only</>}
+      </span>
+    </div>
+  );
+}
+
+// The one link to the current Combine's page (schedule, invites, results).
+function NextCombineLink({ ev, start, end, isMobile }) {
+  return (
+    <Link to={eventPath("combine", COMBINE_EVENT_YEAR)} style={{
+      display: "flex", alignItems: "center", gap: isMobile ? 10 : 16, marginTop: 12, padding: isMobile ? "12px 14px" : "14px 20px", borderRadius: 14,
+      background: "#fff", border: "1px solid #e2e7ef", borderLeft: `6px solid ${GOLD}`, boxShadow: "0 4px 16px rgba(0,30,70,0.08)", textDecoration: "none",
+    }}>
+      <img src={ev.logo} alt="" style={{ width: isMobile ? 38 : 46, height: isMobile ? 38 : 46, objectFit: "contain", flexShrink: 0 }} />
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span style={{ display: "block", fontSize: isMobile ? 15 : 18, fontWeight: 900, color: ev.dark, textTransform: "uppercase" }}>The {COMBINE_EVENT_YEAR} Combine</span>
+        <span style={{ display: "block", fontSize: isMobile ? 12 : 13, fontWeight: 700, color: "#5a6475", fontFamily: BODY_FONT }}>
+          {start ? `${rangeLabel({ start, finish: end || start })} · ` : ""}{ev.location} · Schedule, invites and results
+        </span>
+      </span>
+      <span style={{ flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 4, padding: isMobile ? "7px 10px" : "8px 16px", borderRadius: 999, background: ev.color, color: "#fff", fontSize: 12, fontWeight: 900, letterSpacing: "0.05em", textTransform: "uppercase" }}>
+        {isMobile ? null : "Go"}<Icon name="right" size={14} stroke={3} />
+      </span>
+    </Link>
   );
 }
 
