@@ -1234,22 +1234,41 @@ export default function TransferPortal({ view = "board", embedded = false }) {
     </div>
   );
   const teamCounts = { "": teamMoves.length };
-  const TeamTabs = team && (
-    <div style={{ display: "flex", gap: isMobile ? "5px" : "8px", justifyContent: isMobile ? "flex-start" : "center", overflowX: isMobile ? "auto" : "visible", marginBottom: "12px", paddingBottom: isMobile ? "2px" : 0 }}>
+  // Phones (user, 2026-11-20 — 75% of traffic): one segmented control that
+  // fits the width with short labels, instead of a row that ran off screen
+  // and hid Targets.
+  const TAB_SHORT = { "": "Moves", roster: "Roster", needs: "Needs", targets: "Targets" };
+  const TeamTabs = team && (isMobile ? (
+    <div role="tablist" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 3, padding: 3, marginBottom: 12, borderRadius: 12, background: "#fff", border: `1.5px solid ${tc1}` }}>
+      {TEAM_TABS.map(([k]) => {
+        const on = teamTab === k;
+        return (
+          <Link key={k || "movement"} role="tab" aria-selected={on} to={`/portal/${teamSlug}${k ? `/${k}` : ""}`} aria-current={on ? "page" : undefined} style={{
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 4, minHeight: 38, padding: "0 4px", borderRadius: 9, textDecoration: "none",
+            background: on ? tc1 : "transparent", color: on ? "#fff" : tc1,
+            fontWeight: 900, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", whiteSpace: "nowrap",
+          }}>
+            {TAB_SHORT[k]}{!loading && teamCounts[k] != null && <span style={{ fontSize: 10, opacity: 0.75 }}>{teamCounts[k]}</span>}
+          </Link>
+        );
+      })}
+    </div>
+  ) : (
+    <div style={{ display: "flex", gap: "8px", justifyContent: "center", marginBottom: "12px" }}>
       {TEAM_TABS.map(([k, label]) => {
         const on = teamTab === k;
         return (
           <Link key={k || "movement"} to={`/portal/${teamSlug}${k ? `/${k}` : ""}`} aria-current={on ? "page" : undefined} style={{
-            flexShrink: 0, display: "inline-flex", alignItems: "center", gap: "6px", padding: isMobile ? "7px 12px" : "8px 20px", borderRadius: "10px", textDecoration: "none",
+            flexShrink: 0, display: "inline-flex", alignItems: "center", gap: "6px", padding: "8px 20px", borderRadius: "10px", textDecoration: "none",
             border: `2px solid ${tc1}`, background: on ? tc1 : "#fff", color: on ? "#fff" : tc1,
-            fontWeight: 900, fontSize: isMobile ? "12px" : "14px", textTransform: "uppercase", letterSpacing: "0.05em", whiteSpace: "nowrap",
+            fontWeight: 900, fontSize: "14px", textTransform: "uppercase", letterSpacing: "0.05em", whiteSpace: "nowrap",
           }}>
             {label}{!loading && teamCounts[k] != null && <span style={{ fontSize: "11px", opacity: 0.75 }}>{teamCounts[k]}</span>}
           </Link>
         );
       })}
     </div>
-  );
+  ));
   const teamEmpty = (text) => <div style={{ padding: "44px 20px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "14px", background: "#fff" }}>{text}</div>;
   const teamCard = (title, right, children, { head = tc1 } = {}) => (
     <div className="wdb-card" style={{ borderRadius: "14px", overflow: "hidden", background: "#fff", marginBottom: "14px" }}>

@@ -1000,6 +1000,17 @@ service cloud.firestore {
       allow read: if true;
       allow write: if isAdmin();
     }
+    // Senior Bowl Top Performers (/events/senior-bowl/{year}/performances,
+    // utils/seniorBowlPerf.js) — the admin's list (Admin → Content → Senior
+    // Bowl) and each Save's dated edition. Public, admin-written.
+    match /seniorBowlPerf/{year} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /seniorBowlPerfEditions/{editionId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
     // Portal News (/portal/news, utils/portalNews.js) — one doc, the
     // admin's picks: names, schools, (public CFBD) stats and write-ups.
     match /portalNews/{doc} {

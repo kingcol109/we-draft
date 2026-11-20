@@ -2,6 +2,7 @@
 // requests and issue reports (utils/userMessages.js). Opening the tab marks
 // everything shown as read, which clears the tab and Navbar badges.
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { deleteDoc, doc } from "firebase/firestore";
 import { db } from "../../firebase";
 import LoadingSpinner from "../LoadingSpinner";
@@ -49,11 +50,15 @@ export default function MessagesTab({ uid, isMobile, onSeen }) {
       {rows.map((m) => {
         const ms = messageTimeMs(m.createdAt);
         const declined = m.outcome === "declined";
+        // kind "announcement": a site update sent to a group of users
+        // (e.g. scripts/sendWePickMovedNotice.js), with an optional link.
+        const announce = m.kind === "announcement";
+        const accent = announce ? BLUE : declined ? "#8a96a8" : "#2e7d32";
         return (
-          <div key={m.id} style={{ ...card, padding: isMobile ? 14 : 18, borderLeft: `4px solid ${declined ? "#8a96a8" : "#2e7d32"}` }}>
+          <div key={m.id} style={{ ...card, padding: isMobile ? 14 : 18, borderLeft: `4px solid ${accent}` }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              <span style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#fff", background: declined ? "#8a96a8" : "#2e7d32", borderRadius: 999, padding: "3px 8px" }}>
-                {declined ? "Closed" : "Resolved"}
+              <span style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#fff", background: accent, borderRadius: 999, padding: "3px 8px" }}>
+                {announce ? "Update" : declined ? "Closed" : "Resolved"}
               </span>
               <span style={{ fontSize: 14, fontWeight: 900, color: BLUE, flex: 1, minWidth: 0 }}>{m.subject || "Message from We-Draft"}</span>
               {ms > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: "#8a96a8", fontFamily: "Arial, sans-serif" }}>{new Date(ms).toLocaleDateString()}</span>}
@@ -64,6 +69,11 @@ export default function MessagesTab({ uid, isMobile, onSeen }) {
               </div>
             )}
             <div style={{ marginTop: 10, fontSize: 14, color: "#1f2a3a", fontFamily: "Arial, sans-serif", lineHeight: 1.45, whiteSpace: "pre-wrap" }}>{m.message}</div>
+            {m.link && typeof m.link === "string" && m.link.startsWith("/") && (
+              <Link to={m.link} style={{ display: "inline-block", marginTop: 12, padding: "8px 14px", borderRadius: 999, background: BLUE, color: "#fff", fontSize: 12, fontWeight: 900, letterSpacing: "0.04em", textDecoration: "none" }}>
+                {m.linkLabel || "Open"} →
+              </Link>
+            )}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10 }}>
               <span style={{ fontSize: 11, fontWeight: 900, color: "#8a96a8", letterSpacing: "0.04em" }}>— We-Draft</span>
               <button onClick={() => remove(m.id)} style={{ background: "none", border: "none", color: "#8a96a8", fontSize: 11, fontWeight: 800, cursor: "pointer", textTransform: "uppercase", letterSpacing: "0.04em" }}>Delete</button>

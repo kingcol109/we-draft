@@ -21,6 +21,7 @@ import { prefetchPlayerFromUrl } from "./utils/playerPrefetch";
 import { isUnreleasedYear, isUnreleasedSlug, useIsAdmin } from "./utils/prospectYears";
 import { PreviewContext, usePreviewLink } from "./utils/previewLinks";
 import { WEEKLY_YEARS, MAIN_WEEKLY_YEAR, weeklyMockHref, weeklyYearHref, hasTeamPages } from "./utils/weeklyMockNews";
+import { hsPath } from "./utils/hsRanks";
 
 // A cold landing on /player/:slug starts its player query now, alongside
 // the PlayerProfile chunk download rather than after it.
@@ -55,9 +56,8 @@ const TeamPage = lazy(() => import("./pages/TeamPage"));
 const NFLTeamPage = lazy(() => import("./pages/NFLTeamPage"));
 // /staff/{slug} — current head coaches' and GMs' draft histories.
 const StaffPage = lazy(() => import("./pages/StaffPage"));
-// High school team pages — in development, deliberately unlisted (see that
-// file's own top comment): noindexed and never linked from anywhere else
-// on the site, reachable only via a direct URL.
+// High school team pages (/hs/{st}/{school}) — indexed, in the sitemap,
+// linked from the /hs hub and state pages (released 2026-11-20).
 const HighSchoolTeamPage = lazy(() => import("./pages/HighSchoolTeamPage"));
 // /portalsim (/portalsim/:team) — the Transfer Portal Sim. Public (user, 2026-11-18: out of beta).
 const PortalSim = lazy(() => import("./pages/PortalSim"));
@@ -70,6 +70,22 @@ const TransferPortal = lazy(() => import("./pages/TransferPortal"));
 const PortalNews = lazy(() => import("./pages/PortalNews"));
 // /hs/rankings — the high school leaderboards (also unlisted; admin link).
 const HighSchoolRankings = lazy(() => import("./pages/HighSchoolRankings"));
+// /hs and /hs/{state} (/hs/ga) — states / high schools that produce the most
+// college players and NFL picks, numbers + heatmap. Indexed + in the sitemap (2026-11-20); no nav link yet.
+const HighSchoolHub = lazy(() => import("./pages/HighSchoolHub"));
+// /hs/:slug is a state when it's two letters; anything else is the old
+// school URL (/hs/hun-school-nj), redirected to /hs/nj/hun-school.
+// /hs/nfl is the hub's NFL Draft view.
+function HsSlugRoute() {
+  const { slug } = useParams();
+  if (/^[a-z]{2}$/i.test(slug || "") || slug === "nfl") return <HighSchoolHub />;
+  return <Navigate to={hsPath(slug) + window.location.search} replace />;
+}
+// /hs/{st}/nfl is a state's NFL Draft view; anything else, a school page.
+function HsSchoolRoute() {
+  const { st, school } = useParams();
+  return school === "nfl" && /^[a-z]{2}$/i.test(st || "") ? <HighSchoolHub /> : <HighSchoolTeamPage />;
+}
 
 // Mock Draft
 const MockDraftHub = lazy(() => import("./pages/MockDraftHub"));
@@ -204,7 +220,7 @@ function MainLayout() {
     <>
       <Navbar />
       <AuthModal />
-      <div style={{ paddingTop: "25px" }}>
+      <div className="wd-main">
         <Suspense fallback={<RouteFallback />}>
           <Routes>
             <Route path="/" element={<Home />} />
@@ -278,7 +294,9 @@ function MainLayout() {
             <Route path="/portal/:position" element={<TransferPortal />} />
             <Route path="/portal/:position/:tab" element={<TransferPortal />} />
             <Route path="/hs/rankings" element={<HighSchoolRankings />} />
-            <Route path="/hs/:slug" element={<HighSchoolTeamPage />} />
+            <Route path="/hs" element={<HighSchoolHub />} />
+            <Route path="/hs/:slug" element={<HsSlugRoute />} />
+            <Route path="/hs/:st/:school" element={<HsSchoolRoute />} />
             <Route path="/nfl/:teamId/:tab?" element={<NFLTeamPage />} />
             <Route path="/staff/:slug/:tab?" element={<StaffPage />} />
             <Route path="/boards" element={<UserBoards />} />

@@ -1,7 +1,8 @@
 // src/pages/AdminPanel.js
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { cleanXHandle, xProfileUrl } from "../utils/socialHandles";
-import { matchHighSchool } from "../utils/highSchoolMatch";
+import { matchHighSchool, STATE_NAME as HS_STATE_NAME } from "../utils/highSchoolMatch";
+import { hsPath } from "../utils/hsRanks";
 import { isUnreleasedYear } from "../utils/prospectYears";
 import { igApi } from "../utils/instagram/api";
 import { collection, collectionGroup, getDocs, getDoc, addDoc, doc, updateDoc, setDoc, deleteDoc, deleteField, query, where, serverTimestamp, arrayUnion, arrayRemove, writeBatch, increment, Timestamp } from "firebase/firestore";
@@ -47,6 +48,7 @@ import AdminResearch from "../components/AdminResearch";
 import AdminProspectResearch from "../components/AdminProspectResearch";
 import AdminPhotos from "../components/AdminPhotos";
 import AdminRisers from "../components/AdminRisers";
+import AdminSeniorBowlPerf from "../components/AdminSeniorBowlPerf";
 import AdminCombine from "../components/AdminCombine";
 import AdminSideGraphics from "../components/AdminSideGraphics";
 import AdminProDayIcons from "../components/AdminProDayIcons";
@@ -402,6 +404,8 @@ const CONTENT_SECTION_TABS = [
   { key: "calendar", label: "Content Calendar" },
   { key: "photos", label: "Photos" },
   { key: "risers", label: "Rising Page" },
+  // Senior Bowl Top Performers — WX content (components/AdminSeniorBowlPerf.jsx).
+  { key: "seniorbowl", label: "Senior Bowl" },
   // All-time Combine leader graphics (components/AdminCombine.jsx).
   { key: "combine", label: "Combine" },
   { key: "instagram", label: "Instagram" },
@@ -454,6 +458,7 @@ function ContentSection({ initialTab }) {
       {tab === "calendar" && <ContentCalendarManager onOpenPost={(platform, what) => openIn(platform === "x" ? "x" : "instagram", what)} />}
       {tab === "photos" && <AdminPhotos />}
       {tab === "risers" && <AdminRisers />}
+      {tab === "seniorbowl" && <AdminSeniorBowlPerf />}
       {tab === "combine" && <AdminCombine />}
       {tab === "instagram" && <AdminInstagram openPostId={opening?.tab === "instagram" ? opening.id : null} onOpenInX={(id) => openIn("x", { id })} />}
       {tab === "instagramAnalytics" && <AdminInstagramAnalytics />}
@@ -9899,6 +9904,7 @@ const CONTENT_TABS = [
   { key: "portal", label: "Portal" },
   { key: "portalsim", label: "Portal Sim" },
   { key: "risers", label: "Draft Risers" },
+  { key: "hs", label: "High Schools" },
 ];
 
 function AnalyticsSection() {
@@ -10858,6 +10864,37 @@ const fetchPortalRows = seenRows("portal", "/portal", portalTitle,
   (s) => (s === "hub" ? "Page" : s.startsWith("news") ? "Portal News" : isPortalPos(s) ? "Position" : "Team"));
 const fetchPortalSimRows = seenRows("portalsim", "/portalsim", portalSimTitle, (s) => (PORTALSIM_PAGES[s] ? "Page" : "Team sim"));
 const fetchRisersRows = seenRows("risers", "/risers", risersTitle, (s) => (s === "hub" ? "Page" : s.includes("-") ? "Edition" : "Class"));
+// High schools — slugs per syncGoogleAnalytics.js: "hub" (/hs), "nfl",
+// "ga" (/hs/ga), "ga-nfl", "ga-buford" (/hs/ga/buford), "rankings".
+const hsParts = (slug) => {
+  const m = /^([a-z]{2})(?:-(.+))?$/.exec(slug);
+  return m && HS_STATE_NAME[m[1].toUpperCase()] ? { st: m[1].toUpperCase(), rest: m[2] || null } : null;
+};
+function hsTitle(slug) {
+  if (slug === "hub") return "High Schools";
+  if (slug === "nfl") return "High Schools · NFL Draft";
+  if (slug === "rankings") return "HS Rankings";
+  const p = hsParts(slug);
+  if (!p) return titleWords(slug);
+  const state = HS_STATE_NAME[p.st];
+  if (!p.rest) return `${state} High Schools`;
+  if (p.rest === "nfl") return `${state} High Schools · NFL Draft`;
+  return `${titleWords(p.rest)} (${p.st})`;
+}
+const hsSubtitle = (slug) => {
+  const p = hsParts(slug);
+  return !p ? "Page" : !p.rest || p.rest === "nfl" ? "State" : "School";
+};
+const hsHref = (slug) => {
+  if (slug === "hub") return "/hs";
+  const p = hsParts(slug);
+  return p ? `/hs/${p.st.toLowerCase()}${p.rest ? `/${p.rest}` : ""}` : `/hs/${slug}`;
+};
+async function fetchHsRows() {
+  return [...(await fetchSeen("hs"))].map(([slug, path]) => ({
+    slug, title: hsTitle(slug), subtitle: hsSubtitle(slug), href: path || hsHref(slug), dateMs: 0,
+  }));
+}
 
 // ── Top Pages (Overview): every page the sync tracks, all sections in one
 // ranking. Players' names come from the players collection (one read);
@@ -10893,6 +10930,7 @@ function pageTitleOf({ type, slug }, names) {
     case "portal": return portalTitle(slug);
     case "portalsim": return portalSimTitle(slug);
     case "risers": return risersTitle(slug);
+    case "hs": return hsTitle(slug);
     default: return titleWords(slug);
   }
 }
@@ -10903,6 +10941,7 @@ function pageHrefOf({ type, slug, path }) {
   if (type === "nfl") return slug === "hub" ? "/nfl" : `/nfl/${slug}`;
   if (path) return path;
   if (type === "player") return `/player/${slug}`;
+  if (type === "hs") return hsHref(slug);
   const prefix = CONTENT_ANALYTICS_CONFIG[type]?.publicPrefix;
   if (!prefix) return null;
   return slug === "hub" ? prefix.replace(/\/$/, "") : prefix + slug;
@@ -11027,6 +11066,7 @@ const CONTENT_ANALYTICS_CONFIG = {
   portal: { label: "Portal", noun: "page", publicPrefix: "/portal/", fetchRows: fetchPortalRows },
   portalsim: { label: "Portal Sim", noun: "page", publicPrefix: "/portalsim/", fetchRows: fetchPortalSimRows },
   risers: { label: "Draft Risers", noun: "page", publicPrefix: "/risers/", fetchRows: fetchRisersRows },
+  hs: { label: "High Schools", noun: "page", publicPrefix: "/hs/", fetchRows: fetchHsRows },
 };
 
 // ── Games/Articles page-view table — one reusable component driven by
@@ -13779,7 +13819,7 @@ function HighSchoolSchoolsPane() {
               in, along with the HS Rankings link. */}
           {!isNewSchool && formState?.Logo1 && formState?.Name && (
             <a
-              href={`/hs/${toHsSlug(formState.Name, formState.State)}`}
+              href={hsPath(toHsSlug(formState.Name, formState.State))}
               target="_blank"
               rel="noopener noreferrer"
               style={{ marginLeft: "auto", flexShrink: 0, background: "rgba(255,255,255,0.2)", color: "#fff", border: "2px solid #fff", borderRadius: "6px", padding: "5px 10px", fontWeight: 900, fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.04em", textDecoration: "none", whiteSpace: "nowrap" }}

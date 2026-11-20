@@ -1,8 +1,9 @@
 // src/components/SiteFullscreenButton.jsx
 //
 // The desktop navbar's full-screen toggle (user, 2026-11-18): the whole
-// site goes full screen (the page's root element, so the navbar and every
-// page come along) and back. Hidden where the browser has no Fullscreen API
+// site goes full screen (the page's root element) and back. Since
+// 2026-11-20 it sits right of Profile, and in full screen the navbar tucks
+// away behind a ▼ tab at the top (Navbar.js). Hidden where the browser has no Fullscreen API
 // (iPhone Safari). The sims' own full-screen buttons still take just the
 // sim; leaving full screen anywhere (Esc) is the browser's.
 import { useEffect, useState } from "react";
@@ -22,11 +23,12 @@ function exit() {
   try { const r = ex.call(document); if (r?.catch) r.catch(() => {}); } catch (e) { /* not full screen */ }
 }
 
-export default function SiteFullscreenButton() {
+// True while the whole site (the root element) is full screen — not when a
+// sim has put just itself full screen. The Navbar hides itself then.
+export function useSiteFullscreen() {
   const [on, setOn] = useState(false);
-  const [able] = useState(canFullscreen);
   useEffect(() => {
-    const sync = () => setOn(!!fsElement());
+    const sync = () => setOn(fsElement() === document.documentElement);
     document.addEventListener("fullscreenchange", sync);
     document.addEventListener("webkitfullscreenchange", sync);
     sync();
@@ -35,14 +37,20 @@ export default function SiteFullscreenButton() {
       document.removeEventListener("webkitfullscreenchange", sync);
     };
   }, []);
+  return on;
+}
+
+export default function SiteFullscreenButton({ style }) {
+  const on = useSiteFullscreen();
+  const [able] = useState(canFullscreen);
   if (!able) return null;
   const label = on ? "Exit full screen" : "Full screen";
   return (
     <button type="button" onClick={() => (fsElement() ? exit() : enter())} aria-label={label} title={`${label} (Esc to exit)`} className="wd-nav-fs"
       style={{
-        display: "inline-flex", alignItems: "center", justifyContent: "center", width: 34, height: 34, marginRight: 8, flexShrink: 0,
+        display: "inline-flex", alignItems: "center", justifyContent: "center", width: 34, height: 34, flexShrink: 0,
         borderRadius: 9, border: "1px solid rgba(255,255,255,0.35)", background: on ? "rgba(246,162,29,0.25)" : "rgba(255,255,255,0.08)",
-        color: "#fff", cursor: "pointer", padding: 0,
+        color: "#fff", cursor: "pointer", padding: 0, ...style,
       }}>
       <style>{".wd-nav-fs { transition: background .15s, border-color .15s; } .wd-nav-fs:hover { background: rgba(255,255,255,0.2) !important; border-color: #f6a21d !important; }"}</style>
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

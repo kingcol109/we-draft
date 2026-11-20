@@ -18,6 +18,7 @@ import { topProspects, gradeLabel, gradeLook } from "../utils/communityGrades";
 import { fetchRecentPublicEvals } from "../utils/recentEvaluations";
 import { loadWeeklyMockNews } from "../utils/weeklyMockNews";
 import { loadRiserNews } from "../utils/risers";
+import { loadPerfNews } from "../utils/seniorBowlPerf";
 import { loadPhotos } from "../utils/profileHub";
 import { useAuth } from "../context/AuthContext";
 import HomeInstagram from "./HomeInstagram";
@@ -138,6 +139,7 @@ export function Latest() {
         .then((s) => s.docs.map((d) => ({ id: d.id, ...d.data(), kind: "Article" })).filter((a) => !isSiteUpdate(a))).catch(() => []),
       loadWeeklyMockNews(6).then((w) => w.map((m) => ({ ...m, kind: "Weekly Mock" }))),
       loadRiserNews(6).then((r) => r.map((m) => ({ ...m, kind: "Draft Risers" }))),
+      loadPerfNews(6).then((r) => r.map((m) => ({ ...m, kind: "Senior Bowl" }))),
     ]).then((all) => {
       if (!alive) return;
       setItems(all.flat().sort((a, b) => tsMs(b.publishedAt) - tsMs(a.publishedAt)).slice(0, 6));

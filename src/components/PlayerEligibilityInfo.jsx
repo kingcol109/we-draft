@@ -49,10 +49,8 @@ import { usePreviewMode } from "../utils/previewLinks";
 
 const isHex = (hex) => /^#[0-9a-f]{6}$/i.test(hex || "");
 const initials = (name) => String(name || "?").replace(/[^A-Za-z ]/g, "").split(" ").filter(Boolean).map((w) => w[0]).join("").slice(0, 3).toUpperCase();
-// Same slugs as the team pages (PlayerProfile.js toTeamSlug) and high
-// school pages (HighSchoolTeamPage.js toHsSlug).
+// Same slugs as the team pages (PlayerProfile.js toTeamSlug).
 const teamSlug = (school) => String(school || "").toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9\s]/g, "").trim().replace(/\s+/g, "-");
-const hsSlug = (name, state) => `${name || ""} ${STATE_ABBR[state] || state || ""}`.replace(/['’`.]/g, "").replace(/[^a-zA-Z0-9\- ]/g, "").trim().replace(/\s+/g, "-").toLowerCase().replace(/-+/g, "-");
 
 // ESPN national award winners, one doc for every season — fetched once per
 // page load and shared. → { [espnId]: [[season, name, desc], …] }
@@ -410,6 +408,7 @@ export function useCareerPath(player, espnId, draft) {
   const draftYear = player?.Declared && stillInSchool && !draft ? Number(player.Eligible) : null;
   // Drafted: his NFL team on top, in its colors, with the round and pick.
   const nfl = useNflTeam(draft?.team);
+  const hsStateAbbr = STATE_ABBR[stateName(hs?.State || player?.State)] || null;
   const rows = [
     ...(draft ? [{
       key: "nfl", name: nfl ? `${nfl.City || ""} ${nfl.Team || ""}`.trim() : draft.team,
@@ -444,7 +443,8 @@ export function useCareerPath(player, espnId, draft) {
       current: hsSenior,
       span: player.RecruitYear ? `${hsSenior ? "Class of" : "Graduated"} ${player.RecruitYear}` : null,
       accolades: recruitLine,
-      to: hs?.Ranking === 3 ? `/hs/${hsSlug(hs.Name, hs.State)}` : null,
+      // The school's state page (/hs/ga) — user, 2026-11-20.
+      to: hsStateAbbr ? `/hs/${hsStateAbbr.toLowerCase()}` : null,
     }] : []),
   ];
   return { rows, hometown, born, age };

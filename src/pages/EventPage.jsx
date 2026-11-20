@@ -24,8 +24,10 @@ import { useSchools } from "../components/DraftArchiveList";
 import { DRAFT_EVENTS, COMBINE_SCHEDULE, parseDay } from "../utils/draftCalendar";
 import { STAT_METRICS, toNumber } from "../utils/historicalStats";
 import { GENERIC_PRO_DAY } from "../utils/proDayIcon";
+import { portalTeamSlug } from "../utils/portalTeams";
+import SeniorBowlPerformances from "../components/events/SeniorBowlPerformances";
 import {
-  EVENT_PAGES, EVENT_YEARS, EVENT_POSITIONS, eventPath, eventDates, proDaySchedule, participantsOf, playerHref, schoolHref, useEventYear,
+  EVENT_PAGES, EVENT_YEARS, EVENT_POSITIONS, eventPath, eventDates, proDaySchedule, participantsOf, byLastName, playerHref, schoolHref, useEventYear,
   fetchCombineIndex, fetchCombineYear, isPastCombineYear, useAsync,
 } from "../utils/events";
 import { formatCombine, COMBINE_EVENT_YEAR, COMBINE_FIRST_YEAR } from "../utils/combineData";
@@ -40,7 +42,8 @@ const SITE = "https://we-draft.com";
 const POS_NAMES = { QB: "Quarterback", RB: "Running Back", WR: "Wide Receiver", TE: "Tight End", OL: "Offensive Line", EDGE: "Edge Rusher", DL: "Defensive Line", LB: "Linebacker", DB: "Defensive Back", K: "Kicker", P: "Punter" };
 const TABS = {
   combine: [["", "Overview"], ["participants", "Participants"], ["results", "Results"]],
-  "senior-bowl": [["", "Overview"], ["participants", "Participants"]],
+  // Top Performers: WX content (components/events/SeniorBowlPerformances.jsx).
+  "senior-bowl": [["", "Overview"], ["participants", "Participants"], ["performances", "Top Performers"]],
   "east-west-bowl": [["", "Overview"], ["participants", "Participants"]],
   "pro-days": [["", "Schedule"], ["participants", "Participants"]],
 };
@@ -77,9 +80,13 @@ export default function EventPage({ hub = false, section = "", hubPos = "" }) {
   if (hub) return <CombineHub index={combineIndex} isMobile={isMobile} now={now} section={section} pos={hubPos} drillSlug={hub ? params.drill : undefined} />;
   if (!ev || (!EVENT_YEARS.includes(year) && !past)) return <Navigate to={isCombine ? "/events/combine" : "/events"} replace />;
   if (past && combineIndex !== undefined && !isPastCombineYear(year, combineIndex)) return <Navigate to="/events/combine" replace />;
-  if (!tabs.some(([k]) => k === tab) || (pos && (!tab || !EVENT_POSITIONS.includes(pos)))) return <Navigate to={eventPath(event, year)} replace />;
+  // (Top Performers takes an edition date where the others take a position.)
+  const perfEdition = tab === "performances" ? String(posParam || "") : "";
+  if (perfEdition && !/^\d{4}-\d{2}-\d{2}$/.test(perfEdition)) return <Navigate to={eventPath(event, year, tab)} replace />;
+  if (!tabs.some(([k]) => k === tab) || (pos && !perfEdition && (!tab || !EVENT_POSITIONS.includes(pos)))) return <Navigate to={eventPath(event, year)} replace />;
 
-  const people = past ? pastRows || [] : participantsOf(data, event);
+  // A–Z by last name, past years too (their rows come sorted by full name).
+  const people = past ? [...(pastRows || [])].sort(byLastName) : participantsOf(data, event);
   const loading = past ? pastRows === undefined : data === null;
   const schedule = event === "pro-days" ? proDaySchedule(data) : [];
   const dates = past ? { entries: [], start: null, end: null } : eventDates(event);
@@ -101,6 +108,10 @@ export default function EventPage({ hub = false, section = "", hubPos = "" }) {
       : tab === "participants"
         ? `Every ${pos ? `${posName.toLowerCase()} ` : "prospect "}invited to the ${base}, with school, position and a link to each player's We-Draft.com profile.`
         : `The ${base} schedule — when it starts, which positions work out each day — plus the invite list, results and draft updates from Indianapolis.`,
+  } : event === "pro-days" && !tab ? {
+    // (user, 2026-11-20)
+    title: `${year} Pro Day Schedule and Results | NFL Draft`,
+    description: `Every ${year} NFL pro day, school by school: dates as each school announces its pro day, the prospects working out and their results.`,
   } : ev.teams ? {
     title: tab === "participants" ? `${pos ? `${posName} Participants` : `${ev.teams.join(" and ")} Team Rosters`} | ${updates}` : `${base} Participants and Draft Updates`,
     description: tab === "participants"
@@ -127,7 +138,8 @@ export default function EventPage({ hub = false, section = "", hubPos = "" }) {
 
   return (
     <>
-      <Helmet>
+      {/* Top Performers sets its own (SeniorBowlPerformances.jsx). */}
+      {tab !== "performances" && <Helmet>
         <title>{seo ? title : `${title} | We-Draft.com`}</title>
         <meta name="description" content={description} />
         <link rel="canonical" href={url} />
@@ -141,7 +153,7 @@ export default function EventPage({ hub = false, section = "", hubPos = "" }) {
         <meta name="twitter:title" content={title} />
         <meta name="twitter:description" content={description} />
         {jsonLd && <script type="application/ld+json">{JSON.stringify(jsonLd)}</script>}
-      </Helmet>
+      </Helmet>}
       <BadgeFont />
       <MarginAds contentRef={contentRef} isMobile={isMobile} horizontalPadding={24} />
 
@@ -157,12 +169,14 @@ export default function EventPage({ hub = false, section = "", hubPos = "" }) {
         <Hero ev={ev} year={year} start={start} end={end} now={now} isMobile={isMobile} count={people.length} schools={schedule.length} past={past} />
 
         {/* Tabs */}
-        <div style={{ display: "flex", gap: 6, margin: "14px 0 16px", boxShadow: "inset 0 -2px 0 #e2e7ef", overflowX: "auto", overflowY: "hidden", scrollbarWidth: "none" }}>
+        {/* Phones: the tabs share the width (three fit — Senior Bowl's Top Performers used to run off). */}
+        <div style={{ display: "flex", gap: isMobile ? 0 : 6, margin: "14px 0 16px", boxShadow: "inset 0 -2px 0 #e2e7ef", overflowX: "auto", overflowY: "hidden", scrollbarWidth: "none" }}>
           {tabs.map(([k, label]) => {
             const on = k === tab;
             return (
               <Link key={k || "overview"} to={eventPath(event, year, k)} style={{
-                padding: isMobile ? "9px 12px" : "10px 18px", fontSize: isMobile ? 12 : 13, fontWeight: 900, letterSpacing: "0.06em", textTransform: "uppercase",
+                padding: isMobile ? "9px 6px" : "10px 18px", fontSize: isMobile ? 11.5 : 13, fontWeight: 900, letterSpacing: isMobile ? "0.02em" : "0.06em", textTransform: "uppercase",
+                ...(isMobile ? { flex: "1 0 auto", textAlign: "center" } : {}),
                 textDecoration: "none", whiteSpace: "nowrap", color: on ? ev.color : "#5a6475", borderBottom: `3px solid ${on ? ev.color : "transparent"}`,
               }}>{label}{k === "participants" && people.length ? ` (${people.length})` : ""}</Link>
             );
@@ -175,6 +189,8 @@ export default function EventPage({ hub = false, section = "", hubPos = "" }) {
           <div style={{ padding: 30, textAlign: "center", color: "#8a94a6", fontWeight: 800 }}>Loading…</div>
         ) : tab === "results" ? (
           <Results ev={ev} year={year} people={people} pos={pos} isMobile={isMobile} past={past} />
+        ) : tab === "performances" ? (
+          <SeniorBowlPerformances year={year} edition={perfEdition} isMobile={isMobile} />
         ) : tab === "participants" ? (
           <Participants ev={ev} year={year} people={people} pos={pos} isMobile={isMobile} schedule={schedule} badgeFor={badgeFor} />
         ) : event === "pro-days" ? (
@@ -271,14 +287,13 @@ function Overview({ ev, year, people, dates, isMobile }) {
       <SectionHead icon="calendar" title="Key Dates" isMobile={isMobile} color={ev.color} />
       {ev.slug === "combine" ? <CombineKeyDates ev={ev} year={year} dates={dates} today={today} isMobile={isMobile} /> : (
         <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(280px, 1fr))", gap: 10 }}>
-          {dates.entries.map((e) => <DateCard key={e.id} e={e} ev={ev} today={today} isMobile={isMobile} />)}
+          {oneDayEach(dates.entries).map((e) => <DateCard key={e.id} e={e} ev={ev} today={today} isMobile={isMobile} />)}
         </div>
       )}
 
       {ev.slug === "combine" && (
         <>
-          <SectionHead icon="stopwatch" title="Day-by-Day Schedule" isMobile={isMobile} color={ev.color} />
-          <CombineSchedule isMobile={isMobile} today={today} />
+          <div style={{ marginTop: isMobile ? 18 : 24 }}><CombineSchedule isMobile={isMobile} today={today} /></div>
         </>
       )}
 
@@ -286,6 +301,7 @@ function Overview({ ev, year, people, dates, isMobile }) {
         // The rosters live on the Participants tab.
         <div style={{ marginTop: 18 }}>
           <Link to={eventPath(ev.slug, year, "participants")} style={ctaStyle(ev)}>{people.length ? `See all ${people.length} participants →` : "Participants →"}</Link>
+          {ev.slug === "senior-bowl" && <Link to={eventPath(ev.slug, year, "performances")} style={{ ...ctaStyle(ev), marginLeft: 8 }}>Top Performers →</Link>}
         </div>
       ) : (
         <>
@@ -370,6 +386,20 @@ function CombineKeyDates({ ev, year, dates, today, isMobile }) {
 }
 
 const ctaStyle = (ev) => ({ display: "inline-block", padding: "9px 16px", borderRadius: 999, background: ev.color, color: "#fff", fontSize: 12, fontWeight: 900, letterSpacing: "0.05em", textTransform: "uppercase", textDecoration: "none" });
+
+// A multi-day entry (Senior Bowl Practices, Jan 26–28) as one card per day
+// (user, 2026-11-20: no double dates in one box) — "Senior Bowl Practice ·
+// Day 1", its blurb on the first day only.
+function oneDayEach(entries) {
+  return entries.flatMap((e) => {
+    if (sameDay(e.start, e.finish)) return [e];
+    const days = Math.round((e.finish - e.start) / 86400000) + 1;
+    return Array.from({ length: days }, (_, i) => {
+      const d = new Date(e.start.getFullYear(), e.start.getMonth(), e.start.getDate() + i);
+      return { ...e, id: `${e.id}-${i + 1}`, start: d, finish: d, title: `${e.short || e.title} · Day ${i + 1}`, blurb: i ? "" : e.blurb };
+    });
+  });
+}
 
 function DateCard({ e, ev, today, isMobile }) {
   const done = today > e.finish;
@@ -580,6 +610,39 @@ function ProDaySchedule({ ev, year, people, schedule, isMobile, badgeFor }) {
           ))}
         </div>
       )}
+      <ProDayWall year={year} schedule={schedule} isMobile={isMobile} badgeFor={badgeFor} color={ev.color} />
+    </>
+  );
+}
+
+// Every school's pro day badge we have (user, 2026-11-20), A–Z, each with
+// its date once it's set ("Date TBA" until then), linking to its team page.
+function ProDayWall({ year, schedule, isMobile, badgeFor, color }) {
+  const saved = badgeFor?.saved;
+  if (!saved?.length) return null;
+  const dayOf = new Map(schedule.map((d) => [portalTeamSlug(d.school), d.start]));
+  const size = isMobile ? 78 : 104;
+  return (
+    <>
+      <SectionHead icon="calendar" title={`${year} Pro Days by School`} isMobile={isMobile} color={color} />
+      <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill, minmax(${isMobile ? 100 : 128}px, 1fr))`, gap: isMobile ? 8 : 10 }}>
+        {saved.map(({ slug, school, teamSlug, badge }) => {
+          const d = dayOf.get(slug);
+          return (
+            <Link key={slug} to={`/team/${teamSlug || slug}`} className="wd-pd-tile" style={{
+              display: "flex", flexDirection: "column", alignItems: "center", gap: 6, padding: isMobile ? "10px 6px" : "12px 8px",
+              background: "#fff", border: "1px solid #e2e7ef", borderRadius: 14, textDecoration: "none",
+            }}>
+              <ProDayBadge badge={badge} id={`wall-${slug}`} size={size} year={year} />
+              <span style={{ fontSize: isMobile ? 11.5 : 12.5, fontWeight: 900, color: "#1c2330", textAlign: "center", lineHeight: 1.15 }}>{school}</span>
+              <span style={{ fontSize: 10.5, fontWeight: 900, letterSpacing: "0.06em", textTransform: "uppercase", color: d ? color : "#8a94a6" }}>
+                {d ? `${WEEKDAYS[d.getDay()]}, ${MONTHS[d.getMonth()].slice(0, 3)} ${d.getDate()}` : "Date TBA"}
+              </span>
+            </Link>
+          );
+        })}
+      </div>
+      <style>{".wd-pd-tile { transition: transform .15s, box-shadow .15s; } .wd-pd-tile:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0,30,70,0.1); }"}</style>
     </>
   );
 }
@@ -676,7 +739,7 @@ function Results({ ev, year, people, pos, isMobile, past, onPick }) {
 function YearSwitch({ ev, year, tab, pos, index }) {
   const years = [COMBINE_EVENT_YEAR, ...Object.keys(index?.years || {}).map(Number).sort((a, b) => b - a)];
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6, overflowX: "auto", margin: "-6px 0 14px", paddingBottom: 2 }}>
+    <div className="wd-scroll" style={{ display: "flex", alignItems: "center", gap: 6, overflowX: "auto", margin: "-6px 0 14px", paddingBottom: 8 }}>
       <Link to="/events/combine" style={{ flexShrink: 0, fontSize: 11, fontWeight: 900, letterSpacing: "0.06em", textTransform: "uppercase", color: ev.color, textDecoration: "none", marginRight: 4 }}>All-time</Link>
       {years.map((y) => (
         <Link key={y} to={eventPath("combine", y, tab, pos)} style={{

@@ -329,6 +329,8 @@ for (const doc of allTeams) {
       { path: `/events/${ev}/2027/participants`, priority: 0.6, lastmod: today },
     ]),
     { path: "/events/combine/2027/results", priority: 0.65, lastmod: today },
+    // Senior Bowl Top Performers (WX content) — the latest only; editions are noindex.
+    { path: "/events/senior-bowl/2027/performances", priority: 0.65, lastmod: today },
     ...["qb", "rb", "wr", "te", "ol", "edge", "dl", "lb", "db"].map((pos) => ({ path: `/events/combine/2027/results/${pos}`, priority: 0.5, lastmod: today })),
     // The Combine hub: all-time position averages + records, each position's profile, every year.
     { path: "/events/combine", priority: 0.7, lastmod: today },
@@ -530,6 +532,37 @@ for (const doc of allTeams) {
   // Everything — the NFL team, staff and Weekly Mock pages too (they were
   // built but left out of this list until 2026-10-26).
   const portalSimPages = Object.keys(portalSimTeams).map((slug) => ({ path: `/portalsim/${slug}`, priority: 0.6, lastmod: today }));
+
+  /* High school pages (released 2026-11-20): /hs and /hs/nfl, every state
+     (/hs/{st}, /hs/{st}/nfl) with data, and every school page
+     (/hs/{st}/{school} — a school with a logo, hsPath of its Slug). Read
+     from the precomputed docs: hsAlumni/_hub, then each _state_{ST}. */
+  const hsPages = [];
+  try {
+    const hub = await getDoc(doc(db, "hsAlumni", "_hub"));
+    const states = hub.exists() ? (hub.data().states || []).map((x) => x.a).filter(Boolean) : [];
+    if (states.length) {
+      hsPages.push({ path: "/hs", priority: 0.75, lastmod: today }, { path: "/hs/nfl", priority: 0.7, lastmod: today });
+      const stateDocs = await Promise.all(states.map((a) => getDoc(doc(db, "hsAlumni", `_state_${a}`)).catch(() => null)));
+      const seen = new Set();
+      states.forEach((a, i) => {
+        const st = a.toLowerCase();
+        hsPages.push({ path: `/hs/${st}`, priority: 0.6, lastmod: today }, { path: `/hs/${st}/nfl`, priority: 0.55, lastmod: today });
+        const d = stateDocs[i];
+        (d?.exists() ? d.data().schools || [] : []).forEach((x) => {
+          const m = /^(.+)-([a-z]{2})$/.exec(String(x?.[5] || ""));
+          if (!m) return;
+          const path = `/hs/${m[2]}/${m[1]}`;
+          if (seen.has(path)) return;
+          seen.add(path);
+          hsPages.push({ path, priority: 0.5, lastmod: today });
+        });
+      });
+    }
+  } catch (e) {
+    console.warn("High school pages skipped:", e.message);
+  }
+  console.log(`✅ ${hsPages.length} high school pages.`);
   // Interactive maps: the directory, the draft map, every FBS school's recruiting map.
   // Admin-only for now (user, 2026-11-18) — flip MAPS_RELEASED to list them.
   const MAPS_RELEASED = false;
@@ -547,7 +580,7 @@ for (const doc of allTeams) {
     { path: `/portal/${slug}/needs`, priority: 0.45, lastmod: today },
     { path: `/portal/${slug}/targets`, priority: 0.5, lastmod: today },
   ]);
-  const allUrls = [...staticPages, ...communityBoardPages, ...teamPages, ...nflPages, ...portalSimPages, ...portalPages, ...(MAPS_RELEASED ? mapPages : []), ...weeklyMockPages, ...riserPages, ...portalNewsPages, ...staffPages, ...playerPages, ...comparisonPages, ...newsPages, ...gamePages];
+  const allUrls = [...staticPages, ...communityBoardPages, ...teamPages, ...nflPages, ...portalSimPages, ...portalPages, ...hsPages, ...(MAPS_RELEASED ? mapPages : []), ...weeklyMockPages, ...riserPages, ...portalNewsPages, ...staffPages, ...playerPages, ...comparisonPages, ...newsPages, ...gamePages];
   const chunks = [];
   
   for (let i = 0; i < allUrls.length; i += chunkSize) {

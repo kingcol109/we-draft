@@ -17,7 +17,7 @@ import { Helmet } from "react-helmet-async";
 import { db } from "../firebase";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { STATE_ABBR } from "../utils/highSchoolMatch";
-import { METRICS, POS_GROUPS, rankText } from "../utils/hsRanks";
+import { METRICS, POS_GROUPS, rankText, hsPath } from "../utils/hsRanks";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -193,7 +193,7 @@ function Board({ rows, scope, title, metric, isMobile }) {
           textDecoration: "none", background: "#fff", borderBottom: i < rows.length - 1 ? `1px solid ${LINE_2}` : "none",
         };
         return r.slug ? (
-          <Link key={`${r.k}|${r.st}`} to={`/hs/${r.slug}`} style={style}
+          <Link key={`${r.k}|${r.st}`} to={hsPath(r.slug)} style={style}
             onMouseEnter={(e) => { e.currentTarget.style.background = SOFT; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}>{inner}</Link>
         ) : <div key={`${r.k}|${r.st}`} style={style}>{inner}</div>;

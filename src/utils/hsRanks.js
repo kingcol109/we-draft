@@ -22,5 +22,13 @@ export const METRICS = [
 // "#7", or "T-3" for a shared rank; "—" with none.
 export const rankText = (r, tie) => (r ? (tie ? `T-${r}` : `#${r}`) : "—");
 
+// A school page's URL from its stored Slug ("hun-school-nj" →
+// "/hs/nj/hun-school"): state first, like /hs/{state}. App.js redirects the
+// old /hs/{slug} form here.
+export const hsPath = (slug) => {
+  const m = /^(.+)-([a-z]{2})$/.exec(String(slug || "").toLowerCase());
+  return m ? `/hs/${m[2]}/${m[1]}` : `/hs/${slug}`;
+};
+
 // "Georgia" → "GA" (an abbreviation passes through).
 export const stateAbbr = (s) => STATE_ABBR[s] || s || "";

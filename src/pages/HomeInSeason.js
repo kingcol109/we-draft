@@ -22,6 +22,7 @@ import { topProspects, gradeLabel } from "../utils/communityGrades";
 import { fetchRecentPublicEvals } from "../utils/recentEvaluations";
 import { loadWeeklyMockNews } from "../utils/weeklyMockNews";
 import { loadRiserNews } from "../utils/risers";
+import { loadPerfNews } from "../utils/seniorBowlPerf";
 import { communityAverage } from "../utils/gradeWindow";
 import { isSiteUpdate } from "../utils/siteUpdates";
 
@@ -398,7 +399,8 @@ export default function HomeInSeason() {
 
   // The published Weekly Mocks, as news items (utils/weeklyMockNews.js).
   // …and the Draft Risers editions (utils/risers.js).
-  useEffect(() => { Promise.all([loadWeeklyMockNews(6), loadRiserNews(6)]).then(([w, r]) => setWeeklyMocks([...w, ...r])); }, []);
+  // …and the Senior Bowl Top Performers editions (utils/seniorBowlPerf.js).
+  useEffect(() => { Promise.all([loadWeeklyMockNews(6), loadRiserNews(6), loadPerfNews(6)]).then(([w, r, p]) => setWeeklyMocks([...w, ...r, ...p])); }, []);
 
   // Videos — same fetch shape CommunityBoard.js's own sidebar uses
   // (GenTitle/GenThumb over an items[0] fallback), real data, not dummy.

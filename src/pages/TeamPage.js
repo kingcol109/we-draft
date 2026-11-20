@@ -20,6 +20,8 @@ import { cssRect } from "../utils/pageZoom";
 import { textOn } from "../utils/teamColors";
 import FitText from "../components/FitLine";
 import { PROSPECT_YEARS, useProspectYears } from "../utils/prospectYears";
+import { teamWxNewsItems } from "../utils/teamWxNews";
+import TeamPortalPromo from "../components/TeamPortalPromo";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -227,7 +229,7 @@ function TableHeader({ color1, color2, isMobile, showDraftPick, showGrade, showN
       background: `${color1}f5`, borderBottom: `3px solid ${color2}`,
       backdropFilter: "blur(4px)",
     }}>
-      {cell("Year", COL.year.width, "Eligible")}
+      {cell("Year", isMobile ? "38px" : COL.year.width, "Eligible")}
       {showDraftPick && cell("Rd", COL.round.width)}
       {showDraftPick && !isMobile && cell("Pick", COL.pick.width)}
       {cell("Pos", COL.pos.width, "Position")}
@@ -290,7 +292,7 @@ function PlayerRow({ player, commGrade, draftInfo, nflTeams, isMobile, color1, c
       onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
       onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
     >
-      <div style={{ flexShrink: 0, width: COL.year.width, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ flexShrink: 0, width: isMobile ? "38px" : COL.year.width, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
         <span style={{ fontSize: isMobile ? "13px" : "15px", fontWeight: 900, color: "#444", lineHeight: 1 }}>
           {player.Eligible ? String(player.Eligible).replace(/s$/i, "") : "—"}
         </span>
@@ -351,13 +353,26 @@ function PlayerRow({ player, commGrade, draftInfo, nflTeams, isMobile, color1, c
       )}
 
       <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: "10px" }}>
-        <div style={{
-          flex: "0 1 auto", minWidth: 0,
-          fontWeight: 900, fontSize: isMobile ? "17px" : "24px", color: color1,
-          lineHeight: 1.15, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-        }}>
-          {`${player.First || ""} ${player.Last || ""}`}
-        </div>
+        {/* Phones: first name small over a bold last name, so the name
+            never gets cut off (it used to: "Jeremiah Sm…"). */}
+        {isMobile ? (
+          <div style={{ minWidth: 0, lineHeight: 1.1 }}>
+            <div style={{ fontSize: "11px", fontWeight: 800, color: "#6b7a90", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {player.First || ""}
+            </div>
+            <div style={{ fontSize: "17px", fontWeight: 900, color: color1, overflowWrap: "anywhere" }}>
+              {player.Last || ""}
+            </div>
+          </div>
+        ) : (
+          <div style={{
+            flex: "0 1 auto", minWidth: 0,
+            fontWeight: 900, fontSize: "24px", color: color1,
+            lineHeight: 1.15, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+          }}>
+            {`${player.First || ""} ${player.Last || ""}`}
+          </div>
+        )}
       </div>
 
       <div style={{ flexShrink: 0, width: isMobile ? "52px" : "80px", height: "42px", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -381,7 +396,7 @@ function HistoricalRow({ player, nflTeams, isMobile, color1, color2 }) {
       padding: isMobile ? "10px 12px" : "12px 18px",
       background: "#fff", borderBottom: "1px solid #f0f0f0",
     }}>
-      <div style={{ flexShrink: 0, width: COL.year.width, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ flexShrink: 0, width: isMobile ? "38px" : COL.year.width, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
         <span style={{ fontSize: isMobile ? "13px" : "15px", fontWeight: 900, color: "#444", lineHeight: 1 }}>{player.Year || "—"}</span>
       </div>
 
@@ -434,7 +449,7 @@ function HistoricalRow({ player, nflTeams, isMobile, color1, color2 }) {
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{
           fontWeight: 900, fontSize: isMobile ? "15px" : "20px", color: "#333",
-          lineHeight: 1.15, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+          lineHeight: 1.15, ...(isMobile ? { overflowWrap: "anywhere" } : { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }),
         }}>
           {player.Player || "—"}
         </div>
@@ -766,60 +781,51 @@ function MainContent({
 
   return (
     <div>
-      {/* Tab nav */}
-      <div style={{ display: "flex", gap: "6px", marginBottom: "20px", flexWrap: "wrap" }}>
-        <button onClick={() => setActiveTab("prospects")} style={{
-          padding: isMobile ? "7px 18px" : "8px 24px", fontWeight: 900,
-          fontSize: isMobile ? "13px" : "14px", textTransform: "uppercase", letterSpacing: "0.06em",
-          border: `2px solid ${color2}`, borderRadius: "8px", cursor: "pointer",
-          background: activeTab === "prospects" ? color1 : "#fff",
-          color: activeTab === "prospects" ? "#fff" : color1,
-        }}>
-          Prospects ({totalProspects})
-        </button>
-        {!fcs && cfbdTeamId != null && (
-          <button onClick={() => setActiveTab("insights")} style={{
-            padding: isMobile ? "7px 18px" : "8px 24px", fontWeight: 900,
-            fontSize: isMobile ? "13px" : "14px", textTransform: "uppercase", letterSpacing: "0.06em",
-            border: `2px solid ${color2}`, borderRadius: "8px", cursor: "pointer",
-            background: activeTab === "insights" ? color1 : "#fff",
-            color: activeTab === "insights" ? "#fff" : color1,
-          }}>
-            Insights
-          </button>
-        )}
-        {roster && (
-          <button onClick={() => setActiveTab("roster")} style={{
-            padding: isMobile ? "7px 18px" : "8px 24px", fontWeight: 900,
-            fontSize: isMobile ? "13px" : "14px", textTransform: "uppercase", letterSpacing: "0.06em",
-            border: `2px solid ${color2}`, borderRadius: "8px", cursor: "pointer",
-            background: activeTab === "roster" ? color1 : "#fff",
-            color: activeTab === "roster" ? "#fff" : color1,
-          }}>
-            Roster ({roster.players.length})
-          </button>
-        )}
-        {roster && playersWithStats(roster).length > 0 && (
-          <button onClick={() => setActiveTab("stats")} style={{
-            padding: isMobile ? "7px 18px" : "8px 24px", fontWeight: 900,
-            fontSize: isMobile ? "13px" : "14px", textTransform: "uppercase", letterSpacing: "0.06em",
-            border: `2px solid ${color2}`, borderRadius: "8px", cursor: "pointer",
-            background: activeTab === "stats" ? color1 : "#fff",
-            color: activeTab === "stats" ? "#fff" : color1,
-          }}>
-            Stats
-          </button>
-        )}
-        <button onClick={() => setActiveTab("archive")} style={{
-          padding: isMobile ? "7px 18px" : "8px 24px", fontWeight: 900,
-          fontSize: isMobile ? "13px" : "14px", textTransform: "uppercase", letterSpacing: "0.06em",
-          border: `2px solid ${color2}`, borderRadius: "8px", cursor: "pointer",
-          background: activeTab === "archive" ? color1 : "#fff",
-          color: activeTab === "archive" ? "#fff" : color1,
-        }}>
-          Archive ({totalArchive})
-        </button>
-      </div>
+      {/* Tab nav — phones (user, 2026-11-20): one segmented row that fits
+          the width, count under each label, instead of buttons wrapping
+          onto three ragged lines. */}
+      {(() => {
+        const tabs = [
+          ["prospects", "Prospects", totalProspects],
+          ...(!fcs && cfbdTeamId != null ? [["insights", "Insights", null]] : []),
+          ...(roster ? [["roster", "Roster", roster.players.length]] : []),
+          ...(roster && playersWithStats(roster).length > 0 ? [["stats", "Stats", null]] : []),
+          ["archive", "Archive", totalArchive],
+        ];
+        if (isMobile) {
+          return (
+            <div role="tablist" style={{ display: "flex", gap: 2, padding: 3, marginBottom: 14, borderRadius: 12, background: "#fff", border: `1.5px solid ${color2}` }}>
+              {tabs.map(([k, label, n]) => {
+                const on = activeTab === k;
+                return (
+                  <button key={k} role="tab" aria-selected={on} onClick={() => setActiveTab(k)} style={{
+                    flex: "1 1 auto", minWidth: 0, minHeight: 42, padding: "4px 5px", border: "none", borderRadius: 9, cursor: "pointer",
+                    background: on ? color1 : "transparent", color: on ? "#fff" : color1,
+                    display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 1,
+                    fontFamily: "inherit", fontWeight: 900, fontSize: 10.5, letterSpacing: "0.02em", textTransform: "uppercase", lineHeight: 1.1,
+                  }}>
+                    <span style={{ whiteSpace: "nowrap" }}>{label}</span>
+                    {n != null && <span style={{ fontSize: 10, opacity: 0.7 }}>{n}</span>}
+                  </button>
+                );
+              })}
+            </div>
+          );
+        }
+        return (
+          <div style={{ display: "flex", gap: "6px", marginBottom: "20px", flexWrap: "wrap" }}>
+            {tabs.map(([k, label, n]) => (
+              <button key={k} onClick={() => setActiveTab(k)} style={{
+                padding: "8px 24px", fontWeight: 900, fontSize: "14px", textTransform: "uppercase", letterSpacing: "0.06em",
+                border: `2px solid ${color2}`, borderRadius: "8px", cursor: "pointer",
+                background: activeTab === k ? color1 : "#fff", color: activeTab === k ? "#fff" : color1,
+              }}>
+                {label}{n != null ? ` (${n})` : ""}
+              </button>
+            ))}
+          </div>
+        );
+      })()}
 
       {/* ── PROSPECTS TAB ── */}
       {activeTab === "prospects" && (() => {
@@ -982,6 +988,15 @@ export default function TeamPage() {
   const [teamVideos, setTeamVideos] = useState([]);
   const [visibleVideoCount, setVisibleVideoCount] = useState(VIDEO_INITIAL_COUNT);
   const [visibleNewsCount, setVisibleNewsCount] = useState(NEWS_INITIAL_COUNT);
+  // Draft Risers + Portal News items about this school's players
+  // (utils/teamWxNews.js), merged into In The News below.
+  const [wxNews, setWxNews] = useState([]);
+  useEffect(() => {
+    let live = true;
+    setWxNews([]);
+    if (canonicalSchool) teamWxNewsItems(canonicalSchool).then((items) => { if (live) setWxNews(items); }).catch(() => {});
+    return () => { live = false; };
+  }, [canonicalSchool]);
 
   useEffect(() => {
     const handler = () => setIsMobile(window.innerWidth < 768);
@@ -1876,16 +1891,19 @@ export default function TeamPage() {
 
   // Starts at 3, expandable up to NEWS_LIMIT (everything already fetched) —
   // same "Show More" idiom as VideosSidebar above.
+  const allNews = [...wxNews, ...teamNews]
+    .sort((a, b) => (b.publishedAt?.toMillis?.() || 0) - (a.publishedAt?.toMillis?.() || 0))
+    .slice(0, NEWS_LIMIT);
   const NewsSidebar = (
     <SidebarCard title="In The News" color1={sideC1}>
-      {teamNews.length === 0 ? (
+      {allNews.length === 0 ? (
         <div style={{ padding: "16px", textAlign: "center", color: "#999", fontSize: "13px", fontStyle: "italic" }}>No recent news.</div>
       ) : (
         <>
-          {teamNews.slice(0, visibleNewsCount).map((n, i, arr) => (
+          {allNews.slice(0, visibleNewsCount).map((n, i, arr) => (
             <Link
               key={n.id}
-              to={`/news/${n.slug}`}
+              to={n.href || `/news/${n.slug}`}
               style={{
                 display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px",
                 textDecoration: "none", background: "#fff",
@@ -1914,7 +1932,7 @@ export default function TeamPage() {
               </div>
             </Link>
           ))}
-          {visibleNewsCount < Math.min(teamNews.length, NEWS_LIMIT) && (
+          {visibleNewsCount < allNews.length && (
             <button
               onClick={() => setVisibleNewsCount((c) => Math.min(c + 3, NEWS_LIMIT))}
               style={{
@@ -1989,7 +2007,7 @@ export default function TeamPage() {
         fontFamily: "'Arial Black', Arial, sans-serif",
       }}>
         {isMobile ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
             {/* Hero renders the instant branding is ready (see the render
                 gate above) — everything below it that depends on the rest
                 of the load effect (prospects, schedule, news, etc.) stays
@@ -1999,6 +2017,8 @@ export default function TeamPage() {
               school={school} branding={branding} canonicalSchool={canonicalSchool}
               color1={color1} color2={color2} isMobile={isMobile} ownCurrentRank={ownCurrentRank}
             />
+            {/* While the transfer window's open: this team's portal page. */}
+            {!fcs && <TeamPortalPromo school={school || { School: canonicalSchool }} color1={color1} color2={color2} isMobile />}
             {loading ? (
               <LoadingSpinner label="Loading roster, schedule & more" size={36} minHeight="200px" />
             ) : (
@@ -2013,6 +2033,11 @@ export default function TeamPage() {
                   totalProspects={totalProspects}
                   fcs={fcs} schedule={schedule} currentTop25={currentTop25} schoolsMap={schoolsMap}
                 />
+                {/* Phones: news first (short, timely), then the schedule,
+                    videos, and the conference list last. */}
+                {allNews.length > 0 && NewsSidebar}
+                {!fcs && ScheduleSidebar}
+                {teamVideos.length > 0 && VideosSidebar}
                 <details style={{ border: `1px solid ${SIDE_LINE}`, borderRadius: "14px", overflow: "hidden", background: "#fff" }}>
                   <summary style={{ backgroundColor: sideC1, padding: "12px 16px", cursor: "pointer", listStyle: "none", userSelect: "none" }}>
                     <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", letterSpacing: "0.14em", textTransform: "uppercase" }}>
@@ -2051,9 +2076,6 @@ export default function TeamPage() {
                     })}
                   </div>
                 </details>
-                {teamVideos.length > 0 && VideosSidebar}
-                {NewsSidebar}
-                {!fcs && ScheduleSidebar}
               </>
             )}
           </div>
@@ -2090,6 +2112,7 @@ export default function TeamPage() {
             <div style={{ position: "sticky", top: "20px", display: "flex", flexDirection: "column", gap: "20px" }}>
               {!loading && (
                 <>
+                  {!fcs && <TeamPortalPromo school={school || { School: canonicalSchool }} color1={color1} color2={color2} />}
                   {teamVideos.length > 0 && VideosSidebar}
                   {NewsSidebar}
                   {!fcs && ScheduleSidebar}
@@ -2163,7 +2186,7 @@ function HeroCard({ school, branding, canonicalSchool, color1, color2, isMobile,
   return (
     <div style={{
       position: "relative", overflow: "hidden", borderRadius: "14px",
-      border: `2px solid ${color2}`, marginBottom: "20px",
+      border: `2px solid ${color2}`, marginBottom: isMobile ? 0 : "20px",
       boxShadow: "0 10px 28px rgba(0,0,0,0.22)",
       background: [
         "linear-gradient(rgba(0,0,0,0.38), rgba(0,0,0,0.38))",

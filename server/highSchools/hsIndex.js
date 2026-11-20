@@ -36,12 +36,22 @@
 //       lists: { cfb | nfl: { ALL | QB | …: [{ k name, st abbr, v, r, t,
 //                                               id?, slug?, logo? }] } } }
 //
+//   hsAlumni/_hub, hsAlumni/_state_{ST} — the /hs and /hs/{state} pages
+//     (state totals, every school's counts, pre-projected heatmap points);
+//     see hsGeo.js.
+//
 // Runs at the end of scripts/syncCfbdRosters.js, or on its own:
 // scripts/buildHsAlumni.js.
 
 const { FieldValue } = require("firebase-admin/firestore");
+const { buildHsGeoDocs, cityKey } = require("./hsGeo");
 
 const FIRST_DRAFT = 2000;
+// "In college" counts FBS rosters only (user, 2026-11-20): FCS rosters are
+// stored too, but CFBD has a high school for only ~25% of FCS players (vs
+// ~72% FBS), so they'd skew the numbers. Same conferences as the roster
+// sync's FBS leaders (scripts/syncCfbdRosters.js FBS_CONFS).
+const FBS_CONFS = new Set(["ACC", "Big 10", "Big 12", "SEC", "Pac 12", "Independent", "AAC", "CUSA", "MAC", "Mountain West", "Sun Belt"]);
 const NATIONAL_TOP = 25;
 const STATE_TOP = 15;
 const GROUPS = ["QB", "RB", "WR", "TE", "OL", "DL", "LB", "DB", "ST"];
@@ -74,8 +84,11 @@ function rankOf(pairs) {
   return { ranks: out, sorted };
 }
 
-async function buildHsIndex(db) {
+// opts.geoOnly: write only the /hs hub + state docs (hsGeo.js);
+// opts.dryRun: write nothing, return the hub/state docs as `geoDocs`.
+async function buildHsIndex(db, opts = {}) {
   const { matchHighSchool, stateName, hsKey, NATIONAL_SCHOOLS, STATE_ABBR } = await import("../../src/utils/highSchoolMatch.js");
+  const { albersUsa } = await import("../../src/utils/albersUsa.js");
 
   // Our schools, by state (for matching) and by key.
   const docs = (await db.collection("highSchools").get()).docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -108,20 +121,57 @@ async function buildHsIndex(db) {
   const pages = docs.filter((x) => x.Logo1);
   pages.forEach((x) => pageRows.set(docKey(x), { players: [], drafted: [] }));
 
-  // ── In college: every CFBD roster row. ──
+  // ── In college: every FBS roster row (FCS skipped, see FBS_CONFS). ──
   const links = new Map();
   (await db.collection("cfbdPlayers").where("mappingStatus", "in", ["suggested", "verified"]).select("wedraftPlayerId", "wedraftSlug").get())
     .docs.forEach((d) => { const x = d.data(); if (x.wedraftPlayerId) links.set(d.id, { id: x.wedraftPlayerId, slug: x.wedraftSlug || null }); });
+  // Each current player's transfer stars (portalStars, with the admin's
+  // locks in config/portalGrades winning) — used only to ORDER a school's
+  // college players on /hs (hsGeo.js); the stars themselves aren't written.
+  const { decodeGrade } = await import("../../src/utils/portalStars.mjs");
+  const [starSnap, gradeDoc, schoolSnap] = await Promise.all([
+    db.collection("portalStars").get(),
+    db.collection("config").doc("portalGrades").get(),
+    db.collection("schools").select("School", "Logo1", "LogoDark", "Conference").get(),
+  ]);
+  const starsById = new Map();
+  starSnap.docs.forEach((d) => {
+    if (d.id.startsWith("_")) return;
+    Object.entries(d.data().rows || {}).forEach(([id, r]) => starsById.set(String(id), Number(r?.[0]) || 0));
+  });
+  Object.entries(gradeDoc.data()?.rows || {}).forEach(([id, code]) => {
+    if (id.startsWith("wd:")) return;
+    const g = decodeGrade(code);
+    if (g.s) starsById.set(String(id), g.s);
+  });
+  const collegeLogo = new Map(schoolSnap.docs.map((d) => d.data()).filter((x) => x.School && (x.Logo1 || x.LogoDark))
+    .map((x) => [x.School, [x.LogoDark || x.Logo1, x.Logo1 || x.LogoDark]]));
+  const playersByKey = new Map(); // key → [[stars, rating, name, pos, school]]
+  const fbsSchools = new Set(schoolSnap.docs.map((d) => d.data()).filter((x) => FBS_CONFS.has(x.Conference)).map((x) => x.School));
+  let fcsSkipped = 0;
+
   let season = null;
   let collegePlayers = 0;
+  // Hometown coordinates, for the /hs heatmap (hsGeo.js): per school, and
+  // per high school city.
+  const samples = new Map();
+  const citySamples = new Map();
+  const push = (m, k, v) => { if (!m.has(k)) m.set(k, []); m.get(k).push(v); };
   (await db.collection("cfbRosters").get()).docs.forEach((d) => {
     const t = d.data();
     if (t.season && (!season || t.season > season)) season = t.season;
+    if (!fbsSchools.has(t.school)) { fcsSkipped += (t.players || []).length; return; }
     (t.players || []).forEach((p) => {
       const key = keyFor(p.hs, p.hss);
       if (!key) return;
       collegePlayers += 1;
       bump(key, "cfb", p.pos);
+      if (!playersByKey.has(key)) playersByKey.set(key, []);
+      playersByKey.get(key).push([starsById.get(String(p.id)) || 0, Number(p.rating) || 0, `${p.first || ""} ${p.last || ""}`.trim(), p.pos || null, t.school || t.team || null]);
+      if (Array.isArray(p.hl) && p.hl.length === 2) {
+        push(samples, key, p.hl);
+        if (p.hsc) push(citySamples, cityKey(p.hsc, stateName(p.hss)), p.hl);
+      }
       const page = pageRows.get(key);
       if (!page) return;
       const wd = links.get(String(p.id));
@@ -133,6 +183,16 @@ async function buildHsIndex(db) {
   });
 
   // ── Drafted: historical, then the latest class (still in players). ──
+  // Every school's picks too (for /hs's highest-picks cards, hsGeo.js), with
+  // the NFL team as its abbreviation (historical stores "Detroit Lions").
+  const nflTeams = (await db.collection("nfl").get()).docs.map((d) => ({ abbr: d.id, ...d.data() }));
+  const nflAbbrOf = new Map(nflTeams.map((t) => [`${t.City || ""} ${t.Team || ""}`.trim(), t.abbr]));
+  const picksByKey = new Map();
+  const addPick = (key, y, p, r, n, pos, tm) => {
+    if (!Number(p)) return;
+    if (!picksByKey.has(key)) picksByKey.set(key, []);
+    picksByKey.get(key).push([Number(y), Number(p), Number(r) || null, n || "", pos || null, tm || null]);
+  };
   let draftTo = FIRST_DRAFT;
   (await db.collection("historical").get()).docs.forEach((d) => {
     const h = d.data();
@@ -142,6 +202,7 @@ async function buildHsIndex(db) {
     const key = keyFor(h.HighSchool, h.State);
     if (!key) return;
     bump(key, "nfl", h.Position);
+    addPick(key, y, h.Pick, h.Round, h.Player || [h.First, h.Last].filter(Boolean).join(" "), h.Position, nflAbbrOf.get(h["NFL Team"]));
     const page = pageRows.get(key);
     if (page) {
       page.drafted.push({
@@ -166,6 +227,7 @@ async function buildHsIndex(db) {
     const key = keyFor(p.HighSchool, p.State);
     if (!key) return;
     bump(key, "nfl", p.Position);
+    addPick(key, latest, pick.Pick, pick.Round, `${p.First || ""} ${p.Last || ""}`.trim(), p.Position, pick.Team);
     const page = pageRows.get(key);
     if (page) {
       page.drafted.push({
@@ -213,6 +275,21 @@ async function buildHsIndex(db) {
   batchOps.push(["_rankings_US", { scope: "US", ...base, lists: lists(rank.nat, NATIONAL_TOP) }]);
   states.forEach((st) => batchOps.push([`_rankings_${STATE_ABBR[st]}`, { scope: STATE_ABBR[st], state: st, ...base, lists: lists(rank.state[st], STATE_TOP) }]));
 
+  // The /hs hub + /hs/{state} docs.
+  const geoDocs = buildHsGeoDocs({
+    counts, samples, citySamples, docByKey, base, STATE_ABBR, albersUsa, picksByKey, nflTeams, playersByKey, collegeLogo, GROUPS,
+    slugOf: (d) => hsSlug(d.Name, STATE_ABBR[d.State] || d.State),
+    top: { cfb: board(rank.nat.cfb.ALL, NATIONAL_TOP), nfl: board(rank.nat.nfl.ALL, NATIONAL_TOP) },
+  });
+  if (opts.dryRun) return { geoDocs };
+  if (opts.geoOnly) {
+    const b = db.batch();
+    geoDocs.forEach(([id, data]) => b.set(db.collection("hsAlumni").doc(id), data));
+    await b.commit();
+    return { geoDocs: geoDocs.length };
+  }
+  geoDocs.forEach((x) => batchOps.push(x));
+
   // Each page's own doc.
   const natRanked = rank.nat.cfb.ALL.sorted.length;
   pages.forEach((x) => {
@@ -257,7 +334,7 @@ async function buildHsIndex(db) {
   }
   return {
     pages: pages.length, leaderboards: states.length + 1, schoolsRanked: natRanked,
-    slugsFixed, collegePlayers, drafted: keys.reduce((n, k) => n + (counts.get(k).nfl.ALL || 0), 0), draftTo,
+    slugsFixed, collegePlayers, fcsSkipped, geoDocs: geoDocs.length, drafted: keys.reduce((n, k) => n + (counts.get(k).nfl.ALL || 0), 0), draftTo,
   };
 }
 

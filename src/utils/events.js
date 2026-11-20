@@ -87,11 +87,12 @@ export function proDaySchedule(data) {
 
 // One event's participants as a list, A–Z by last name.
 const lastName = (n) => String(n || "").trim().split(/\s+/).slice(1).join(" ") || String(n || "");
+export const byLastName = (a, b) => lastName(a.name).localeCompare(lastName(b.name)) || String(a.name).localeCompare(String(b.name));
 export function participantsOf(data, slug) {
   const key = EVENT_PAGES[slug]?.key;
   return Object.entries(data?.[key]?.p || {})
     .map(([id, p]) => ({ id, ...p }))
-    .sort((a, b) => lastName(a.name).localeCompare(lastName(b.name)) || String(a.name).localeCompare(String(b.name)));
+    .sort(byLastName);
 }
 
 // A participant's player page, when it's public.

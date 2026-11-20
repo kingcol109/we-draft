@@ -25,6 +25,7 @@ import { getSiteSnapshot, fetchAds, fetchCfbAds, fetchAdTeamLogos } from "../uti
 import { loadWeeklyMockSummary, weeklyMockPlayerTitle, weeklyYearHref, hasTeamPages, WEEKLY_YEARS } from "../utils/weeklyMockNews";
 import { riserNewsItem } from "../utils/risers";
 import { portalNewsItem } from "../utils/portalNews";
+import { perfNewsItem } from "../utils/seniorBowlPerf";
 import { NflTeamPicker, useMarginAdFit } from "../components/MarginAds";
 import AdBanner, { MobileAdCard, MOBILE_AD_HEIGHT } from "../components/AdBanner";
 import { takePlayerBySlug, takeSchoolByName } from "../utils/playerPrefetch";
@@ -2740,7 +2741,9 @@ export default function PlayerProfile() {
   useEffect(() => {
     let live = true;
     setPortalItems([]);
-    if (player?.id) portalNewsItem(player).then((it) => live && it && setPortalItems([it])).catch(() => {});
+    if (player?.id) portalNewsItem(player).then((it) => live && it && setPortalItems((l) => [...l, it])).catch(() => {});
+    // …and the Senior Bowl Top Performers (utils/seniorBowlPerf.js).
+    if (player?.id) perfNewsItem(player).then((it) => live && it && setPortalItems((l) => [...l, it])).catch(() => {});
     return () => { live = false; };
   }, [player?.id, player?.Last]); // eslint-disable-line react-hooks/exhaustive-deps
   // In The News: everything about him (articles, news, the weekly mocks,

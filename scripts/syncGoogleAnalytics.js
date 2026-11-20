@@ -109,6 +109,11 @@ const PAGE_TYPES = [
   // Draft Risers: each class (/risers/2027 → "2027") and edition
   // (/risers/2027/week-3 → "2027-week-3").
   { type: "risers", prefix: "/risers", hub: true, parse: words },
+  // High schools (released 2026-11-20): the /hs hub ("hub"), its NFL view
+  // (/hs/nfl → "nfl"), each state and its NFL view (/hs/ga → "ga",
+  // /hs/ga/nfl → "ga-nfl"), each school page (/hs/ga/buford → "ga-buford"),
+  // and the leaderboards (/hs/rankings → "rankings").
+  { type: "hs", prefix: "/hs", hub: true, parse: words },
 ];
 
 const FIRESTORE_BATCH_LIMIT = 500; // Firestore's hard cap on ops per batch

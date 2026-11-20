@@ -1,10 +1,9 @@
 // src/pages/HighSchoolTeamPage.js
 //
-// A high school's own team page (/hs/:slug) — branded like TeamPage.js
+// A high school's own team page (/hs/{st}/{school}, e.g. /hs/nj/hun-school) — branded like TeamPage.js
 // (college team pages). Every school with a logo uploaded (highSchools
-// Logo1) has one. Public, but not linked from anywhere on the site yet: the
-// way in is the admin (Branding → High School → Schools "View Page", and the
-// HS Rankings link). noindex until it's released.
+// Logo1) has one. Indexed and in the sitemap since 2026-11-20 (with the /hs
+// hub and state pages, which link here); title/description/canonical below.
 //
 // Reads (a page view): the school (highSchools where Slug == slug — one
 // indexed query), its precomputed doc hsAlumni/{id} (current college
@@ -24,7 +23,7 @@ import LoadingSpinner from "../components/LoadingSpinner";
 import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
 import { useSchools } from "../components/DraftArchiveList";
 import { currentDraftClass } from "../utils/eligibility";
-import { POS_GROUPS, rankText, stateAbbr } from "../utils/hsRanks";
+import { POS_GROUPS, rankText, stateAbbr, hsPath } from "../utils/hsRanks";
 import { isUnreleasedYear, isUnreleasedSlug, useIsAdmin } from "../utils/prospectYears";
 
 const BLUE = "#0055a5";
@@ -42,6 +41,12 @@ const HERO_STYLE = `
     0%, 100% { opacity: 0.7; }
     50%      { opacity: 1; }
   }
+  @keyframes wdHsPickIn {
+    0%   { opacity: 0; transform: translateY(14px) scale(0.97); }
+    100% { opacity: 1; transform: none; }
+  }
+  .wd-hs-pick { transition: transform .18s ease, box-shadow .18s ease; }
+  .wd-hs-pick:hover { transform: translateY(-4px); box-shadow: 0 14px 30px rgba(0,0,0,0.3) !important; }
   @keyframes wdHsLogoGlow {
     0%, 100% { opacity: 0.82; transform: scale(0.96); }
     50%      { opacity: 1;    transform: scale(1.04); }
@@ -89,6 +94,10 @@ function sanitizeUrl(url) {
   if (!/^https?:\/\//i.test(u)) return `https://${u}`;
   return u;
 }
+
+// imgur.com/x.png answers with a 302 to i.imgur.com/x.png — crawlers get
+// the direct image (og:image, JSON-LD).
+const directImage = (url) => sanitizeUrl(url).replace(/^https?:\/\/(www\.)?imgur\.com\//i, "https://i.imgur.com/");
 
 const NEWS_LIMIT = 8;
 // Players tab order: graded We-Draft players first, best grade first.
@@ -173,7 +182,11 @@ const SIDE_INK = "#0f1b2d";
 
 export default function HighSchoolTeamPage() {
   const { isAdmin } = useIsAdmin();
-  const { slug } = useParams();
+  // /hs/{st}/{school} → the stored Slug "{school}-{st}".
+  const { st: stParam, school: schoolParam } = useParams();
+  const slug = `${schoolParam || ""}-${stParam || ""}`.toLowerCase();
+  // Open at the top, not wherever the last page was scrolled.
+  useEffect(() => { window.scrollTo(0, 0); }, [slug]);
   const [school, setSchool] = useState(null); // null = loading, false = not available
   const [players, setPlayers] = useState([]);
   const [archive, setArchive] = useState([]);
@@ -325,15 +338,73 @@ export default function HighSchoolTeamPage() {
   // other, else site blue) — TeamPage.js's sideC1.
   const sideC1 = colorLightness(color1) < 0.75 ? color1 : colorLightness(color2) < 0.75 ? color2 : BLUE;
   const cityState = [school.City, school.State ? (STATE_ABBR[school.State] || school.State) : ""].filter(Boolean).join(", ");
+  // SEO: "Buford Football: College Players & NFL Draft Picks", with the
+  // school's own numbers in the description once they've loaded.
+  const nCfb = stats?.stats?.cfb?.ALL?.v;
+  const nNfl = stats?.stats?.nfl?.ALL?.v;
+  const seo = {
+    title: `${school.Name} Football: College Players & NFL Draft Picks | We-Draft.com`,
+    description: nCfb != null
+      ? `${school.Name} (${stateAbbr(school.State)}) has ${nCfb} player${nCfb === 1 ? "" : "s"} in college football and ${nNfl || 0} NFL draft pick${nNfl === 1 ? "" : "s"}. See every current player, draft history, and state rankings.`
+      : `${school.Name}${cityState ? ` (${cityState})` : ""} high school football: current college players, NFL draft picks, and state rankings.`,
+    url: `https://we-draft.com${hsPath(slug)}`,
+  };
+  // Structured data: the team (name, sport, logo, place) and the breadcrumb
+  // trail We-Draft.com › High Schools › {State} › {School}.
+  const teamName = `${school.Name}${school.Mascot ? ` ${school.Mascot}` : ""}`;
+  const logoUrl = school.Logo1 ? directImage(school.Logo1) : "";
+  const stAbbr = stateAbbr(school.State);
+  const jsonLd = [
+    {
+      "@context": "https://schema.org",
+      "@type": "SportsTeam",
+      name: teamName,
+      alternateName: school.Name,
+      sport: "American Football",
+      url: seo.url,
+      description: seo.description,
+      ...(logoUrl ? { logo: logoUrl, image: logoUrl } : {}),
+      location: {
+        "@type": "Place",
+        address: {
+          "@type": "PostalAddress",
+          ...(school.City ? { addressLocality: school.City } : {}),
+          ...(stAbbr ? { addressRegion: stAbbr } : {}),
+          addressCountry: "US",
+        },
+      },
+    },
+    {
+      "@context": "https://schema.org",
+      "@type": "BreadcrumbList",
+      itemListElement: [
+        { "@type": "ListItem", position: 1, name: "We-Draft.com", item: "https://we-draft.com/" },
+        { "@type": "ListItem", position: 2, name: "High Schools", item: "https://we-draft.com/hs" },
+        ...(stAbbr ? [{ "@type": "ListItem", position: 3, name: school.State, item: `https://we-draft.com/hs/${stAbbr.toLowerCase()}` }] : []),
+        { "@type": "ListItem", position: stAbbr ? 4 : 3, name: school.Name, item: seo.url },
+      ],
+    },
+  ];
 
   return (
     <>
       <style>{HERO_STYLE}</style>
       <Helmet>
-        <title>{school.Name} | We-Draft.com</title>
-        {/* In development and deliberately unlisted — see this file's own
-            top comment. */}
-        <meta name="robots" content="noindex, nofollow" />
+        {/* Indexed since 2026-11-20 (user), with the /hs pages; in the sitemap. */}
+        <title>{seo.title}</title>
+        <meta name="description" content={seo.description} />
+        <link rel="canonical" href={seo.url} />
+        <meta property="og:type" content="website" />
+        <meta property="og:site_name" content="We-Draft.com" />
+        <meta property="og:title" content={seo.title} />
+        <meta property="og:description" content={seo.description} />
+        <meta property="og:url" content={seo.url} />
+        {logoUrl ? <meta property="og:image" content={logoUrl} /> : null}
+        {logoUrl ? <meta property="og:image:alt" content={`${teamName} logo`} /> : null}
+        <meta name="twitter:card" content="summary" />
+        <meta name="twitter:title" content={seo.title} />
+        <meta name="twitter:description" content={seo.description} />
+        <script type="application/ld+json">{JSON.stringify(jsonLd)}</script>
         {/* Google Fonts — the varsity/team-branding-style face used as a
             manually-made stand-in for a real wordmark image below, since
             most high schools here won't have one on file. */}
@@ -356,6 +427,7 @@ export default function HighSchoolTeamPage() {
           <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
             <HeroCard school={school} color1={color1} color2={color2} isMobile={isMobile} heroLogo={heroLogo} cityState={cityState} />
             <RankStrip stats={stats} state={school.State} color1={color1} isMobile={isMobile} loading={contentLoading} />
+            <TopPicks archive={archive} color1={color1} color2={color2} isMobile={isMobile} loading={contentLoading} />
             <TabbedContent activeTab={activeTab} setActiveTab={setActiveTab} contentLoading={contentLoading} players={players} archive={archive} stats={stats} school={school} color1={color1} color2={color2} isMobile={isMobile} />
             <StateBoardSidebar board={stateBoard} school={school} sideC1={sideC1} />
             <NewsSidebar news={news} sideC1={sideC1} />
@@ -368,6 +440,7 @@ export default function HighSchoolTeamPage() {
             <div>
               <HeroCard school={school} color1={color1} color2={color2} isMobile={isMobile} heroLogo={heroLogo} cityState={cityState} />
               <RankStrip stats={stats} state={school.State} color1={color1} isMobile={isMobile} loading={contentLoading} />
+              <TopPicks archive={archive} color1={color1} color2={color2} isMobile={isMobile} loading={contentLoading} />
               <TabbedContent activeTab={activeTab} setActiveTab={setActiveTab} contentLoading={contentLoading} players={players} archive={archive} stats={stats} school={school} color1={color1} color2={color2} isMobile={isMobile} />
             </div>
             <div style={{ position: "sticky", top: "20px" }}>
@@ -436,26 +509,29 @@ function HeroCard({ school, color1, color2, isMobile, heroLogo, cityState }) {
       )}
 
       <div style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center", gap: isMobile ? "16px" : "28px" }}>
-        {heroLogo && <HeroLogo src={sanitizeUrl(heroLogo)} alt={school.Name} glow={!school.LogoDark} size={isMobile ? 84 : 150} />}
+        {heroLogo && <HeroLogo src={sanitizeUrl(heroLogo)} alt={`${school.Name}${school.Mascot ? ` ${school.Mascot}` : ""} logo`} glow={!school.LogoDark} size={isMobile ? 84 : 150} />}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{
-            fontFamily: "'Anton', 'Arial Black', Arial, sans-serif",
-            fontSize: isMobile ? "clamp(22px, 7vw, 30px)" : "clamp(38px, 4.2vw, 56px)", color: "#fff",
-            lineHeight: 1.05, letterSpacing: "0.02em",
-            textTransform: "uppercase", wordBreak: "break-word", textShadow: "0 2px 8px rgba(0,0,0,0.4)",
-          }}>
-            {school.Name}
-          </div>
-          {school.Mascot && (
-            <div style={{
-              fontFamily: "'Anton', 'Arial Black', Arial, sans-serif",
+          {/* The page's <h1>: "Buford Wolves Football" — the name and mascot
+              look as before; "Football" rides small after the mascot. */}
+          <h1 style={{ margin: 0, fontWeight: 400 }}>
+            <span style={{
+              display: "block", fontFamily: "'Anton', 'Arial Black', Arial, sans-serif",
+              fontSize: isMobile ? "clamp(22px, 7vw, 30px)" : "clamp(38px, 4.2vw, 56px)", color: "#fff",
+              lineHeight: 1.05, letterSpacing: "0.02em",
+              textTransform: "uppercase", wordBreak: "break-word", textShadow: "0 2px 8px rgba(0,0,0,0.4)",
+            }}>
+              {school.Name}
+            </span>
+            <span style={{
+              display: "block", fontFamily: "'Anton', 'Arial Black', Arial, sans-serif",
               fontSize: isMobile ? "clamp(16px, 5vw, 22px)" : "clamp(24px, 3vw, 36px)",
               color: "rgba(255,255,255,0.88)", lineHeight: 1.05, letterSpacing: "0.02em",
               textTransform: "uppercase", wordBreak: "break-word", textShadow: "0 2px 8px rgba(0,0,0,0.4)",
             }}>
-              {school.Mascot}
-            </div>
-          )}
+              {school.Mascot ? `${school.Mascot} ` : ""}
+              <span style={{ fontSize: "0.5em", letterSpacing: "0.12em", color: "rgba(255,255,255,0.7)", verticalAlign: "middle" }}>Football</span>
+            </span>
+          </h1>
           {cityState && (
             <div style={{
               display: "inline-block", background: "rgba(0,0,0,0.3)", color: "rgba(255,255,255,0.85)",
@@ -532,6 +608,75 @@ function RankStrip({ stats, state, color1, isMobile, loading }) {
   );
 }
 
+// The school's five highest NFL draft picks (lowest overall pick; `Pick`
+// is the overall number in both historical and the latest class).
+function TopPicks({ archive, color1, color2, isMobile, loading }) {
+  const colleges = useSchools(archive.map((r) => r.School));
+  const nfl = useNflTeams();
+  if (loading) return null;
+  const top = archive.filter((r) => Number(r.Pick) > 0)
+    .sort((a, b) => Number(a.Pick) - Number(b.Pick) || Number(b.Year) - Number(a.Year)).slice(0, 5);
+  if (!top.length) return null;
+  return (
+    <div style={{ marginBottom: isMobile ? 0 : "20px" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: "10px", marginBottom: "10px" }}>
+        <span style={{ fontFamily: "'Anton', 'Arial Black', Arial, sans-serif", fontSize: isMobile ? "20px" : "24px", color: SIDE_INK, textTransform: "uppercase", letterSpacing: "0.02em" }}>
+          Highest Draft Picks
+        </span>
+        <span style={{ fontSize: "11px", fontWeight: 900, color: "#8a94a3", textTransform: "uppercase", letterSpacing: "0.1em" }}>Top {top.length}</span>
+      </div>
+      <div style={{
+        display: isMobile ? "flex" : "grid", gridTemplateColumns: `repeat(${top.length}, minmax(0, 1fr))`, gap: isMobile ? "10px" : "12px",
+        overflowX: isMobile ? "auto" : "visible", paddingBottom: isMobile ? "6px" : 0, scrollSnapType: isMobile ? "x mandatory" : undefined,
+      }}>
+        {top.map((r, i) => {
+          const team = r.nflAbbr ? nfl.byAbbr[r.nflAbbr] : nfl.byName[r["NFL Team"]];
+          const c = colleges[r.School];
+          const name = r.Player || "—";
+          const card = (
+            <div className="wd-hs-pick" style={{
+              position: "relative", overflow: "hidden", borderRadius: "14px", height: "100%", boxSizing: "border-box",
+              padding: isMobile ? "14px 14px 12px" : "16px 16px 14px", color: "#fff",
+              border: `2px solid ${i === 0 ? GOLD : color2}`, boxShadow: "0 8px 20px rgba(0,0,0,0.2)",
+              background: `linear-gradient(rgba(0,0,0,${i === 0 ? 0.28 : 0.42}), rgba(0,0,0,0.55)), linear-gradient(150deg, ${color1} 0%, ${color1} 45%, ${color2} 100%)`,
+              animation: `wdHsPickIn .45s ease-out ${i * 0.07}s both`,
+            }}>
+              {team?.LogoDark || team?.Logo1 ? (
+                <img src={team.LogoDark || team.Logo1} alt="" aria-hidden="true" style={{ position: "absolute", right: "-18%", bottom: "-14%", width: "78%", opacity: 0.16, pointerEvents: "none" }} />
+              ) : null}
+              <div style={{ position: "relative", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "6px" }}>
+                <div>
+                  <div style={{ fontSize: "10px", fontWeight: 900, letterSpacing: "0.14em", textTransform: "uppercase", color: i === 0 ? GOLD : "rgba(255,255,255,0.7)" }}>
+                    {r.Year} Draft
+                  </div>
+                  {/* Round first ("R1"), the overall pick under it. */}
+                  <div style={{ fontFamily: "'Anton', 'Arial Black', Arial, sans-serif", fontSize: isMobile ? "40px" : "46px", lineHeight: 1, textShadow: "0 3px 10px rgba(0,0,0,0.35)" }}>
+                    {r.Round ? `R${r.Round}` : "—"}
+                  </div>
+                  <div style={{ fontSize: "10px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.7)" }}>Pick {Number(r.Pick)}</div>
+                </div>
+                {team?.LogoDark || team?.Logo1 ? (
+                  <img src={team.LogoDark || team.Logo1} alt={team.Team || ""} title={`${team.City || ""} ${team.Team || ""}`.trim()} style={{ width: isMobile ? "34px" : "38px", height: isMobile ? "34px" : "38px", objectFit: "contain", filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.4))" }} />
+                ) : null}
+              </div>
+              <div style={{ position: "relative", marginTop: "12px", fontSize: isMobile ? "15px" : "16px", fontWeight: 900, lineHeight: 1.15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
+              <div style={{ position: "relative", display: "flex", alignItems: "center", gap: "6px", marginTop: "6px", minWidth: 0 }}>
+                {r.Position && <span style={{ flexShrink: 0, background: "rgba(255,255,255,0.18)", borderRadius: "4px", padding: "2px 6px", fontSize: "10px", fontWeight: 900 }}>{r.Position}</span>}
+                {(c?.logoDark || c?.Logo1) && <img src={c.logoDark || c.Logo1} alt="" style={{ width: "16px", height: "16px", objectFit: "contain", flexShrink: 0 }} />}
+                <span style={{ fontSize: "11px", fontWeight: 800, color: "rgba(255,255,255,0.8)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.School}</span>
+              </div>
+            </div>
+          );
+          const wrap = { display: "block", textDecoration: "none", flex: isMobile ? "0 0 64%" : undefined, scrollSnapAlign: "start", minWidth: 0 };
+          return r.Slug && !isUnreleasedSlug(r.Slug)
+            ? <Link key={r.id} to={`/player/${r.Slug}`} style={wrap}>{card}</Link>
+            : <div key={r.id} style={wrap}>{card}</div>;
+        })}
+      </div>
+    </div>
+  );
+}
+
 // Left column: the state's top programs by players in college — this school
 // highlighted — with a link to the full leaderboards.
 function StateBoardSidebar({ board, school, sideC1 }) {
@@ -566,7 +711,7 @@ function StateBoardSidebar({ board, school, sideC1 }) {
           background: mine(r) ? tint : "#fff", borderBottom: i < rows.length - 1 ? `1px solid ${SIDE_LINE_2}` : "none",
         };
         return r.slug && !mine(r)
-          ? <Link key={`${r.k}${i}`} to={`/hs/${r.slug}`} style={style}
+          ? <Link key={`${r.k}${i}`} to={hsPath(r.slug)} style={style}
               onMouseEnter={(e) => { e.currentTarget.style.background = SIDE_SOFT; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}>{inner}</Link>
           : <div key={`${r.k}${i}`} style={style}>{inner}</div>;

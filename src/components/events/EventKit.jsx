@@ -182,16 +182,28 @@ export function useProDayBadges(enabled = true) {
       .then(([snap, cfg]) => { if (live) setSrc({ teams: snap?.teams || {}, prefs: (cfg?.exists() && cfg.data().schools) || {} }); });
     return () => { live = false; };
   }, [enabled]);
-  return useMemo(() => (school) => {
-    if (!school) return GENERIC_PRO_DAY;
-    const slug = portalTeamSlug(school);
-    const team = src?.teams?.[slug];
-    if (!team) return null;
-    const look = proDayLook(team, src.prefs[slug] || null);
-    return {
-      logo: look.logo, color1: team.Color1, color2: team.Color2, swap: look.swap,
-      logoX: look.logoX, logoY: look.logoY, logoScale: look.logoScale, darkLogo: isDarkLogoField(look.logoField),
+  return useMemo(() => {
+    const badgeOf = (team, pref) => {
+      const look = proDayLook(team, pref || null);
+      return {
+        logo: look.logo, color1: team.Color1, color2: team.Color2, swap: look.swap,
+        logoX: look.logoX, logoY: look.logoY, logoScale: look.logoScale, darkLogo: isDarkLogoField(look.logoField),
+      };
     };
+    const badgeFor = (school) => {
+      if (!school) return GENERIC_PRO_DAY;
+      const slug = portalTeamSlug(school);
+      const team = src?.teams?.[slug];
+      return team ? badgeOf(team, src.prefs[slug]) : null;
+    };
+    // badgeFor.saved: every school with a badge made in Admin → Branding →
+    // Pro Day, A–Z — [{ slug, school, teamSlug, badge }] (the pro days
+    // page's badge wall). null until loaded.
+    badgeFor.saved = src ? Object.keys(src.prefs)
+      .filter((slug) => src.teams[slug])
+      .map((slug) => ({ slug, school: src.teams[slug].School, teamSlug: src.teams[slug].teamSlug, badge: badgeOf(src.teams[slug], src.prefs[slug]) }))
+      .sort((a, b) => a.school.localeCompare(b.school)) : null;
+    return badgeFor;
   }, [src]);
 }
 
@@ -219,38 +231,14 @@ export function CombineSchedule({ isMobile, today }) {
   const groups = COMBINE_SCHEDULE.groups;
   const [groupId, setGroupId] = useState(groups[0].id);
   const group = groups.find((g) => g.id === groupId) || groups[0];
-  const workoutDay = (g) => parseDay(g.days.find(([, items]) => items.includes(WORKOUT))[0]);
   const C = EVENT_TYPES.workout.color;
 
   return (
     <div>
-      {/* On-field workout days, one tile per group; a tile picks its group. */}
-      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, minmax(0, 1fr))" : "repeat(4, minmax(0, 1fr))", gap: 10 }}>
-        {groups.map((g) => {
-          const d = workoutDay(g);
-          const on = g.id === group.id;
-          return (
-            <button key={g.id} type="button" onClick={() => setGroupId(g.id)} aria-pressed={on} style={{
-              textAlign: "left", fontFamily: "inherit", cursor: "pointer", borderRadius: 14, padding: isMobile ? "12px" : "14px 16px",
-              border: on ? `2px solid ${C}` : "2px solid #e2e7ef",
-              background: on ? `linear-gradient(135deg, ${NAVY}, ${C})` : "#fff",
-              color: on ? "#fff" : "#1c2330", boxShadow: on ? "0 8px 20px rgba(2,132,199,0.28)" : "0 2px 10px rgba(0,30,70,0.06)",
-              opacity: d < today ? 0.65 : 1,
-            }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10, fontWeight: 900, letterSpacing: "0.14em", textTransform: "uppercase", color: on ? GOLD : C }}>
-                <Icon name="stopwatch" size={14} stroke={2.4} />On-field workout
-              </div>
-              <div style={{ fontSize: isMobile ? 20 : 24, fontWeight: 900, marginTop: 6, lineHeight: 1 }}>
-                {WEEKDAYS[d.getDay()]}, {MON(d)} {d.getDate()}
-              </div>
-              <div style={{ fontSize: isMobile ? 12 : 13, fontWeight: 800, marginTop: 6, fontFamily: BODY_FONT, color: on ? "rgba(255,255,255,0.9)" : "#5a6475" }}>{g.label}</div>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* The chosen group's week. */}
-      <div style={{ marginTop: 14, background: "#fff", borderRadius: 16, border: "1px solid #e2e7ef", boxShadow: "0 4px 18px rgba(0,30,70,0.07)", overflow: "hidden" }}>
+      {/* The chosen group's week — its buttons pick the group (the row of
+          workout-day tiles above it was removed, user 2026-11-20: Key Dates
+          already shows those days). */}
+      <div style={{ background: "#fff", borderRadius: 16, border: "1px solid #e2e7ef", boxShadow: "0 4px 18px rgba(0,30,70,0.07)", overflow: "hidden" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: isMobile ? "12px" : "14px 18px", borderBottom: `3px solid ${GOLD}` }}>
           <img src="/logos/nfl-combine.png" alt="" style={{ width: 40, height: 40, objectFit: "contain" }} />
           <div style={{ flex: 1, minWidth: 160 }}>

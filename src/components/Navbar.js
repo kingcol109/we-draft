@@ -1,9 +1,9 @@
 import { Link, useLocation } from "react-router-dom";
-import { wePickHref } from "../utils/wePickRoutes";
 import { useAuth } from "../context/AuthContext";
 import { useEffect, useRef, useState } from "react";
 import Logo2 from "../assets/Logo2.png";
-import SiteFullscreenButton from "./SiteFullscreenButton";
+import SiteFullscreenButton, { useSiteFullscreen } from "./SiteFullscreenButton";
+import NavMenu, { NavMenuItem } from "./NavMenu";
 
 import {
   collection,
@@ -31,10 +31,10 @@ const conferenceOrder = [
 ];
 
 const COMMUNITY_YEARS = [
-  { label: "2027 Draft Class", path: "/community" },
-  { label: "2028 Draft Class", path: "/community/2028" },
-  { label: "2029 Draft Class", path: "/community/2029" },
-  { label: "2026 Archive",     path: "/community/2026" },
+  { label: "2027 Draft Class", path: "/community",      tile: "'27", note: "This year's class" },
+  { label: "2028 Draft Class", path: "/community/2028", tile: "'28", note: "Next year's class" },
+  { label: "2029 Draft Class", path: "/community/2029", tile: "'29", note: "The way-early look" },
+  { label: "2026 Archive",     path: "/community/2026", icon: "archive", note: "Last year's evaluations" },
 ];
 
 export default function Navbar() {
@@ -47,20 +47,29 @@ export default function Navbar() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [tickerText, setTickerText] = useState(FALLBACK_MESSAGE);
   const [schools, setSchools] = useState([]);
+  // The dropdowns themselves are NavMenu.jsx; these just flip true the
+  // first time the CFB / NFL menu opens, to load its teams (schools read;
+  // NFL logos/names from the shared _nflBranding snapshot — one cached read).
   const [cfbOpen, setCfbOpen] = useState(false);
-  const [cfbTimeout, setCfbTimeout] = useState(null);
-  // NFL dropdown — team logos/names from the shared _nflBranding snapshot,
-  // read the first time it opens (one cached read).
   const [nflOpen, setNflOpen] = useState(false);
-  const [nflTimeout, setNflTimeout] = useState(null);
-  // Mock Drafts dropdown: the Draft Sim first, then the written mocks.
-  const [mocksOpen, setMocksOpen] = useState(false);
-  const [mocksTimeout, setMocksTimeout] = useState(null);
   const [nflTeams, setNflTeams] = useState(null);
-  const [communityOpen, setCommunityOpen] = useState(false);
-  const [communityTimeout, setCommunityTimeout] = useState(null);
-  const [boardsOpen, setBoardsOpen] = useState(false);
-  const [boardsTimeout, setBoardsTimeout] = useState(null);
+  // Site full screen (desktop): the navbar tucks up out of the way behind a
+  // ▼ tab at the top center that drops it back down (user, 2026-11-20).
+  const siteFullscreen = useSiteFullscreen();
+  const [fsNavOpen, setFsNavOpen] = useState(false);
+  useEffect(() => {
+    const html = document.documentElement;
+    html.classList.toggle("wd-fs-navhide", siteFullscreen);
+    if (!siteFullscreen) setFsNavOpen(false);
+    return () => html.classList.remove("wd-fs-navhide");
+  }, [siteFullscreen]);
+  useEffect(() => {
+    const html = document.documentElement;
+    html.classList.toggle("wd-fs-navopen", siteFullscreen && fsNavOpen);
+    return () => html.classList.remove("wd-fs-navopen");
+  }, [siteFullscreen, fsNavOpen]);
+  // Going somewhere from the dropped-down navbar tucks it back up.
+  useEffect(() => { setFsNavOpen(false); }, [location.pathname]);
   // Pending incoming friend request count — shown as a sticker on the
   // Profile link (see We-Pick's own Friends-tab badge for the same idea).
   // Refetches on every route change rather than just once on sign-in:
@@ -280,63 +289,19 @@ export default function Navbar() {
   return (
     <>
       <style>{`
-        .cfb-team-link {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          padding: 6px 10px;
-          text-decoration: none;
-          color: #222;
-          border-radius: 6px;
-          font-weight: 700;
-          font-size: 13px;
-          transition: background 0.12s ease;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-        .cfb-team-link:hover { background: #f0f5ff; color: #0055a5; }
-        .community-year-link {
-          display: block;
-          padding: 10px 16px;
-          text-decoration: none;
-          color: #222;
-          font-weight: 700;
-          font-size: 14px;
-          transition: background 0.12s ease;
-          border-bottom: 1px solid #f0f0f0;
-        }
-        .community-year-link:last-child { border-bottom: none; }
-        .community-year-link:hover { background: #f0f5ff; color: #0055a5; }
-        .boards-highlight-link {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          padding: 10px 16px;
-          text-decoration: none;
-          font-weight: 900;
-          font-size: 14px;
-          transition: background 0.12s ease;
-          background: #fff8e6;
-          border-bottom: 1px solid #f0f0f0;
-          color: #0055a5;
-        }
-        .boards-highlight-link:hover { background: #fff0c0; }
-        .boards-link {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          padding: 10px 16px;
-          text-decoration: none;
-          color: #222;
-          font-weight: 700;
-          font-size: 14px;
-          transition: background 0.12s ease;
-          border-bottom: 1px solid #f0f0f0;
-        }
-        .boards-link:last-child { border-bottom: none; }
-        .boards-link:hover { background: #f0f5ff; color: #0055a5; }
         .wd-nav-link:hover { border-bottom-color: rgba(246,162,29,0.65) !important; }
+        /* Site full screen: the navbar slides up; the tab brings it back. */
+        html.wd-fs-navhide .wd-navbar-wrap { transform: translateY(-100%); }
+        html.wd-fs-navhide.wd-fs-navopen .wd-navbar-wrap { transform: none; }
+        html.wd-fs-navhide body { padding-top: 0; }
+        .wd-fs-navtab { position: fixed; left: 50%; transform: translateX(-50%); z-index: 10002; width: 64px; height: 22px;
+          display: flex; align-items: center; justify-content: center; padding: 0; cursor: pointer; color: #fff;
+          background: linear-gradient(180deg, #0055a5, #003a78); border: 1px solid rgba(255,255,255,0.18); border-top: none;
+          border-radius: 0 0 12px 12px; box-shadow: inset 0 -2px 0 #f6a21d, 0 6px 16px rgba(0,30,70,0.3);
+          transition: top .25s ease, height .15s ease, opacity .2s; opacity: .55; }
+        .wd-fs-navtab:hover, .wd-fs-navtab:focus-visible, .wd-fs-navtab.is-open { opacity: 1; height: 26px; outline: none; }
+        /* A sim that hides the navbar itself has its own arrow. */
+        html.wd-sim-navhide .wd-fs-navtab { display: none; }
         .wd-nav-signin:hover { background: #ffb43c !important; }
         /* Phone menu: full-width rows on navy, a gold arrow on each. */
         .mobile-nav-link {
@@ -376,7 +341,7 @@ export default function Navbar() {
           zIndex: 10000,
           opacity: showNavbar || isMobile ? 1 : 0,
           pointerEvents: showNavbar || isMobile ? "auto" : "none",
-          transition: isMobile ? "none" : "opacity 0.3s ease-in-out",
+          transition: isMobile ? "none" : "transform .25s ease, opacity 0.3s ease-in-out",
         }}
       >
         {/* ================= NAVBAR ================= */}
@@ -430,290 +395,117 @@ export default function Navbar() {
               /* Centered on wide screens; on laptop widths there isn't room to
                  center without running into the logo, so it sits to its right. */
               .wd-desktop-nav { position: absolute; left: 50%; transform: translateX(-50%); align-items: center; }
-              @media (max-width: 1440px) { .wd-desktop-nav { position: static; transform: none; margin-left: auto; } }
+              @media (max-width: 1800px) { .wd-desktop-nav { position: static; transform: none; margin-left: auto; } }
             `}</style>
           </div>
 
           {/* DESKTOP NAV */}
           <div className="hidden md:flex wd-desktop-nav">
 
-            {/* ── COMMUNITY BOARD DROPDOWN ── */}
-            <div
-              style={{ position: "relative" }}
-              onMouseEnter={() => { if (communityTimeout) clearTimeout(communityTimeout); setCommunityOpen(true); }}
-              onMouseLeave={() => { const t = setTimeout(() => setCommunityOpen(false), 150); setCommunityTimeout(t); }}
-            >
-              <Link to="/community" className="wd-nav-link" style={navLink(onSection("/community"))}>Community Board</Link>
+            <NavMenu label="Community Board" to="/community" linkStyle={navLink(onSection("/community"))}
+              width={300} eyebrow="Draft Classes">
+              {(close) => COMMUNITY_YEARS.map((yr) => (
+                <NavMenuItem key={yr.path} to={yr.path} title={yr.label} note={yr.note} tile={yr.tile} icon={yr.icon} onClick={close} />
+              ))}
+            </NavMenu>
 
-              {communityOpen && (
-                <div
-                  onMouseEnter={() => { if (communityTimeout) clearTimeout(communityTimeout); setCommunityOpen(true); }}
-                  onMouseLeave={() => setCommunityOpen(false)}
-                  style={{
-                    position: "fixed",
-                    top: "60px",
-                    left: "50%",
-                    transform: "translateX(-50%)",
-                    width: "220px",
-                    background: "#ffffff",
-                    border: "2px solid #0055a5",
-                    borderRadius: "10px",
-                    boxShadow: "0 10px 28px rgba(0,0,0,0.18)",
-                    zIndex: 10002,
-                    overflow: "hidden",
-                  }}
-                >
-                  {/* Header */}
-                  <div style={{ backgroundColor: "#0055a5", padding: "10px 14px" }}>
-                    <div style={{ color: "#f6a21d", fontWeight: 900, fontSize: "13px", letterSpacing: "0.1em", textTransform: "uppercase" }}>
-                      Draft Classes
-                    </div>
-                  </div>
-                  <div style={{ height: "3px", backgroundColor: "#f6a21d" }} />
-
-                  {/* Year links */}
-                  {COMMUNITY_YEARS.map((yr) => (
-                    <Link
-                      key={yr.path}
-                      to={yr.path}
-                      className="community-year-link"
-                      onClick={() => setCommunityOpen(false)}
-                    >
-                      {yr.label}
-                    </Link>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* ── MY BOARDS DROPDOWN — signed-in users only ── */}
+            {/* Signed-in users only. */}
             {user && (
-              <div
-                style={{ position: "relative" }}
-                onMouseEnter={() => { if (boardsTimeout) clearTimeout(boardsTimeout); setBoardsOpen(true); }}
-                onMouseLeave={() => { const t = setTimeout(() => setBoardsOpen(false), 150); setBoardsTimeout(t); }}
-              >
-                <Link to="/boards" className="wd-nav-link" style={navLink(onSection("/boards", "/whiteboard"))}>My Boards</Link>
-
-                {boardsOpen && (
-                  <div
-                    onMouseEnter={() => { if (boardsTimeout) clearTimeout(boardsTimeout); setBoardsOpen(true); }}
-                    onMouseLeave={() => setBoardsOpen(false)}
-                    style={{
-                      position: "fixed",
-                      top: "60px",
-                      left: "50%",
-                      transform: "translateX(-50%)",
-                      width: "220px",
-                      background: "#ffffff",
-                      border: "2px solid #0055a5",
-                      borderRadius: "10px",
-                      boxShadow: "0 10px 28px rgba(0,0,0,0.18)",
-                      zIndex: 10002,
-                      overflow: "hidden",
-                    }}
-                  >
-                    <div style={{ backgroundColor: "#0055a5", padding: "10px 14px" }}>
-                      <div style={{ color: "#f6a21d", fontWeight: 900, fontSize: "13px", letterSpacing: "0.1em", textTransform: "uppercase" }}>
-                        My Boards
-                      </div>
-                    </div>
-                    <div style={{ height: "3px", backgroundColor: "#f6a21d" }} />
-
-                    <Link to="/boards" className="boards-highlight-link" onClick={() => setBoardsOpen(false)}>
-                      <span style={{ fontSize: "16px", lineHeight: 1 }}>📋</span>
-                      My Draft Board
-                    </Link>
-                    <Link to="/whiteboard" className="boards-link" onClick={() => setBoardsOpen(false)}>
-                      <span style={{ fontSize: "16px", lineHeight: 1 }}>📝</span>
-                      My Whiteboard
-                    </Link>
-                    <Link to="/boards/feed" className="boards-link" onClick={() => setBoardsOpen(false)}>
-                      <span style={{ fontSize: "16px", lineHeight: 1 }}>🔔</span>
-                      My Feed
-                    </Link>
-                  </div>
+              <NavMenu label="My Boards" to="/boards" linkStyle={navLink(onSection("/boards", "/whiteboard"))} width={300} eyebrow="My Boards">
+                {(close) => (
+                  <>
+                    <NavMenuItem to="/boards" icon="board" title="My Draft Board" note="Your rankings and evaluations" featured onClick={close} />
+                    <NavMenuItem to="/whiteboard" icon="pen" title="My Whiteboard" note="Sketch out your board" onClick={close} />
+                    <NavMenuItem to="/boards/feed" icon="bell" title="My Feed" note="News on the players you follow" onClick={close} />
+                  </>
                 )}
-              </div>
+              </NavMenu>
             )}
 
-            <Link to={wePickHref()} className="wd-nav-link" style={navLink(onSection(wePickHref()))}>We-Pick</Link>
-
-            {/* ── CFB DROPDOWN ── */}
-            <div
-              style={{ position: "relative" }}
-              onMouseEnter={() => { if (cfbTimeout) clearTimeout(cfbTimeout); setCfbOpen(true); }}
-              onMouseLeave={() => { const t = setTimeout(() => setCfbOpen(false), 150); setCfbTimeout(t); }}
-            >
-              <Link to="/cfb" className="wd-nav-link" style={navLink(onSection("/cfb", "/portal", "/portalsim"))}>CFB</Link>
-
-              {cfbOpen && (
-                <div
-                  onMouseEnter={() => { if (cfbTimeout) clearTimeout(cfbTimeout); setCfbOpen(true); }}
-                  onMouseLeave={() => setCfbOpen(false)}
-                  style={{
-                    position: "fixed",
-                    top: "60px",
-                    left: "50%",
-                    transform: "translateX(-50%)",
-                    width: "min(580px, 96vw)",
-                    maxHeight: "480px",
-                    background: "#ffffff",
-                    border: "2px solid #0055a5",
-                    borderRadius: "10px",
-                    boxShadow: "0 10px 28px rgba(0,0,0,0.18)",
-                    zIndex: 10002,
-                    overflow: "hidden",
-                    display: "flex",
-                    flexDirection: "column",
-                  }}
-                >
-                  <div style={{ backgroundColor: "#0055a5", padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
-                    <div style={{ color: "#f6a21d", fontWeight: 900, fontSize: "13px", letterSpacing: "0.1em", textTransform: "uppercase" }}>College Football</div>
-                    <span style={{ display: "flex", gap: "14px" }}>
-                      {/* The Transfer Portal (/portal), as NFL's Draft Order. */}
-                      <Link to="/portal" onClick={() => setCfbOpen(false)}
-                        style={{ color: "#fff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.06em", textDecoration: "underline", whiteSpace: "nowrap" }}>
-                        Transfer Portal →
-                      </Link>
-                      <Link to="/cfb" onClick={() => setCfbOpen(false)}
-                        style={{ color: "rgba(255,255,255,0.8)", fontSize: "11px", fontWeight: 800, letterSpacing: "0.06em", textDecoration: "underline", whiteSpace: "nowrap" }}>
-                        View All →
-                      </Link>
-                    </span>
-                  </div>
-                  <div style={{ height: "3px", backgroundColor: "#f6a21d", flexShrink: 0 }} />
-
-                  <div style={{ overflowY: "auto", padding: "10px 12px", flex: 1 }}>
-                    {schoolsLoading && schools.length === 0 && (
-                      <div style={{ padding: "18px", textAlign: "center", color: "#999", fontSize: "12px", fontWeight: 700 }}>Loading teams…</div>
-                    )}
-                    {conferenceOrder.map((conf) => {
-                      const teams = grouped[conf];
-                      if (!teams || teams.length === 0) return null;
-                      return (
-                        <div key={conf} style={{ marginBottom: "12px" }}>
-                          <div style={{ fontSize: "10px", fontWeight: 900, color: "#0055a5", textTransform: "uppercase", letterSpacing: "0.12em", borderBottom: "2px solid #0055a5", paddingBottom: "3px", marginBottom: "6px" }}>
-                            {conf}
-                          </div>
-                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px" }}>
-                            {teams.map((team) => (
-                              <Link
-                                key={team.School}
-                                to={`/team/${team.Slug || toSlug(team.School)}`}
-                                className="cfb-team-link"
-                                onClick={() => setCfbOpen(false)}
-                              >
-                                {team.Logo1 && (
-                                  <img src={team.Logo1} alt={team.School}
-                                    loading="lazy"
-                                    style={{ width: "18px", height: "18px", objectFit: "contain", flexShrink: 0 }}
-                                    onError={(e) => { e.currentTarget.style.display = "none"; }} />
-                                )}
-                                {team.School}
-                              </Link>
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+            <NavMenu label="CFB" to="/cfb" linkStyle={navLink(onSection("/cfb", "/portal", "/portalsim"))}
+              width={600} maxHeight={400} eyebrow="College Football" onOpen={() => setCfbOpen(true)}
+              actions={[{ to: "/cfb/stats", label: "Stats" }, { to: "/cfb", label: "All Teams" }]}
+              lead={(close) => (
+                // The Transfer Portal's own row (user, 2026-11-20), pinned
+                // above the team scroll: the live portal and Portal News.
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 4, padding: "0 0 8px", marginBottom: 6, borderBottom: "1px solid #edf1f6" }}>
+                  <NavMenuItem to="/portal" icon="swap" title="View the Portal" note="Every entry and commitment" featured onClick={close} />
+                  <NavMenuItem to="/portal/news" icon="star" title="Top Portal Players" note="Our breakdown of the portal" onClick={close} />
                 </div>
-              )}
-            </div>
-
-            {/* ── NFL DROPDOWN — all 32 teams by division (same panel as CFB) ── */}
-            <div
-              style={{ position: "relative" }}
-              onMouseEnter={() => { if (nflTimeout) clearTimeout(nflTimeout); setNflOpen(true); }}
-              onMouseLeave={() => { const t = setTimeout(() => setNflOpen(false), 150); setNflTimeout(t); }}
-            >
-              <Link to="/nfl" className="wd-nav-link" style={navLink(onSection("/nfl"))}>NFL</Link>
-
-              {nflOpen && (
-                <div
-                  onMouseEnter={() => { if (nflTimeout) clearTimeout(nflTimeout); setNflOpen(true); }}
-                  onMouseLeave={() => setNflOpen(false)}
-                  style={{
-                    position: "fixed", top: "60px", left: "50%", transform: "translateX(-50%)",
-                    width: "min(640px, 96vw)", maxHeight: "480px", background: "#ffffff",
-                    border: "2px solid #0055a5", borderRadius: "10px", boxShadow: "0 10px 28px rgba(0,0,0,0.18)",
-                    zIndex: 10002, overflow: "hidden", display: "flex", flexDirection: "column",
-                  }}
-                >
-                  <div style={{ backgroundColor: "#0055a5", padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
-                    <div style={{ color: "#f6a21d", fontWeight: 900, fontSize: "13px", letterSpacing: "0.1em", textTransform: "uppercase" }}>NFL Teams</div>
-                    <span style={{ display: "flex", gap: "14px" }}>
-                      <Link to="/draftorder" onClick={() => setNflOpen(false)}
-                        style={{ color: "#fff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.06em", textDecoration: "underline", whiteSpace: "nowrap" }}>
-                        Draft Order →
-                      </Link>
-                      <Link to="/events" onClick={() => setNflOpen(false)}
-                        style={{ color: "#fff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.06em", textDecoration: "underline", whiteSpace: "nowrap" }}>
-                        Draft Calendar →
-                      </Link>
-                      <Link to="/nfl" onClick={() => setNflOpen(false)}
-                        style={{ color: "rgba(255,255,255,0.8)", fontSize: "11px", fontWeight: 800, letterSpacing: "0.06em", textDecoration: "underline", whiteSpace: "nowrap" }}>
-                        View All →
-                      </Link>
-                    </span>
-                  </div>
-                  <div style={{ height: "3px", backgroundColor: "#f6a21d", flexShrink: 0 }} />
-                  <div style={{ overflowY: "auto", padding: "10px 12px", flex: 1, display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", columnGap: "14px" }}>
-                    {NFL_DIVISIONS.map(([division, abbrs]) => (
-                      <div key={division} style={{ marginBottom: "12px" }}>
-                        <div style={{ fontSize: "10px", fontWeight: 900, color: "#0055a5", textTransform: "uppercase", letterSpacing: "0.12em", borderBottom: "2px solid #0055a5", paddingBottom: "3px", marginBottom: "6px" }}>
-                          {division}
-                        </div>
-                        {abbrs.map((abbr) => {
-                          const t = nflTeams?.[abbr];
-                          return (
-                            <Link key={abbr} to={`/nfl/${abbr.toLowerCase()}`} className="cfb-team-link" onClick={() => setNflOpen(false)}>
-                              {t?.Logo1 && (
-                                <img src={t.Logo1} alt="" loading="lazy" style={{ width: "18px", height: "18px", objectFit: "contain", flexShrink: 0 }}
-                                  onError={(e) => { e.currentTarget.style.display = "none"; }} />
-                              )}
-                              {t ? `${t.City} ${t.Team}`.trim() : abbr}
+              )}>
+              {(close) => (
+                <>
+                  {schoolsLoading && schools.length === 0 && (
+                    <div style={{ padding: 18, textAlign: "center", color: "#8a96a8", fontSize: 12, fontWeight: 700 }}>Loading teams…</div>
+                  )}
+                  {conferenceOrder.map((conf) => {
+                    const teams = grouped[conf];
+                    if (!teams || teams.length === 0) return null;
+                    return (
+                      <div key={conf} style={{ marginBottom: 12 }}>
+                        <div className="wd-menu-group">{conf}</div>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 1 }}>
+                          {teams.map((team) => (
+                            <Link key={team.School} to={`/team/${team.Slug || toSlug(team.School)}`} className="wd-menu-team" onClick={close}>
+                              {team.Logo1 && <img src={team.Logo1} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.display = "none"; }} />}
+                              {team.School}
                             </Link>
-                          );
-                        })}
+                          ))}
+                        </div>
                       </div>
-                    ))}
-                  </div>
-                </div>
+                    );
+                  })}
+                </>
               )}
-            </div>
+            </NavMenu>
 
-            {/* ── MOCK DRAFTS DROPDOWN — the Draft Sim, then written mocks ── */}
-            <div
-              style={{ position: "relative" }}
-              onMouseEnter={() => { if (mocksTimeout) clearTimeout(mocksTimeout); setMocksOpen(true); }}
-              onMouseLeave={() => { const t = setTimeout(() => setMocksOpen(false), 150); setMocksTimeout(t); }}
-            >
-              <Link to="/mocks" className="wd-nav-link" style={navLink(onSection("/mocks", "/draftsim"))}>Mock Drafts</Link>
-              {mocksOpen && (
-                <div style={{
-                  position: "absolute", top: "calc(100% + 6px)", left: "50%", transform: "translateX(-50%)", minWidth: "220px",
-                  background: "#ffffff", border: "2px solid #0055a5", borderRadius: "10px", boxShadow: "0 10px 28px rgba(0,0,0,0.18)",
-                  zIndex: 10002, overflow: "hidden",
-                }}>
-                  {[
-                    { to: "/draftsim", label: "Draft Simulator", note: "Run the draft live" },
-                    { to: "/mocks", label: "Mock Drafts", note: "Write and read mocks" },
-                  ].map((m, i) => (
-                    <Link key={m.to} to={m.to} onClick={() => setMocksOpen(false)} className="cfb-team-link"
-                      style={{ display: "block", padding: "10px 14px", textDecoration: "none", borderTop: i ? "1px solid #e6ecf3" : "none" }}>
-                      <span style={{ display: "block", color: "#0055a5", fontWeight: 900, fontSize: "14px" }}>{m.label}</span>
-                      <span style={{ display: "block", color: "#667085", fontSize: "11px", fontWeight: 700 }}>{m.note}</span>
-                    </Link>
+            {/* All 32 teams by division. */}
+            <NavMenu label="NFL" to="/nfl" linkStyle={navLink(onSection("/nfl", "/draftorder"))}
+              width={640} maxHeight={440} eyebrow="NFL Teams" onOpen={() => setNflOpen(true)}
+              actions={[{ to: "/draftorder", label: "Draft Order" }, { to: "/nfl", label: "All Teams" }]}>
+              {(close) => (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", columnGap: 14 }}>
+                  {NFL_DIVISIONS.map(([division, abbrs]) => (
+                    <div key={division} style={{ marginBottom: 12 }}>
+                      <div className="wd-menu-group">{division}</div>
+                      {abbrs.map((abbr) => {
+                        const t = nflTeams?.[abbr];
+                        return (
+                          <Link key={abbr} to={`/nfl/${abbr.toLowerCase()}`} className="wd-menu-team" onClick={close}>
+                            {t?.Logo1 && <img src={t.Logo1} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.display = "none"; }} />}
+                            {t ? `${t.City} ${t.Team}`.trim() : abbr}
+                          </Link>
+                        );
+                      })}
+                    </div>
                   ))}
                 </div>
               )}
-            </div>
+            </NavMenu>
 
+            {/* Draft (user, 2026-11-20): the events calendar, the Combine, Pro
+                Days and Draft Risers — more to come. */}
+            <NavMenu label="Draft" to="/events" linkStyle={navLink(onSection("/events", "/risers"))} width={320} eyebrow="NFL Draft">
+              {(close) => (
+                <>
+                  <NavMenuItem to="/events" icon="calendar" title="Draft Calendar" note="Bowls, the Combine, pro days and more" featured onClick={close} />
+                  <NavMenuItem to="/events/combine" icon="stopwatch" title="NFL Combine" note="Results, drill rankings, all-time bests" onClick={close} />
+                  <NavMenuItem to="/events/pro-days" icon="shield" title="Pro Days" note="Every school's pro day date and results" onClick={close} />
+                  <NavMenuItem to="/risers" icon="trend" title="Draft Risers" note="Who's climbing boards this week" onClick={close} />
+                </>
+              )}
+            </NavMenu>
 
-            {/* The whole site full screen (desktop). */}
-            <SiteFullscreenButton />
+            {/* The Draft Sim first, then the written mocks. */}
+            <NavMenu label="Mock Drafts" to="/mocks" linkStyle={navLink(onSection("/mocks", "/draftsim"))} width={300} eyebrow="Mock Drafts">
+              {(close) => (
+                <>
+                  <NavMenuItem to="/draftsim" icon="bolt" title="Draft Simulator" note="Run the draft live" featured onClick={close} />
+                  <NavMenuItem to="/mocks" icon="doc" title="Mock Drafts" note="Write and read mocks" onClick={close} />
+                </>
+              )}
+            </NavMenu>
+
             {user ? (
               <Link to="/profile" className="wd-nav-link" style={navLink(onSection("/profile"))}>
                 Profile
@@ -730,6 +522,8 @@ export default function Navbar() {
             ) : (
               <button onClick={login} className="wd-nav-signin" style={signInStyle}>Sign In</button>
             )}
+            {/* The whole site full screen (desktop) — right of Profile. */}
+            <SiteFullscreenButton style={{ marginLeft: 10 }} />
           </div>
 
           {/* MOBILE HAMBURGER — pinned right, over the logo if it runs long. */}
@@ -762,10 +556,15 @@ export default function Navbar() {
                 page itself now (its own mobile dropdowns), not here. */}
             {[
               { path: "/community", label: "Community Board" },
-              { path: wePickHref(), label: "We-Pick" },
               { path: "/cfb", label: "CFB Teams" },
+              { path: "/cfb/stats", label: "CFB Stats" },
               { path: "/portal", label: "Transfer Portal" },
+              { path: "/portal/news", label: "Top Portal Players" },
               { path: "/nfl", label: "NFL Teams" },
+              { path: "/events", label: "Draft Calendar" },
+              { path: "/events/combine", label: "NFL Combine" },
+              { path: "/events/pro-days", label: "Pro Days" },
+              { path: "/risers", label: "Draft Risers" },
               { path: "/mocks", label: "Mock Drafts" },
             ].map((l) => (
               <Link key={l.path} to={l.path} className="mobile-nav-link" onClick={() => setMenuOpen(false)}>
@@ -822,6 +621,17 @@ export default function Navbar() {
           </div>
         )}
       </div>
+
+      {siteFullscreen && (
+        <button type="button" className={`wd-fs-navtab${fsNavOpen ? " is-open" : ""}`} onClick={() => setFsNavOpen((o) => !o)}
+          aria-label={fsNavOpen ? "Hide the menu" : "Show the menu"} aria-expanded={fsNavOpen}
+          title={fsNavOpen ? "Hide the menu" : "Show the menu"} style={{ top: fsNavOpen ? 66 : 0 }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"
+            style={{ transition: "transform .25s", transform: fsNavOpen ? "rotate(180deg)" : "none" }}>
+            <path d="M4 7h16l-8 11z" />
+          </svg>
+        </button>
+      )}
 
       <style>{`
         @keyframes tickerMove {
