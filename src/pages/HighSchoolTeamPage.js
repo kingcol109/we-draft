@@ -52,8 +52,14 @@ const HERO_STYLE = `
     0%, 100% { opacity: 0.82; transform: scale(0.96); }
     50%      { opacity: 1;    transform: scale(1.04); }
   }
+  /* The hero's state mark: a ring pinging out from the school's star. */
+  @keyframes wdHsPing {
+    0%   { transform: scale(0.6); opacity: 0.9; }
+    80%, 100% { transform: scale(3.2); opacity: 0; }
+  }
+  .wd-hs-ping { animation: wdHsPing 2.4s ease-out infinite; }
   @media (prefers-reduced-motion: reduce) {
-    .wd-hs-glow { animation: none !important; }
+    .wd-hs-glow, .wd-hs-ping { animation: none !important; }
   }
 `;
 
@@ -229,6 +235,21 @@ export default function HighSchoolTeamPage() {
     load();
     return () => { cancelled = true; };
   }, [slug]);
+
+  // Where the school is on the /hs map (its row in hsAlumni/_state_{ST}:
+  // [name, cfb, nfl, x, y, slug, …]) — for the hero's state mark, so only on
+  // a computer; null when it isn't located (the hero keeps its wordmark).
+  const [geo, setGeo] = useState(null);
+  useEffect(() => {
+    setGeo(null);
+    if (!school || isMobile) return undefined;
+    let off = false;
+    getDoc(doc(db, "hsAlumni", `_state_${stateAbbr(school.State)}`)).then((s) => {
+      const row = (s.data()?.schools || []).find((r) => r[5] === (school.Slug || slug));
+      if (!off && row && row[3] != null && row[4] != null) setGeo({ x: row[3], y: row[4] });
+    }).catch(() => {});
+    return () => { off = true; };
+  }, [school, isMobile, slug]);
 
   // Players (CFBD's rosters + We-Draft), Archive (historical picks + this
   // year's class), and the We-Draft alumni the News feed is built from —
@@ -426,7 +447,7 @@ export default function HighSchoolTeamPage() {
             full-width header with sidebars only appearing below it. ===== */}
         {isMobile ? (
           <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-            <HeroCard school={school} color1={color1} color2={color2} isMobile={isMobile} heroLogo={heroLogo} cityState={cityState} />
+            <HeroCard school={school} color1={color1} color2={color2} isMobile={isMobile} heroLogo={heroLogo} cityState={cityState} geo={geo} />
             <RankStrip stats={stats} state={school.State} color1={color1} isMobile={isMobile} loading={contentLoading} />
             <TopPicks archive={archive} color1={color1} color2={color2} isMobile={isMobile} loading={contentLoading} />
             <TabbedContent activeTab={activeTab} setActiveTab={setActiveTab} contentLoading={contentLoading} players={players} archive={archive} stats={stats} school={school} color1={color1} color2={color2} isMobile={isMobile} />
@@ -440,7 +461,7 @@ export default function HighSchoolTeamPage() {
               <StateBoardSidebar board={stateBoard} school={school} sideC1={sideC1} />
             </div>
             <div>
-              <HeroCard school={school} color1={color1} color2={color2} isMobile={isMobile} heroLogo={heroLogo} cityState={cityState} />
+              <HeroCard school={school} color1={color1} color2={color2} isMobile={isMobile} heroLogo={heroLogo} cityState={cityState} geo={geo} />
               <RankStrip stats={stats} state={school.State} color1={color1} isMobile={isMobile} loading={contentLoading} />
               <TopPicks archive={archive} color1={color1} color2={color2} isMobile={isMobile} loading={contentLoading} />
               <TabbedContent activeTab={activeTab} setActiveTab={setActiveTab} contentLoading={contentLoading} players={players} archive={archive} stats={stats} school={school} color1={color1} color2={color2} isMobile={isMobile} />
@@ -458,7 +479,59 @@ export default function HighSchoolTeamPage() {
 // ===== Hero — same visual recipe as TeamPage.js's own HeroCard, and
 // (per that file's own layout) lives inside the center grid column
 // alongside the sidebars, not spanning full width above them. =====
-function HeroCard({ school, color1, color2, isMobile, heroLogo, cityState }) {
+// The hero's right side on a computer when the school is located (user,
+// 2026-11-21): its state's silhouette in the team's colors, north up, with
+// a star where the school is. geo: { x, y } on the /hs map (the 975 × 610
+// Albers frame — hsAlumni/_state_{ST}); utils/usStatesGeo.js straightPoint
+// turns it with the state. Holds its space until the outlines load.
+let statesGeo = null;
+function HeroStateMark({ abbr, geo, color1, color2 }) {
+  const [mod, setMod] = useState(statesGeo);
+  useEffect(() => {
+    if (mod) return undefined;
+    let off = false;
+    import("../utils/usStatesGeo").then((m) => { statesGeo = { states: m.usStates(), straightPoint: m.straightPoint }; if (!off) setMod(statesGeo); }).catch(() => {});
+    return () => { off = true; };
+  }, [mod]);
+  const st = mod?.states?.[abbr];
+  if (!st) return null;
+  const [x0, y0, x1, y1] = st.bboxS;
+  const w = x1 - x0;
+  const h = y1 - y0;
+  const pad = Math.max(w, h) * 0.08;
+  const [px, py] = mod.straightPoint(st, geo.x, geo.y);
+  const u = Math.max(w, h) / 100; // 1% of the state — sizes the star and rings
+  const star = (r) => Array.from({ length: 10 }, (_, i) => {
+    const a = -Math.PI / 2 + (i * Math.PI) / 5;
+    const rr = i % 2 ? r * 0.45 : r;
+    return `${(px + rr * Math.cos(a)).toFixed(2)},${(py + rr * Math.sin(a)).toFixed(2)}`;
+  }).join(" ");
+  return (
+    <svg aria-hidden="true" viewBox={`${x0 - pad} ${y0 - pad} ${w + pad * 2} ${h + pad * 2}`} preserveAspectRatio="xMidYMid meet"
+      style={{ position: "absolute", top: "3%", right: "4%", height: "94%", width: "42%", zIndex: 0, pointerEvents: "none", overflow: "visible" }}>
+      <defs>
+        {/* The banner runs color1 → color2 left to right and the state
+            sits on the color2 end — so it's filled with color1, edged in color2. */}
+        <linearGradient id="wdHsState" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor={color1} stopOpacity="0.95" />
+          <stop offset="1" stopColor={color1} stopOpacity="0.75" />
+        </linearGradient>
+        <filter id="wdHsStateShadow" x="-20%" y="-20%" width="140%" height="140%">
+          <feDropShadow dx="0" dy={u * 1.2} stdDeviation={u * 1.5} floodColor="#000" floodOpacity="0.4" />
+        </filter>
+        <filter id="wdHsStarGlow" x="-200%" y="-200%" width="500%" height="500%">
+          <feGaussianBlur stdDeviation={u * 1.6} result="b" /><feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+        </filter>
+      </defs>
+      <path d={st.ds} fill="url(#wdHsState)" stroke={color2} strokeWidth={u * 0.9} strokeLinejoin="round" filter="url(#wdHsStateShadow)" />
+      {/* The ping, then the star. */}
+      <circle cx={px} cy={py} r={u * 4} fill="none" stroke={color2} strokeWidth={u * 0.7} className="wd-hs-ping" style={{ transformOrigin: `${px}px ${py}px`, transformBox: "view-box" }} />
+      <polygon points={star(u * 7)} fill={color2} stroke="#fff" strokeWidth={u * 0.9} strokeLinejoin="round" filter="url(#wdHsStarGlow)" />
+    </svg>
+  );
+}
+
+function HeroCard({ school, color1, color2, isMobile, heroLogo, cityState, geo }) {
   return (
     <div style={{
       position: "relative", overflow: "hidden", borderRadius: "14px",
@@ -486,7 +559,10 @@ function HeroCard({ school, color1, color2, isMobile, heroLogo, cityState }) {
           school has one on file, otherwise the school's own name rendered
           huge in the same Anton "manual wordmark" face used up front,
           faded the same way. */}
-      {!isMobile && (
+      {/* A located school, on a computer: its state with a star where it is
+          (HeroStateMark) — in place of the wordmark below. */}
+      {!isMobile && geo && <HeroStateMark abbr={stateAbbr(school.State)} geo={geo} color1={color1} color2={color2} />}
+      {!isMobile && !geo && (
         (school.WordmarkDark || school.Wordmark) ? (
           <img
             src={sanitizeUrl(school.WordmarkDark || school.Wordmark)} alt="" aria-hidden="true"

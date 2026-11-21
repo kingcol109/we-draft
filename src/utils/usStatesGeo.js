@@ -81,10 +81,21 @@ export function usStates() {
       });
       ds += "Z";
     }));
-    out[abbr] = { abbr, name: f.properties.name, d, bbox: [x0, y0, x1, y1], ds, bboxS: [sx0, sy0, sx1, sy1] };
+    // turn: the straightening, for points on the state (straightPoint).
+    out[abbr] = { abbr, name: f.properties.name, d, bbox: [x0, y0, x1, y1], ds, bboxS: [sx0, sy0, sx1, sy1], turn: [mx, my, cos, sin] };
   });
   cache = out;
   return out;
 }
 
 export const US_FRAME = [975, 610];
+
+// A point on the map (the 975 × 610 Albers frame — a school's x / y from
+// the hsAlumni state docs) turned the way its state is straightened (ds /
+// bboxS), so a marker lands on the north-up silhouette.
+export function straightPoint(state, x, y) {
+  const [mx, my, cos, sin] = state.turn;
+  const dx = x - mx;
+  const dy = y - my;
+  return [mx + dx * cos - dy * sin, my + dx * sin + dy * cos];
+}
