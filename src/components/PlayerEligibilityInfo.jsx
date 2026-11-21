@@ -19,8 +19,10 @@
 //                        timeline. College logos from schools
 //                        (DraftArchiveList useSchools); the high school's
 //                        from its highSchools doc when it's branded, else
-//                        its state's silhouette (stateSilhouettes/{state}),
-//                        else the state's shorthand ("TX").
+//                        its state's silhouette (components/StateShape.jsx —
+//                        the /hs pages' own, user 2026-11-21; it replaced
+//                        the uploaded stateSilhouettes images), else the
+//                        state's shorthand ("TX").
 //   Hometown / Born / Age  players.Hometown / Birthday when entered, else the
 //                        ESPN athlete record (useEspnBio) — shown only if known
 //   Accolades            under each stop: national awards won there (ESPN,
@@ -38,6 +40,7 @@ import { Link } from "react-router-dom";
 import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useSchools } from "./DraftArchiveList";
+import StateShape from "./StateShape";
 import { ELIGIBILITY_DISCLAIMER, currentDraftClass, inHighSchool } from "../utils/eligibility";
 import { stopSpan, championSeasons } from "../utils/careerStops";
 import { stateName, STATE_ABBR } from "../utils/highSchoolMatch";
@@ -167,14 +170,8 @@ function Accolade({ children, title, icon, isMobile, dark = false }) {
 
 // The player's high school doc (for its branding), matched on name + state
 // (one read — six schools share "Liberty"), else the one school by that
-// name in any state (IMG and other national schools, or no state on file);
-// and that state's silhouette (stateSilhouettes/{state name}, cached per
-// state) for a school without a logo. → { hs, silhouette }
-const silhouetteCache = new Map();
-const silhouetteOf = (st) => {
-  if (!silhouetteCache.has(st)) silhouetteCache.set(st, getDoc(doc(db, "stateSilhouettes", st)).then((s) => s.data()?.Silhouette || null).catch(() => null));
-  return silhouetteCache.get(st);
-};
+// name in any state (IMG and other national schools, or no state on file).
+// → { hs }
 async function findHighSchool(name, st) {
   const byName = (...w) => getDocs(query(collection(db, "highSchools"), where("Name", "==", name), ...w)).then((s) => s.docs.map((d) => d.data()));
   if (st) {
@@ -185,17 +182,13 @@ async function findHighSchool(name, st) {
   return docs.length === 1 ? docs[0] : null;
 }
 function useHighSchool(name, state) {
-  const [found, setFound] = useState({ hs: null, silhouette: null });
+  const [found, setFound] = useState({ hs: null });
   useEffect(() => {
-    setFound({ hs: null, silhouette: null });
+    setFound({ hs: null });
     if (!name) return undefined;
     let cancelled = false;
-    const st = stateName(state);
-    Promise.all([
-      findHighSchool(name, st).catch(() => null),
-      st ? silhouetteOf(st) : null,
-    ]).then(([hs, silhouette]) => {
-      if (!cancelled) setFound({ hs, silhouette });
+    findHighSchool(name, stateName(state)).catch(() => null).then((hs) => {
+      if (!cancelled) setFound({ hs });
     });
     return () => { cancelled = true; };
   }, [name, state]);
@@ -210,7 +203,7 @@ const GAP = 12; // between stops
 // their own color with the dark-background logo; the high school (and marks
 // with no colors — the portal arrows, the draft) keep a light gray circle.
 export function CareerStop(props) { return <Stop {...props} />; }
-function Stop({ name, sub, span, current, brand, label, to, accolades, fallback, isMobile, last, dark = false }) {
+function Stop({ name, sub, span, current, brand, label, to, accolades, fallback, state, isMobile, last, dark = false }) {
   const c1 = isHex(brand?.Color1) ? brand.Color1 : "#5f6b7a";
   const filled = dark ? label !== "High School" && isHex(brand?.Color1) : current && isHex(brand?.Color1);
   const logo = filled ? brand.LogoDark || brand.Logo1 : brand?.Logo1;
@@ -225,6 +218,7 @@ function Stop({ name, sub, span, current, brand, label, to, accolades, fallback,
     }}>
       {logo
         ? <img src={logo} alt="" style={{ width: "72%", height: "72%", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+        : state ? <StateShape abbr={state} size={Math.round(size * 0.68)} glow={false} title={stateName(state) || state} />
         : <span style={{ fontSize: 11, fontWeight: 900, color: filled ? "#fff" : "#9aa5b4" }}>{fallback || initials(name)}</span>}
     </div>
   );
@@ -356,7 +350,7 @@ export function useCareerPath(player, espnId, draft) {
   const eventData = useEventYear(eventYear);
   const eventRows = playerEvents(eventData, player?.id, eventYear);
   const brands = useSchools([...stops.filter((s) => s.Level !== "JUCO").map((s) => s.School), ...eventRows.map((r) => r.school).filter(Boolean)]);
-  const { hs, silhouette } = useHighSchool(player?.HighSchool, player?.State);
+  const { hs } = useHighSchool(player?.HighSchool, player?.State);
   const stillInSchool = Number(player?.Eligible) >= Number(currentDraftClass());
   // A promoted recruit still in high school: the college is where they're
   // committed (not current), and the high school is the current stop.
@@ -436,8 +430,10 @@ export function useCareerPath(player, espnId, draft) {
     })),
     ...(player?.HighSchool ? [{
       key: "hs", name: player.HighSchool, label: "High School",
-      brand: hs?.Logo1 ? hs : silhouette ? { Logo1: silhouette } : null,
-      // No school logo or state silhouette: the state's shorthand ("TX").
+      brand: hs?.Logo1 ? hs : null,
+      // No school logo: the state's silhouette (StateShape), else its
+      // shorthand ("TX").
+      state: STATE_ABBR[stateName(player.State)] || null,
       fallback: STATE_ABBR[stateName(player.State)] || null,
       sub: [hs?.City, stateName(player.State)].filter(Boolean).join(", "),
       current: hsSenior,

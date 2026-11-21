@@ -79,7 +79,7 @@ function SectionTitle({ children, color1, color2, right, isMobile }) {
 // "Kamario Taylor is a very strong match to Cam Newton, who Brad Holmes
 // drafted as general manager of the Carolina Panthers in 2012." — both
 // players' names bold.
-function comparisonSentence(prospect, m, tier) {
+export function comparisonSentence(prospect, m, tier) {
   const team = NFL_TEAMS[m.pt] || m.pt;
   const why = ["HC", "IHC", "GM"].includes(m.r)
     ? `who ${m.pn} drafted as ${lowerRole(m.r)} of the ${team} in ${m.y}`
@@ -93,8 +93,11 @@ function comparisonSentence(prospect, m, tier) {
   );
 }
 
-export default function ProjectedPicks({ staff, staffLoading, teamKey, color1, color2, isMobile }) {
-  const [years, setYears] = useState(["2027"]);
+// fixedYears: show just these classes, with no class toggles — the WX
+// Targets tab (TeamTargetsWX.jsx) picks the class itself.
+export default function ProjectedPicks({ staff, staffLoading, teamKey, color1, color2, isMobile, fixedYears = null }) {
+  const [pickedYears, setYears] = useState(["2027"]);
+  const years = fixedYears || pickedYears;
   const visibleYears = useVisibleProspectYears(); // 2030 once it has players
   const [position, setPosition] = useState(ALL);
   // At least one class stays on.
@@ -205,14 +208,14 @@ export default function ProjectedPicks({ staff, staffLoading, teamKey, color1, c
           </button>
         ))}
       </div>
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 22 }}>
+      {fixedYears ? <div style={{ marginBottom: 12 }} /> : <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 22 }}>
         <span style={{ fontSize: 11, fontWeight: 900, color: "#6b7685", letterSpacing: "0.08em", textTransform: "uppercase", marginRight: 4 }}>Classes</span>
         {PROSPECT_YEARS.filter((y) => visibleYears.includes(y)).map((y) => (
           <button key={y} onClick={() => toggleYear(y)} aria-pressed={years.includes(y)} style={chip(years.includes(y))}>
             {years.includes(y) ? "✓ " : "+ "}{y}
           </button>
         ))}
-      </div>
+      </div>}
 
       {loading ? (
         <LoadingSpinner label="Finding fits" size={28} minHeight="200px" />
@@ -294,7 +297,7 @@ function SchoolLogo({ school, logo, isMobile }) {
 // is the same size: the tier sits on two words' worth of lines ("Extremely
 // / Strong"), so the longest label wraps instead of being cut off and the
 // shorter ones center in the same space.
-function FitBadge({ score, color1 }) {
+export function FitBadge({ score, color1 }) {
   const tier = fitTier(score);
   const words = tier ? tier.label.split(" ") : ["Fit"];
   return (

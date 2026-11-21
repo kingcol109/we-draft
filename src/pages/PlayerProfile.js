@@ -26,6 +26,7 @@ import { loadWeeklyMockSummary, weeklyMockPlayerTitle, weeklyYearHref, hasTeamPa
 import { riserNewsItem } from "../utils/risers";
 import { portalNewsItem } from "../utils/portalNews";
 import { perfNewsItem } from "../utils/seniorBowlPerf";
+import { classIntroNewsItem } from "../utils/classIntro";
 import { NflTeamPicker, useMarginAdFit } from "../components/MarginAds";
 import AdBanner, { MobileAdCard, MOBILE_AD_HEIGHT } from "../components/AdBanner";
 import { takePlayerBySlug, takeSchoolByName } from "../utils/playerPrefetch";
@@ -2744,6 +2745,8 @@ export default function PlayerProfile() {
     if (player?.id) portalNewsItem(player).then((it) => live && it && setPortalItems((l) => [...l, it])).catch(() => {});
     // …and the Senior Bowl Top Performers (utils/seniorBowlPerf.js).
     if (player?.id) perfNewsItem(player).then((it) => live && it && setPortalItems((l) => [...l, it])).catch(() => {});
+    // …and "Meet the Class of 2030", once it's released (utils/classIntro.js).
+    if (player?.id) classIntroNewsItem(player).then((it) => live && it && setPortalItems((l) => [...l, it])).catch(() => {});
     return () => { live = false; };
   }, [player?.id, player?.Last]); // eslint-disable-line react-hooks/exhaustive-deps
   // In The News: everything about him (articles, news, the weekly mocks,

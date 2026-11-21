@@ -26,9 +26,10 @@
 //          card front's "where they play" (top rows in _hub: pm / co).
 //   sideCfb / sidePicks (state docs and _hub): the right column — the 15
 //          top current college players from the state (nation), ordered by
-//          transfer stars (never written) [[name, pos, college, high school]],
+//          transfer stars (never written) [[name, pos, college, high school, slug?]],
 //          and its 15 highest picks [[year, overall, round, name, pos, team,
-//          high school]].
+//          high school, slug?]] — slug: the player's We-Draft page when he
+//          has one (the column links his name).
 //   nflLogos: { abbr: [LogoDark || Logo1, Logo1] } for the teams in the doc;
 //   collegeLogos: { school: [LogoDark || Logo1, Logo1] } likewise.
 //
@@ -74,7 +75,7 @@ function buildHsGeoDocs({ counts, samples, citySamples, docByKey, slugOf, top, b
     lists.forEach((list) => (list || []).forEach((x) => { const l = x[at] && collegeLogo?.get(x[at]); if (l && !out[x[at]]) out[x[at]] = l; }));
     return out;
   };
-  const topPicks = (key) => (picksByKey?.get(key) || []).sort((a, b) => a[1] - b[1] || b[0] - a[0]).slice(0, 5);
+  const topPicks = (key) => (picksByKey?.get(key) || []).sort((a, b) => a[1] - b[1] || b[0] - a[0]).slice(0, 5).map((x) => x.slice(0, 6));
   const colorsOf = (d) => (d?.Color1 ? [d.Color1, d.Color2 || d.Color1] : null);
   const nflById = new Map((nflTeams || []).map((t) => [t.abbr, t]));
   const logosFor = (pickLists) => {
@@ -135,11 +136,11 @@ function buildHsGeoDocs({ counts, samples, citySamples, docByKey, slugOf, top, b
     const pk = [];
     keys.forEach((key) => {
       const hs = key.split("|")[0];
-      (playersByKey?.get(key) || []).forEach((x) => pl.push([x[0], x[1], x[2], x[3], x[4], hs]));
-      (picksByKey?.get(key) || []).forEach((x) => pk.push([...x, hs]));
+      (playersByKey?.get(key) || []).forEach((x) => pl.push([x[0], x[1], x[2], x[3], x[4], hs, x[5]]));
+      (picksByKey?.get(key) || []).forEach((x) => pk.push([...x.slice(0, 6), hs, ...(x[6] ? [x[6]] : [])]));
     });
     return {
-      sideCfb: pl.sort((a, b) => b[0] - a[0] || b[1] - a[1]).slice(0, SIDE).map((x) => [x[2], x[3], x[4], x[5]]),
+      sideCfb: pl.sort((a, b) => b[0] - a[0] || b[1] - a[1]).slice(0, SIDE).map((x) => [x[2], x[3], x[4], x[5], ...(x[6] ? [x[6]] : [])]),
       sidePicks: pk.sort((a, b) => a[1] - b[1] || b[0] - a[0]).slice(0, SIDE),
     };
   };

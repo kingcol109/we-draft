@@ -24,6 +24,7 @@ import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog"
 import { useSchools } from "../components/DraftArchiveList";
 import { currentDraftClass } from "../utils/eligibility";
 import { POS_GROUPS, rankText, stateAbbr, hsPath } from "../utils/hsRanks";
+import { STATE_NAME } from "../utils/highSchoolMatch";
 import { isUnreleasedYear, isUnreleasedSlug, useIsAdmin } from "../utils/prospectYears";
 
 const BLUE = "#0055a5";
@@ -431,6 +432,7 @@ export default function HighSchoolTeamPage() {
             <TabbedContent activeTab={activeTab} setActiveTab={setActiveTab} contentLoading={contentLoading} players={players} archive={archive} stats={stats} school={school} color1={color1} color2={color2} isMobile={isMobile} />
             <StateBoardSidebar board={stateBoard} school={school} sideC1={sideC1} />
             <NewsSidebar news={news} sideC1={sideC1} />
+            <MoreHsLinks school={school} sideC1={sideC1} />
           </div>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "250px minmax(0, 1fr) 250px", gap: "20px", alignItems: "start" }}>
@@ -716,6 +718,38 @@ function StateBoardSidebar({ board, school, sideC1 }) {
               onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}>{inner}</Link>
           : <div key={`${r.k}${i}`} style={style}>{inner}</div>;
       })}
+    </SidebarCard>
+  );
+}
+
+// Mobile only, at the bottom: routes out to the rest of the HS section
+// (desktop has the sidebars + navbar for this).
+function MoreHsLinks({ school, sideC1 }) {
+  const abbr = stateAbbr(school.State);
+  const st = String(abbr || "").toLowerCase();
+  const stateName = STATE_NAME[abbr] || school.State || abbr;
+  const links = [
+    st && { to: `/hs/${st}`, title: `${stateName} High Schools`, note: "Top programs in college football" },
+    st && { to: `/hs/${st}/nfl`, title: `${stateName} NFL Draft Picks`, note: "Schools with the most picks" },
+    st && { to: `/hs/rankings?scope=${abbr}`, title: `${abbr} Rankings`, note: "Full state rankings" },
+    { to: "/hs", title: "All States", note: "National hub + heatmap" },
+    { to: "/hs/nfl", title: "National NFL Draft", note: "Every pick by high school" },
+    { to: "/hs/rankings", title: "National Rankings", note: "Every high school, ranked" },
+  ].filter(Boolean);
+  return (
+    <SidebarCard title="More High School Football" color1={sideC1}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr" }}>
+        {links.map((l, i) => (
+          <Link key={l.to} to={l.to} style={{
+            display: "block", padding: "12px 14px", textDecoration: "none", minWidth: 0,
+            borderBottom: i < links.length - 2 ? `1px solid ${SIDE_LINE_2}` : "none",
+            borderRight: i % 2 === 0 ? `1px solid ${SIDE_LINE_2}` : "none",
+          }}>
+            <div style={{ fontSize: "13px", fontWeight: 900, color: sideC1, lineHeight: 1.2 }}>{l.title} →</div>
+            <div style={{ fontSize: "11px", fontWeight: 700, color: "#7a8594", marginTop: "3px", fontFamily: "Arial, sans-serif" }}>{l.note}</div>
+          </Link>
+        ))}
+      </div>
     </SidebarCard>
   );
 }

@@ -478,6 +478,22 @@ for (const doc of allTeams) {
   console.log(`✅ ${riserPages.length} Draft Risers pages.`);
 
   /* =========================
+     MEET THE CLASS OF 2030 (/class-of-2030) and the high school prospects
+     page (/early-look — working name): only once the admin releases them
+     (live). Before that the rules keep them unreadable here, so they're
+     left out either way. Past Early Look editions are noindexed.
+  ========================= */
+  const prospectPages = [];
+  for (const [coll, id, path, priority] of [["classIntro", "2030", "/class-of-2030", 0.7], ["earlyLook", "current", "/early-look", 0.65]]) {
+    const snap = await getDoc(doc(db, coll, id)).catch(() => null);
+    const data = snap?.exists() ? snap.data() : null;
+    if (!data?.live) continue;
+    const lastmod = data.updatedAt?.toDate?.()?.toLocaleDateString("en-CA", { timeZone: "America/New_York" }) || today;
+    prospectPages.push({ path, priority, lastmod });
+  }
+  console.log(`✅ ${prospectPages.length} high school prospect pages (released only).`);
+
+  /* =========================
      PORTAL NEWS — /portal/news and its IN / OUT and position pages, like the
      Risers: only once a board is published (portalNews/current has players),
      dated to its last Save, and only the pages that have someone on them
@@ -580,7 +596,7 @@ for (const doc of allTeams) {
     { path: `/portal/${slug}/needs`, priority: 0.45, lastmod: today },
     { path: `/portal/${slug}/targets`, priority: 0.5, lastmod: today },
   ]);
-  const allUrls = [...staticPages, ...communityBoardPages, ...teamPages, ...nflPages, ...portalSimPages, ...portalPages, ...hsPages, ...(MAPS_RELEASED ? mapPages : []), ...weeklyMockPages, ...riserPages, ...portalNewsPages, ...staffPages, ...playerPages, ...comparisonPages, ...newsPages, ...gamePages];
+  const allUrls = [...staticPages, ...communityBoardPages, ...teamPages, ...nflPages, ...portalSimPages, ...portalPages, ...hsPages, ...(MAPS_RELEASED ? mapPages : []), ...weeklyMockPages, ...riserPages, ...prospectPages, ...portalNewsPages, ...staffPages, ...playerPages, ...comparisonPages, ...newsPages, ...gamePages];
   const chunks = [];
   
   for (let i = 0; i < allUrls.length; i += chunkSize) {

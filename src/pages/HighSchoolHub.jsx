@@ -32,6 +32,8 @@ import LoadingSpinner from "../components/LoadingSpinner";
 import { STATE_NAME } from "../utils/highSchoolMatch";
 import { POS_GROUPS, rankText, hsPath } from "../utils/hsRanks";
 import { usStates, US_FRAME } from "../utils/usStatesGeo";
+import { isUnreleasedSlug } from "../utils/prospectYears";
+import SharedStateShape, { primeStateShapes } from "../components/StateShape";
 
 // ── look: light, site blue + gold, varsity type ──
 const BLUE = "#0055a5";
@@ -73,12 +75,17 @@ const STYLE = `
   .wd-hub-card:hover { transform: translateY(-3px); box-shadow: 0 14px 30px rgba(15,27,45,0.14) !important; border-color: ${GOLD} !important; }
   .wd-hub-row { transition: background .15s ease; }
   .wd-hub-row:hover { background: #f5f8fc !important; }
+  .wd-hub-name:hover { text-decoration: underline !important; }
   .wd-hub-scroll::-webkit-scrollbar { height: 0; }
   .wd-hub-flip { perspective: 1400px; height: 100%; }
   .wd-hub-flip-inner { position: relative; height: 100%; display: grid; transition: transform .65s cubic-bezier(.2,.7,.2,1); transform-style: preserve-3d; }
   .wd-hub-flip.on .wd-hub-flip-inner { transform: rotateY(180deg); }
   @media (hover: hover) { .wd-hub-flip.can:hover .wd-hub-flip-inner { transform: rotateY(180deg); } }
-  .wd-hub-face { backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+  .wd-hub-face { backface-visibility: hidden; -webkit-backface-visibility: hidden; transition: visibility 0s linear .32s; }
+  .wd-hub-back { visibility: hidden; }
+  .wd-hub-flip.on .wd-hub-front { visibility: hidden; }
+  .wd-hub-flip.on .wd-hub-back { visibility: visible; }
+  @media (hover: hover) { .wd-hub-flip.can:hover .wd-hub-front { visibility: hidden; } .wd-hub-flip.can:hover .wd-hub-back { visibility: visible; } }
   .wd-hub-zoom:hover:not(:disabled) { border-color: ${BLUE} !important; color: ${BLUE} !important; }
   @media (prefers-reduced-motion: reduce) { .wd-hub-rise, .wd-hub-drift { animation: none !important; } }
 `;
@@ -331,26 +338,34 @@ function TopSide({ doc, metric, scopeName }) {
   return (
     <SideCard title={cfb ? "Top College Players" : "Top Draft Picks"} sub={cfb ? `From ${scopeName} high schools` : `${scopeName} high schools · ${doc?.draftFrom || 2000}–${doc?.draftTo || ""}`}>
       {rows.length === 0 && <div style={{ padding: "24px 14px", textAlign: "center", fontSize: "12px", fontStyle: "italic", color: FAINT }}>None yet.</div>}
+      {/* Two lines a row (user 2026-11-21: tighter): name — a link when he
+          has a released We-Draft page — then position · high school. The
+          logo carries the college / NFL team (its name on hover). */}
       {rows.map((x, i) => {
         const logo = cfb ? doc?.collegeLogos?.[x[2]] : doc?.nflLogos?.[x[5]];
         const src = logo?.[1] || logo?.[0];
+        const team = cfb ? x[2] : x[5];
+        const name = cfb ? x[0] : x[3];
+        const slug = cfb ? x[4] : x[7];
+        const linked = slug && !isUnreleasedSlug(slug);
+        const nameStyle = { display: "block", fontSize: "12.5px", fontWeight: 900, lineHeight: 1.25, color: TEXT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: "none" };
         return (
-          <div key={i} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "9px 14px", borderBottom: i < rows.length - 1 ? `1px solid ${TRACK}` : "none" }}>
-            {cfb ? (
-              <span style={{ width: "30px", height: "30px", flexShrink: 0, borderRadius: "50%", background: "#fff", border: `1px solid ${EDGE}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                {src ? <img src={src} alt="" style={{ width: "72%", height: "72%", objectFit: "contain" }} /> : null}
-              </span>
-            ) : (
-              <span style={{ width: "30px", flexShrink: 0, fontFamily: DISPLAY, fontSize: "20px", lineHeight: 1, color: x[2] === 1 ? GOLD : BLUE }}>{x[2] ? `R${x[2]}` : "—"}</span>
+          <div key={i} style={{ display: "flex", alignItems: "center", gap: "9px", padding: "7px 12px", borderBottom: i < rows.length - 1 ? `1px solid ${TRACK}` : "none" }}>
+            {!cfb && (
+              <span style={{ width: "22px", flexShrink: 0, fontFamily: DISPLAY, fontSize: "15px", lineHeight: 1, color: x[2] === 1 ? GOLD : BLUE }}>{x[2] ? `R${x[2]}` : "—"}</span>
             )}
-            <span style={{ flex: 1, minWidth: 0 }}>
-              <span style={{ display: "block", fontSize: "13px", fontWeight: 900, color: TEXT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cfb ? x[0] : x[3]}</span>
-              <span style={{ display: "block", fontSize: "10px", fontWeight: 800, color: DIM, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {cfb ? [x[1], x[2]].filter(Boolean).join(" · ") : [x[4], x[0]].filter(Boolean).join(" · ")}
-              </span>
-              <span style={{ display: "block", fontSize: "10px", fontWeight: 700, color: FAINT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cfb ? x[3] : x[6]}</span>
+            <span title={team || ""} style={{ width: "24px", height: "24px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              {src ? <img src={src} alt={team || ""} style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} /> : null}
             </span>
-            {!cfb && src ? <img src={src} alt={x[5]} style={{ width: "26px", height: "26px", objectFit: "contain", flexShrink: 0 }} /> : null}
+            <span style={{ flex: 1, minWidth: 0 }}>
+              {linked
+                ? <Link to={`/player/${slug}`} className="wd-hub-name" style={{ ...nameStyle, color: BLUE }}>{name}</Link>
+                : <span style={nameStyle}>{name}</span>}
+              <span style={{ display: "block", fontSize: "10px", fontWeight: 700, lineHeight: 1.3, color: FAINT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <b style={{ fontWeight: 900, color: DIM }}>{cfb ? x[1] : x[4]}</b>
+                {(cfb ? [x[3]] : [x[0], x[6]]).filter(Boolean).map((t) => ` · ${t}`).join("")}
+              </span>
+            </span>
           </div>
         );
       })}
@@ -442,25 +457,12 @@ function StateSelect({ value, isMobile, metric }) {
   );
 }
 
-// A state's own silhouette, filled with a gradient.
-function StateShape({ abbr, size = 80, glow = true, light = false }) {
-  const s = usStates()[abbr];
-  if (!s) return null;
-  const [x0, y0, x1, y1] = s.bbox;
-  const pad = Math.max(x1 - x0, y1 - y0) * 0.06;
-  const gid = `wdhub-g-${abbr}-${light ? "l" : "d"}`;
-  return (
-    <svg viewBox={`${x0 - pad} ${y0 - pad} ${x1 - x0 + pad * 2} ${y1 - y0 + pad * 2}`} width={size} height={size} aria-hidden="true"
-      style={{ flexShrink: 0, overflow: "visible", filter: glow ? `drop-shadow(0 6px 14px rgba(0,85,165,${light ? 0.5 : 0.3}))` : undefined }}>
-      <defs>
-        <linearGradient id={gid} x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor={light ? "#ffffff" : "#5b9be6"} />
-          <stop offset="1" stopColor={light ? "#cfe1f7" : BLUE} />
-        </linearGradient>
-      </defs>
-      <path d={s.d} fill={`url(#${gid})`} stroke="#fff" strokeWidth={(x1 - x0) / 120} />
-    </svg>
-  );
+// A state's own silhouette (components/StateShape.jsx, shared with the
+// portal and career paths). This page already has the outlines loaded, so
+// it hands them over — no blank first frame.
+function StateShape(props) {
+  primeStateShapes(usStates());
+  return <SharedStateShape straight={false} {...props} />;
 }
 
 function SchoolMark({ logo, size }) {
@@ -622,7 +624,7 @@ function TopCard({ it, isMobile }) {
   );
 
   const front = (
-    <div className="wd-hub-face" style={{
+    <div className="wd-hub-face wd-hub-front" style={{
       ...faceBase, position: "relative", color: ink, background: frontBg,
       border: `${team ? 2 : 1}px solid ${team ? c2 : first ? NAVY : EDGE}`,
       padding: isMobile ? "14px" : "20px 20px 16px", display: "flex", flexDirection: "column", gap: isMobile ? "10px" : "14px",
@@ -640,7 +642,9 @@ function TopCard({ it, isMobile }) {
             {rankText(it.r, it.t)}
           </div>
           {/* Sized to the longest word, so a name wraps between words, never inside one. */}
-          <div style={{ fontFamily: DISPLAY, fontSize: `${nameSize}px`, lineHeight: 1.02, marginTop: "6px", textTransform: "uppercase", textShadow: dark ? "0 2px 8px rgba(0,0,0,0.3)" : "none", overflowWrap: "break-word", wordBreak: "normal", hyphens: "none" }}>{it.name}</div>
+          <div style={{ fontFamily: DISPLAY, fontSize: `${nameSize}px`, lineHeight: 1.02, marginTop: "6px", textTransform: "uppercase", textShadow: dark ? "0 2px 8px rgba(0,0,0,0.3)" : "none", overflowWrap: "break-word", wordBreak: "normal", hyphens: "none" }}>
+            {isMobile && it.to ? <Link to={it.to} style={{ color: "inherit", textDecoration: "underline", textDecorationThickness: "2px", textUnderlineOffset: "4px", textDecorationColor: dark ? "rgba(255,255,255,0.45)" : "rgba(15,27,45,0.25)" }}>{it.name}</Link> : it.name}
+          </div>
           {it.sub && <div style={{ fontSize: "11px", fontWeight: 800, color: soft, marginTop: "3px" }}>{it.sub}</div>}
         </div>
       </div>
@@ -726,7 +730,7 @@ function TopCard({ it, isMobile }) {
   );
 
   const back = canFlip && (
-    <div className="wd-hub-face" style={{
+    <div className="wd-hub-face wd-hub-back" style={{
       ...faceBase, position: "relative", transform: "rotateY(180deg)", color: "#fff", background: backBg,
       border: `${team ? 2 : 1}px solid ${team ? c2 : NAVY}`, padding: isMobile ? "12px 14px 16px" : "16px 18px 20px", display: "flex", flexDirection: "column",
     }}>
@@ -745,8 +749,8 @@ function TopCard({ it, isMobile }) {
               </span>
             )}
             <span style={{ flex: 1, minWidth: 0 }}>
-              <span style={{ display: "block", fontFamily: x.tag ? HEAD : DISPLAY, fontSize: x.tag ? "13px" : (isMobile ? "19px" : "21px"), fontWeight: x.tag ? 900 : 400, lineHeight: 1.1, textTransform: x.tag ? "none" : "uppercase", letterSpacing: x.tag ? 0 : "0.01em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{x.name}</span>
-              <span style={{ display: "block", fontSize: x.tag ? "10px" : "11px", fontWeight: 800, color: "rgba(255,255,255,0.62)", marginTop: x.tag ? 0 : "2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{x.cardMeta || x.meta}</span>
+              <span style={{ display: "block", fontFamily: x.tag ? HEAD : DISPLAY, fontSize: x.tag ? "13px" : (isMobile ? "16px" : "21px"), fontWeight: x.tag ? 900 : 400, lineHeight: 1.1, textTransform: x.tag ? "none" : "uppercase", letterSpacing: x.tag ? 0 : "0.01em", ...(isMobile ? { overflowWrap: "anywhere" } : { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }) }}>{x.name}</span>
+              <span style={{ display: "block", fontSize: x.tag ? "10px" : "11px", fontWeight: 800, color: "rgba(255,255,255,0.62)", marginTop: x.tag ? 0 : "2px", ...(isMobile ? { lineHeight: 1.25 } : { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }) }}>{x.cardMeta || x.meta}</span>
             </span>
             {x.tag && x.logo?.[0] ? <img src={x.logo[0]} alt="" style={{ flexShrink: 0, width: "26px", height: "26px", objectFit: "contain", filter: "drop-shadow(0 1px 3px rgba(0,0,0,0.4))" }} /> : null}
           </div>
@@ -760,9 +764,43 @@ function TopCard({ it, isMobile }) {
       <div className="wd-hub-flip-inner">{front}{back}</div>
     </div>
   );
-  return it.to
+  return it.to && !isMobile
     ? <Link to={it.to} style={{ textDecoration: "none", color: "inherit", display: "block", height: "100%" }}>{body}</Link>
     : <div style={{ height: "100%" }}>{body}</div>;
+}
+
+// Mobile list row (ranks 4+): stacked, so long names get the full width
+// and wrap instead of being cut off. Only the name links (taps elsewhere
+// just scroll the chips).
+function MobileRankRow({ r, max, last, delay }) {
+  const ink = inkOf(r.colors) || (r.to ? BLUE : TEXT);
+  return (
+    <div className="wd-hub-rise" style={{ padding: "12px 12px 11px", background: CARD, borderBottom: last ? "none" : `1px solid ${TRACK}`, animationDelay: `${delay}s` }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0 }}>
+        <span style={{ flexShrink: 0, minWidth: "26px", padding: "3px 0", borderRadius: "8px", background: "#f1f4f8", textAlign: "center", fontFamily: DISPLAY, fontSize: "14px", lineHeight: 1.1, color: DIM, fontVariantNumeric: "tabular-nums" }}>
+          {rankText(r.r, r.t).replace("#", "")}
+        </span>
+        {r.art}
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ display: "block", fontSize: "15px", fontWeight: 900, lineHeight: 1.2, color: ink, overflowWrap: "anywhere" }}>
+            {r.to ? <Link to={r.to} style={{ color: "inherit", textDecoration: "none" }}>{r.name}</Link> : r.name}
+          </span>
+          {(r.sub || r.extra) && (
+            <span style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "2px 8px", marginTop: "2px", fontSize: "11px", fontWeight: 700, color: FAINT, lineHeight: 1.3 }}>
+              {r.sub && <span>{r.sub}</span>}
+              {r.extra}
+            </span>
+          )}
+        </span>
+        <span style={{ flexShrink: 0, textAlign: "right" }}>
+          <span style={{ display: "block", fontFamily: DISPLAY, fontSize: "24px", lineHeight: 1, color: TEXT, fontVariantNumeric: "tabular-nums" }}>{fmt(r.v)}</span>
+          {r.unit && <span style={{ display: "block", fontSize: "8px", fontWeight: 900, color: FAINT, textTransform: "uppercase", letterSpacing: "0.1em", marginTop: "2px" }}>{r.unit}</span>}
+        </span>
+      </div>
+      <span style={{ display: "block", marginTop: "9px" }}><Bar pct={(r.v / (max || 1)) * 100} color={ink === TEXT ? BLUE : ink} height={4} /></span>
+      <ShowChips items={r.chips} />
+    </div>
+  );
 }
 
 // Ranks 4+: compact rows.
@@ -770,6 +808,7 @@ function RankRows({ rows, max, isMobile, onMore, moreLabel, startDelay = 0 }) {
   return (
     <div style={{ background: CARD, border: `1px solid ${EDGE}`, borderRadius: "18px", overflow: "hidden", boxShadow: "0 4px 14px rgba(15,27,45,0.05)" }}>
       {rows.map((r, i) => {
+        if (isMobile) return <MobileRankRow key={r.key} r={r} max={max} last={i === rows.length - 1 && !onMore} delay={startDelay + Math.min(i, 12) * 0.03} />;
         const inner = (
           <>
             <span style={{ flexShrink: 0, width: isMobile ? "34px" : "44px", textAlign: "right", fontFamily: DISPLAY, fontSize: isMobile ? "18px" : "22px", color: FAINT, fontVariantNumeric: "tabular-nums" }}>{rankText(r.r, r.t).replace("#", "")}</span>

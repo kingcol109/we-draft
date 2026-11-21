@@ -33,6 +33,7 @@ import { db } from "../../firebase";
 import { NFL_TEAMS } from "../../utils/coachHistory";
 import { useCareerPath } from "../PlayerEligibilityInfo";
 import { useHeadshot } from "./simHeadshots";
+import StateShape from "../StateShape";
 
 // His players doc and ESPN id, once a session each.
 const playerCache = new Map();
@@ -85,7 +86,7 @@ function CareerStop({ r, last, isMobile }) {
     <div style={{ position: "relative", display: "flex", alignItems: "flex-start", gap: 12, paddingBottom: last ? 0 : 12 }}>
       {!last && <div aria-hidden="true" style={{ position: "absolute", left: size / 2 - 1, top: size / 2, bottom: 0, width: 2, background: "#5b6880" }} />}
       <div style={{ position: "relative", zIndex: 1, flexShrink: 0, width: size, height: size, borderRadius: "50%", background: filled ? r.brand.Color1 : light ? "#eef1f5" : "#111a2b", border: `2px solid ${r.current ? GOLD : LINE}`, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
-        {logo ? <img src={logo} alt="" style={{ width: "70%", height: "70%", objectFit: "contain" }} /> : <span style={{ fontSize: 10, fontWeight: 900, color: light ? "#5b6676" : SUB }}>{r.fallback || String(r.name || "?").split(" ").map((w) => w[0]).join("").slice(0, 3)}</span>}
+        {logo ? <img src={logo} alt="" style={{ width: "70%", height: "70%", objectFit: "contain" }} /> : r.state ? <StateShape abbr={r.state} size={Math.round(size * 0.68)} glow={false} /> : <span style={{ fontSize: 10, fontWeight: 900, color: light ? "#5b6676" : SUB }}>{r.fallback || String(r.name || "?").split(" ").map((w) => w[0]).join("").slice(0, 3)}</span>}
       </div>
       <div style={{ flex: 1, minWidth: 0, paddingTop: (size - 18) / 2 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>

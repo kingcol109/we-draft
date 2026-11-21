@@ -422,9 +422,9 @@ export default function Navbar() {
               </NavMenu>
             )}
 
-            <NavMenu label="CFB" to="/cfb" linkStyle={navLink(onSection("/cfb", "/portal", "/portalsim"))}
+            <NavMenu label="CFB" to="/cfb" linkStyle={navLink(onSection("/cfb", "/portal", "/portalsim", "/hs"))}
               width={600} maxHeight={400} eyebrow="College Football" onOpen={() => setCfbOpen(true)}
-              actions={[{ to: "/cfb/stats", label: "Stats" }, { to: "/cfb", label: "All Teams" }]}
+              actions={[{ to: "/cfb/stats", label: "Stats" }, { to: "/hs", label: "High Schools" }, { to: "/cfb", label: "All Teams" }]}
               lead={(close) => (
                 // The Transfer Portal's own row (user, 2026-11-20), pinned
                 // above the team scroll: the live portal and Portal News.
@@ -558,6 +558,7 @@ export default function Navbar() {
               { path: "/community", label: "Community Board" },
               { path: "/cfb", label: "CFB Teams" },
               { path: "/cfb/stats", label: "CFB Stats" },
+              { path: "/hs", label: "High Schools" },
               { path: "/portal", label: "Transfer Portal" },
               { path: "/portal/news", label: "Top Portal Players" },
               { path: "/nfl", label: "NFL Teams" },

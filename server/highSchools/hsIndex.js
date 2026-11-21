@@ -146,7 +146,7 @@ async function buildHsIndex(db, opts = {}) {
   });
   const collegeLogo = new Map(schoolSnap.docs.map((d) => d.data()).filter((x) => x.School && (x.Logo1 || x.LogoDark))
     .map((x) => [x.School, [x.LogoDark || x.Logo1, x.Logo1 || x.LogoDark]]));
-  const playersByKey = new Map(); // key → [[stars, rating, name, pos, school]]
+  const playersByKey = new Map(); // key → [[stars, rating, name, pos, school, We-Draft slug | null]]
   const fbsSchools = new Set(schoolSnap.docs.map((d) => d.data()).filter((x) => FBS_CONFS.has(x.Conference)).map((x) => x.School));
   let fcsSkipped = 0;
 
@@ -167,7 +167,7 @@ async function buildHsIndex(db, opts = {}) {
       collegePlayers += 1;
       bump(key, "cfb", p.pos);
       if (!playersByKey.has(key)) playersByKey.set(key, []);
-      playersByKey.get(key).push([starsById.get(String(p.id)) || 0, Number(p.rating) || 0, `${p.first || ""} ${p.last || ""}`.trim(), p.pos || null, t.school || t.team || null]);
+      playersByKey.get(key).push([starsById.get(String(p.id)) || 0, Number(p.rating) || 0, `${p.first || ""} ${p.last || ""}`.trim(), p.pos || null, t.school || t.team || null, links.get(String(p.id))?.slug || null]);
       if (Array.isArray(p.hl) && p.hl.length === 2) {
         push(samples, key, p.hl);
         if (p.hsc) push(citySamples, cityKey(p.hsc, stateName(p.hss)), p.hl);
@@ -188,10 +188,11 @@ async function buildHsIndex(db, opts = {}) {
   const nflTeams = (await db.collection("nfl").get()).docs.map((d) => ({ abbr: d.id, ...d.data() }));
   const nflAbbrOf = new Map(nflTeams.map((t) => [`${t.City || ""} ${t.Team || ""}`.trim(), t.abbr]));
   const picksByKey = new Map();
-  const addPick = (key, y, p, r, n, pos, tm) => {
+  // slug: the player's We-Draft page (only the latest class still has one).
+  const addPick = (key, y, p, r, n, pos, tm, slug = null) => {
     if (!Number(p)) return;
     if (!picksByKey.has(key)) picksByKey.set(key, []);
-    picksByKey.get(key).push([Number(y), Number(p), Number(r) || null, n || "", pos || null, tm || null]);
+    picksByKey.get(key).push([Number(y), Number(p), Number(r) || null, n || "", pos || null, tm || null, slug || null]);
   };
   let draftTo = FIRST_DRAFT;
   (await db.collection("historical").get()).docs.forEach((d) => {
@@ -227,7 +228,7 @@ async function buildHsIndex(db, opts = {}) {
     const key = keyFor(p.HighSchool, p.State);
     if (!key) return;
     bump(key, "nfl", p.Position);
-    addPick(key, latest, pick.Pick, pick.Round, `${p.First || ""} ${p.Last || ""}`.trim(), p.Position, pick.Team);
+    addPick(key, latest, pick.Pick, pick.Round, `${p.First || ""} ${p.Last || ""}`.trim(), p.Position, pick.Team, p.Slug);
     const page = pageRows.get(key);
     if (page) {
       page.drafted.push({

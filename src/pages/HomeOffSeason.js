@@ -19,6 +19,8 @@ import { fetchRecentPublicEvals } from "../utils/recentEvaluations";
 import { loadWeeklyMockNews } from "../utils/weeklyMockNews";
 import { loadRiserNews } from "../utils/risers";
 import { loadPerfNews } from "../utils/seniorBowlPerf";
+import { loadClassIntroNews } from "../utils/classIntro";
+import { loadEarlyLookNews, EARLY_LOOK } from "../utils/earlyLook";
 import { loadPhotos } from "../utils/profileHub";
 import { useAuth } from "../context/AuthContext";
 import HomeInstagram from "./HomeInstagram";
@@ -140,6 +142,9 @@ export function Latest() {
       loadWeeklyMockNews(6).then((w) => w.map((m) => ({ ...m, kind: "Weekly Mock" }))),
       loadRiserNews(6).then((r) => r.map((m) => ({ ...m, kind: "Draft Risers" }))),
       loadPerfNews(6).then((r) => r.map((m) => ({ ...m, kind: "Senior Bowl" }))),
+      // Both empty until released in Admin → Content.
+      loadClassIntroNews().then((r) => r.map((m) => ({ ...m, kind: "Class of 2030" }))),
+      loadEarlyLookNews(6).then((r) => r.map((m) => ({ ...m, kind: EARLY_LOOK.name }))),
     ]).then((all) => {
       if (!alive) return;
       setItems(all.flat().sort((a, b) => tsMs(b.publishedAt) - tsMs(a.publishedAt)).slice(0, 6));

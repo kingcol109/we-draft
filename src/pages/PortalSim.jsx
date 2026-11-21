@@ -70,6 +70,7 @@ import PortalTutorial from "../components/portalSim/PortalTutorial";
 import { useScrollLock } from "../utils/scrollLock";
 import { CLASSES_PATH, COMMUNITY_PATH, RECENT_PATH, recordPortalResult } from "../utils/portalSim/publicSims";
 import { portalSimYear } from "../utils/portalSim/meta";
+import { useFullscreenHandoff } from "../components/SiteFullscreenButton";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -469,6 +470,9 @@ function LiveSim({ data, run, isMobile, onSettings, onRerun, onOptions, tabs: do
   const pctOf = (n) => `${Math.min(100, (n / Math.max(1, view.budget)) * 100)}%`;
   const fsRef = useRef(null);
   const [fs, toggleFs] = useFullscreen(fsRef);
+  // Opening a run while the whole site is full screen hands it to the run's
+  // own full-screen view (SiteFullscreenButton.jsx).
+  useFullscreenHandoff(fsRef);
   // The head coach's briefing: once, as portal window 1 opens (reopened
   // from the console's "Coach's Briefing").
   const [brief, setBrief] = useState(false);
@@ -570,7 +574,7 @@ function LiveSim({ data, run, isMobile, onSettings, onRerun, onOptions, tabs: do
   }
 
   return (
-    <div ref={fsRef} className={fs ? "wd-sim-scroll" : undefined} style={fs ? { background: BG, padding: 14, overflowY: "auto", height: "calc(100vh / var(--pz, 1))", boxSizing: "border-box", color: INK, fontFamily: "Arial, sans-serif" } : undefined}>
+    <div ref={fsRef} data-fs-target="portal-sim" className={fs ? "wd-sim-scroll" : undefined} style={fs ? { background: BG, padding: 14, overflowY: "auto", height: "calc(100vh / var(--pz, 1))", boxSizing: "border-box", color: INK, fontFamily: "Arial, sans-serif" } : undefined}>
       {/* The New Portal / My Classes / Community tabs, at the very top before the
           run starts and after it closes (user, 2026-11-18). */}
       {(phase === "ready" || phase === "done") && !fs && doneTabs}
@@ -2059,6 +2063,19 @@ function Final({ state, team, run, branding, brand, isMobile, onRerun, onSetting
   const signings = state.log.filter((e) => e.kind === "committed" && e.to === team).map((e) => ({ e, p: state.players[e.pid] }))
     .sort((a, b) => b.p.stars - a.p.stars || b.e.nil - a.e.nil);
   const departed = Object.values(state.players).filter((p) => p.team === team && !(p.status === "roster" || (p.status === "committed" && p.to === team)));
+  // Your board's players (contacted, or offered at any point) and where each
+  // ended up — in your board's order, then stars.
+  const commitOf = new Map(state.log.filter((e) => e.kind === "committed").map((e) => [e.pid, e]));
+  const offeredIds = new Set(state.log.filter((e) => e.kind === "committed" && e.offeredBy?.includes(team)).map((e) => e.pid));
+  const lastWindow = Math.max(0, ...state.log.filter((e) => e.kind === "committed").map((e) => e.w || 0));
+  const boardAt = new Map((state.boardOrder?.[team] || []).map((id, i) => [id, i]));
+  const pursued = Object.values(state.players)
+    .filter((p) => p.team !== team && (p.evals?.[team] != null || p.offers?.[team] || offeredIds.has(p.id)))
+    .sort((a, b) => (boardAt.get(a.id) ?? 999) - (boardAt.get(b.id) ?? 999) || b.stars - a.stars)
+    .map((p) => ({ p, e: commitOf.get(p.id) || null }));
+  const pursuedMine = pursued.filter(({ e }) => e?.to === team).length;
+  const pursuedAway = pursued.filter(({ e }) => e && e.to !== team);
+  const pursuedOpen = pursued.filter(({ e }) => !e);
   const toNfl = departed.filter((p) => p.status === "declared").length;
   const kept = state.log.filter((e) => e.kind === "retained" && e.team === team).length;
   const b = brand(team) || {};
@@ -2164,6 +2181,25 @@ function Final({ state, team, run, branding, brand, isMobile, onRerun, onSetting
           </div>
         )}
       </Section>
+
+      {/* Your board, how it ended (user 2026-11-21): everyone you contacted
+          or offered — the last window's moves never got a Results screen,
+          so they land here, flagged. Signed with you sits in the class
+          above; the rest: signed elsewhere, then went unsigned. */}
+      {pursued.length > 0 && (
+        <Section title={`Your board — how it ended (${pursued.length})`}>
+          <div style={{ padding: "8px 16px", borderBottom: `1px solid ${LINE}`, fontSize: 12, fontWeight: 800, color: SUB }}>
+            {[`${pursuedMine} signed with you`, `${pursuedAway.length} signed elsewhere`, `${pursuedOpen.length} went unsigned`].join(" · ")}
+          </div>
+          {[...pursuedAway, ...pursuedOpen].map(({ p, e }) => (
+            <PlayerRow key={p.id} p={p} brand={brand} to={e ? e.to : null} isMobile={isMobile}
+              tag={e && e.w === lastWindow ? <span style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.08em", color: "#0b1626", background: GOLD, borderRadius: 4, padding: "2px 6px", whiteSpace: "nowrap" }}>FINAL WINDOW</span> : null}
+              right={<span style={{ fontSize: 12, fontWeight: 800, color: e ? (e.to === p.team ? SUB : "#ff8a7a") : SUB, textAlign: "right", flexShrink: 0 }}>
+                {e ? `${e.to === p.team ? "Returned to" : "Signed with"} ${state.teams[e.to]?.school || e.to} · ${money(e.nil)}` : "Went unsigned"}
+              </span>} />
+          ))}
+        </Section>
+      )}
 
       {/* Around the country: every team's verdict. */}
       <Section title="Around the country">

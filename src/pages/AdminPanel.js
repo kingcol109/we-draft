@@ -32,8 +32,10 @@ import AdminPortalTargets from "../components/AdminPortalTargets";
 import AdminPortalPages from "../components/AdminPortalPages";
 import AdminPortalManual from "../components/AdminPortalManual";
 import AdminPortalNews from "../components/AdminPortalNews";
-import AdminEligibility, { classChange } from "../components/AdminEligibility";
-import { activePortalSeason, currentDraftClass, classTag, firstClassFor } from "../utils/eligibility";
+import AdminEligibility from "../components/AdminEligibility";
+import { currentDraftClass, classTag, firstClassFor } from "../utils/eligibility";
+import { enterPortal, withdrawPortal, resolvePortal, applyMove } from "../utils/portalMoves";
+import AdminGo, { useAdminMobile } from "../components/AdminGo";
 import AdminSubPositions from "../components/AdminSubPositions";
 import AdminProspectRoles from "../components/AdminProspectRoles";
 import AdminStreamManager from "../components/AdminStreamManager";
@@ -49,6 +51,10 @@ import AdminProspectResearch from "../components/AdminProspectResearch";
 import AdminPhotos from "../components/AdminPhotos";
 import AdminRisers from "../components/AdminRisers";
 import AdminSeniorBowlPerf from "../components/AdminSeniorBowlPerf";
+import AdminClassIntro from "../components/AdminClassIntro";
+import AdminEarlyLook from "../components/AdminEarlyLook";
+import AdminNflTargets from "../components/AdminNflTargets";
+import { EARLY_LOOK } from "../utils/earlyLook";
 import AdminCombine from "../components/AdminCombine";
 import AdminSideGraphics from "../components/AdminSideGraphics";
 import AdminProDayIcons from "../components/AdminProDayIcons";
@@ -373,6 +379,9 @@ const PLAYER_GROUPS = [
 ];
 
 const SECTIONS = [
+  // Go: the quick jobs on a phone (components/AdminGo.jsx) — mobile only,
+  // and what /admin opens to there.
+  { key: "go", label: "Go", icon: "⚡", ready: true, mobileOnly: true },
   { key: "players", label: "Players", icon: "🏈", ready: true },
   { key: "videos", label: "Videos", icon: "🎬", ready: true },
   { key: "content", label: "Content", icon: "📝", ready: true },
@@ -403,15 +412,30 @@ const CONTENT_SECTION_TABS = [
   { key: "branding", label: "Branding" },
   { key: "calendar", label: "Content Calendar" },
   { key: "photos", label: "Photos" },
-  { key: "risers", label: "Rising Page" },
-  // Senior Bowl Top Performers — WX content (components/AdminSeniorBowlPerf.jsx).
-  { key: "seniorbowl", label: "Senior Bowl" },
-  // All-time Combine leader graphics (components/AdminCombine.jsx).
-  { key: "combine", label: "Combine" },
+  // WX content, all in one tab (user, 2026-11-21) — new WX pages go in
+  // WX_TABS below, not here. Mock Draft and the rest stay as they are.
+  { key: "wx", label: "WX" },
   { key: "instagram", label: "Instagram" },
   { key: "instagramAnalytics", label: "Instagram Analytics" },
   { key: "x", label: "X Posts" },
 ];
+// Content → WX: the WX pages' admin tabs (see the wx-content notes:
+// recurring / editioned list pages). Add new WX content here.
+const WX_TABS = [
+  { key: "risers", label: "Rising Page" },
+  // Senior Bowl Top Performers (components/AdminSeniorBowlPerf.jsx).
+  { key: "seniorbowl", label: "Senior Bowl" },
+  // "Meet the Class of 2030" (components/AdminClassIntro.jsx) and the high
+  // school prospects page (components/AdminEarlyLook.jsx — working name).
+  { key: "classintro", label: "Class of 2030" },
+  { key: "earlylook", label: EARLY_LOOK.name },
+  // NFL teams' curated 2027 draft targets — the team pages' Targets tab
+  // (components/AdminNflTargets.jsx, utils/nflTargets.js).
+  { key: "nfltargets", label: "NFL Targets" },
+  // All-time Combine leader graphics (components/AdminCombine.jsx).
+  { key: "combine", label: "Combine" },
+];
+const isWxTab = (k) => WX_TABS.some((t) => t.key === k);
 
 // Old ?section= keys, now tabs: [section, tab]. YouTube Analytics' sign-in
 // (api/youtube-analytics.js) still returns to ?section=youtube.
@@ -422,10 +446,14 @@ const MOVED_SECTIONS = {
   // The thumbnail editor (King Cold Sports' edit sign-in returns here).
   thumbnail: ["videos", "thumbnail"],
   ...Object.fromEntries(CONTENT_SECTION_TABS.map((t) => [t.key, ["content", t.key]])),
+  // A WX page's own key (?section=risers) opens Content → WX on it.
+  ...Object.fromEntries(WX_TABS.map((t) => [t.key, ["content", t.key]])),
 };
 
 function ContentSection({ initialTab }) {
-  const [tab, setTab] = useState(initialTab || "nfl");
+  // A WX page's key opens the WX tab on that page.
+  const [tab, setTab] = useState(isWxTab(initialTab) ? "wx" : initialTab || "nfl");
+  const [wxTab, setWxTab] = useState(isWxTab(initialTab) ? initialTab : WX_TABS[0].key);
   // A record to open in the tab it's being sent to (Content Calendar, Send to
   // X): { tab, id } or, for a new X post, { tab, date }. Fresh each time, so
   // opening the same one twice still opens it.
@@ -457,9 +485,26 @@ function ContentSection({ initialTab }) {
       {tab === "branding" && <BrandingSection />}
       {tab === "calendar" && <ContentCalendarManager onOpenPost={(platform, what) => openIn(platform === "x" ? "x" : "instagram", what)} />}
       {tab === "photos" && <AdminPhotos />}
-      {tab === "risers" && <AdminRisers />}
-      {tab === "seniorbowl" && <AdminSeniorBowlPerf />}
-      {tab === "combine" && <AdminCombine />}
+      {tab === "wx" && (
+        <>
+          {/* The WX pages, a second row of smaller tabs. */}
+          <div style={{ display: "flex", gap: "6px", marginBottom: "14px", flexWrap: "wrap", paddingBottom: "12px", borderBottom: "1px solid #e3e8ef" }}>
+            {WX_TABS.map((t) => (
+              <button key={t.key} type="button" onClick={() => setWxTab(t.key)} style={{
+                padding: "6px 14px", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em",
+                border: "2px solid " + GOLD, borderRadius: "999px", cursor: "pointer",
+                background: wxTab === t.key ? GOLD : "#fff", color: wxTab === t.key ? "#fff" : "#9a5d00",
+              }}>{t.label}</button>
+            ))}
+          </div>
+          {wxTab === "risers" && <AdminRisers />}
+          {wxTab === "seniorbowl" && <AdminSeniorBowlPerf />}
+          {wxTab === "classintro" && <AdminClassIntro />}
+          {wxTab === "earlylook" && <AdminEarlyLook />}
+          {wxTab === "nfltargets" && <AdminNflTargets />}
+          {wxTab === "combine" && <AdminCombine />}
+        </>
+      )}
       {tab === "instagram" && <AdminInstagram openPostId={opening?.tab === "instagram" ? opening.id : null} onOpenInX={(id) => openIn("x", { id })} />}
       {tab === "instagramAnalytics" && <AdminInstagramAnalytics />}
       {tab === "x" && <AdminX open={opening?.tab === "x" ? opening : null} />}
@@ -471,12 +516,13 @@ function ContentSection({ initialTab }) {
 // tabs (UserProfile.js): an underline on the open one, scrolling sideways
 // when they don't fit. Layout only — same sections, same setActive.
 function AdminTabs({ active, setActive, badgeCounts }) {
+  const isMobile = useAdminMobile();
   return (
     <>
       {/* Every section visible: wraps to a second row on wide screens
           (13 sections don't fit one); phones scroll sideways instead. */}
       <div role="tablist" className="wd-admin-tabs" style={{ position: "relative", display: "flex", columnGap: "24px", rowGap: "2px", marginTop: "18px", scrollbarWidth: "none" }}>
-        {SECTIONS.map((s) => {
+        {SECTIONS.filter((s) => !s.mobileOnly || isMobile || active === s.key).map((s) => {
           const isActive = active === s.key;
           const badge = badgeCounts?.[s.key] || 0;
           return (
@@ -1293,28 +1339,12 @@ function PlayerDataSection() {
     setSaving(true);
     setSaveMessage("");
     try {
-      const fields = {
-        InPortal: true,
-        PortalEnteredAt: serverTimestamp(),
-        // Snapshotted now (not read back off School later) so a stray edit
-        // to School while a player sits in the portal can't corrupt which
-        // school Resolve later credits as where they transferred from.
-        PortalOriginalSchool: selectedPlayer.School || formState.School || "",
-        // The last season played there — the season before the portal's
-        // (utils/eligibility.js activePortalSeason: Jan 2027 is the 2027
-        // portal, so 2026).
-        PortalSeasonYear: String(activePortalSeason() - 1),
-        // The portal cycle (the season it feeds) — the public Transfer
-        // Portal (pages/TransferPortal.jsx) lists a cycle's entries, commits
-        // and withdrawals by it.
-        PortalCycle: String(activePortalSeason()),
-      };
-      // A new cycle starts clean: no commit / withdrawal from an older one.
-      await updateDoc(doc(db, "players", selectedPlayer.id), { ...fields, PortalCommittedAt: deleteField(), PortalWithdrawnAt: deleteField() });
-      const strip = (p) => { const next = { ...p, ...fields }; delete next.PortalCommittedAt; delete next.PortalWithdrawnAt; return next; };
-      setAllPlayers((prev) => prev.map((p) => (p.id === selectedPlayer.id ? strip(p) : p)));
-      setSelectedPlayer((prev) => strip(prev));
-      setSaveMessage("Moved into the Transfer Portal.");
+      // The writes: utils/portalMoves.js (shared with Admin → Go).
+      const move = enterPortal(selectedPlayer, formState.School);
+      await updateDoc(doc(db, "players", selectedPlayer.id), move.write);
+      setAllPlayers((prev) => prev.map((p) => (p.id === selectedPlayer.id ? applyMove(p, move) : p)));
+      setSelectedPlayer((prev) => applyMove(prev, move));
+      setSaveMessage(move.message);
     } catch (e) {
       console.error("Admin enter-portal error:", e);
       setSaveMessage("Failed to update — check console.");
@@ -1377,23 +1407,11 @@ function PlayerDataSection() {
     setSaving(true);
     setSaveMessage("");
     try {
-      const fields = {
-        InPortal: false,
-        PortalWithdrawnAt: serverTimestamp(),
-        PortalCycle: selectedPlayer.PortalCycle || String(activePortalSeason()),
-        PortalOriginalSchool: deleteField(),
-        PortalSeasonYear: deleteField(),
-        updatedAt: serverTimestamp(),
-      };
-      await updateDoc(doc(db, "players", selectedPlayer.id), fields);
-      const local = (p) => {
-        const next = { ...p, InPortal: false, PortalWithdrawnAt: new Date(), PortalCycle: fields.PortalCycle };
-        delete next.PortalOriginalSchool; delete next.PortalSeasonYear;
-        return next;
-      };
-      setAllPlayers((prev) => prev.map((p) => (p.id === selectedPlayer.id ? local(p) : p)));
-      setSelectedPlayer((prev) => local(prev));
-      setSaveMessage(`Withdrew from the portal — stays at ${selectedPlayer.School || "their school"}.`);
+      const move = withdrawPortal(selectedPlayer);
+      await updateDoc(doc(db, "players", selectedPlayer.id), move.write);
+      setAllPlayers((prev) => prev.map((p) => (p.id === selectedPlayer.id ? applyMove(p, move) : p)));
+      setSelectedPlayer((prev) => applyMove(prev, move));
+      setSaveMessage(move.message);
     } catch (e) {
       console.error("Admin withdraw-portal error:", e);
       setSaveMessage("Failed to update — check console.");
@@ -1459,49 +1477,15 @@ function PlayerDataSection() {
     setSaving(true);
     setSaveMessage("");
     try {
-      const bumpToNextClass = selectedPlayer.Eligible === currentDraftClass();
-      const move = bumpToNextClass ? classChange(selectedPlayer, String(+selectedPlayer.Eligible + 1), "transfer") : null;
-      const fields = {
-        School: newSchool,
-        PriorSchool: selectedPlayer.PortalOriginalSchool || selectedPlayer.School || "",
-        PriorSchoolYear: selectedPlayer.PortalSeasonYear || String(activePortalSeason() - 1),
-        InPortal: false,
-        // PortalEnteredAt stays and PortalCommittedAt is stamped — the
-        // public Transfer Portal lists this cycle's committed transfers too.
-        PortalCommittedAt: serverTimestamp(),
-        PortalCycle: selectedPlayer.PortalCycle || String(activePortalSeason()),
-        PortalOriginalSchool: deleteField(),
-        PortalSeasonYear: deleteField(),
-        updatedAt: serverTimestamp(),
-        ...(move ? move.fields : {}),
-      };
-      await updateDoc(doc(db, "players", selectedPlayer.id), fields);
-      const localFields = {
-        School: fields.School, PriorSchool: fields.PriorSchool, PriorSchoolYear: fields.PriorSchoolYear, InPortal: false,
-        ...(move ? move.local : {}),
-      };
-      setAllPlayers((prev) => prev.map((p) => {
-        if (p.id !== selectedPlayer.id) return p;
-        const next = { ...p, ...localFields };
-        delete next.PortalOriginalSchool; delete next.PortalSeasonYear;
-        (move?.removed || []).forEach((k) => delete next[k]);
-        return next;
-      }));
-      setSelectedPlayer((prev) => {
-        const next = { ...prev, ...localFields };
-        delete next.PortalOriginalSchool; delete next.PortalSeasonYear;
-        (move?.removed || []).forEach((k) => delete next[k]);
-        return next;
-      });
+      const move = resolvePortal(selectedPlayer, newSchool);
+      await updateDoc(doc(db, "players", selectedPlayer.id), move.write);
+      setAllPlayers((prev) => prev.map((p) => (p.id === selectedPlayer.id ? applyMove(p, move) : p)));
+      setSelectedPlayer((prev) => applyMove(prev, move));
       // Keeps the general form's own School/Eligible fields (and anything
       // relying on formState, like the slug regenerate check) in sync too.
-      setFormState((prev) => (prev ? { ...prev, School: newSchool, ...(move ? { Eligible: move.local.Eligible } : {}) } : prev));
+      setFormState((prev) => (prev ? { ...prev, School: newSchool, Eligible: move.eligible } : prev));
       setPortalNewSchool("");
-      setSaveMessage(
-        bumpToNextClass
-          ? `Committed to ${newSchool} — moved to the ${move.local.Eligible} class. Slug updates automatically Feb 1.`
-          : `Committed to ${newSchool}.`
-      );
+      setSaveMessage(move.message);
     } catch (e) {
       console.error("Admin resolve-portal error:", e);
       setSaveMessage("Failed to update — check console.");
@@ -13515,11 +13499,10 @@ function HighSchoolSchoolsPane() {
     return schools.filter((h) => {
       if (selectedStates.length > 0 && !selectedStates.includes(h.State)) return false;
       if (searchQuery.trim()) {
-        const q = searchQuery.trim().toLowerCase();
-        const matches =
-          (h.Name || "").toLowerCase().includes(q) ||
-          (h.City || "").toLowerCase().includes(q) ||
-          (h.Mascot || "").toLowerCase().includes(q);
+        // Punctuation/spacing-blind, so "st edward" finds "St. Edward".
+        const norm = (x) => String(x || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+        const q = norm(searchQuery);
+        const matches = [h.Name, h.City, h.Mascot, ...(h.CFBDNames || [])].some((x) => norm(x).includes(q));
         if (!matches) return false;
       }
       return true;
@@ -15424,7 +15407,9 @@ export default function AdminPanel() {
   const [opened] = useState(() => {
     const k = new URLSearchParams(window.location.search).get("section");
     if (MOVED_SECTIONS[k]) return { section: MOVED_SECTIONS[k][0], tab: MOVED_SECTIONS[k][1] };
-    return { section: SECTIONS.some((s) => s.key === k) ? k : "players", tab: null };
+    // No section asked for: a phone opens Go, anything wider Players.
+    const fallback = typeof window !== "undefined" && window.innerWidth < 768 ? "go" : "players";
+    return { section: SECTIONS.some((s) => s.key === k) ? k : fallback, tab: null };
   });
   const [activeSection, setActiveSection] = useState(opened.section);
   const [unreadRequestCount, setUnreadRequestCount] = useState(0);
@@ -15476,6 +15461,7 @@ export default function AdminPanel() {
 
         <div style={{ marginTop: "22px" }}>
           <div>
+            {activeSection === "go" && <AdminGo />}
             {activeSection === "players" && <PlayerDataSection />}
             {activeSection === "videos" && <VideosSection initialTab={opened.section === "videos" ? opened.tab : null} />}
             {activeSection === "content" && <ContentSection initialTab={opened.section === "content" ? opened.tab : null} />}

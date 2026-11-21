@@ -10,7 +10,9 @@ import LoadingSpinner from "../components/LoadingSpinner";
 import MarginAds from "../components/MarginAds";
 import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
 import DraftArchiveList, { useSchoolLogos } from "../components/DraftArchiveList";
-import ProjectedPicks from "../components/ProjectedPicks";
+import TeamTargetsWX from "../components/TeamTargetsWX";
+import { useIsAdmin } from "../utils/prospectYears";
+import { NFL_TARGETS_DOC, TARGETS_YEAR, byOrder, draftCardImageUrl } from "../utils/nflTargets";
 import NFLTeamRail from "../components/NFLTeamRail";
 import DraftOrderRail from "../components/DraftOrderRail";
 import DraftNowButton from "../components/DraftNowButton";
@@ -31,7 +33,7 @@ const BLUE = "#0055a5";
 
 // Page titles — the main page's is its search title.
 const TEAM_TAB_TITLES = {
-  targets: (t) => `${t} Draft Targets and Projected Picks`,
+  targets: (t) => `${t} ${TARGETS_YEAR} Draft Targets & Projected Picks`,
   picks: (t) => `${t} Draft Order and ${ORDER_YEAR} Picks`,
   staff: (t) => `${t} Coaching Staff and Front Office`,
   depth: (t) => `${t} Depth Chart`,
@@ -40,13 +42,15 @@ const TEAM_TAB_TITLES = {
 
 // Meta description: as many of the staff's top fits in the next class
 // (_teamTargets) as fit in ~160 characters.
-function teamDescription(teamName, nickname, year, targets) {
+// curated: the names are We-Draft.com's published list (utils/nflTargets.js),
+// not computed fits.
+function teamDescription(teamName, nickname, year, targets, curated = false) {
   const lead = `${teamName} draft targets and projected picks.`;
   const label = (t) => `${t.F} ${t.L} (${[t.S, t.P].filter(Boolean).join(" ")})`;
   for (let n = Math.min(3, targets.length); n > 0; n--) {
     const names = targets.slice(0, n).map(label);
     const list = n === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names[n - 1]}`;
-    const text = `${lead} Top ${year} fits for the ${nickname}: ${list}.`;
+    const text = curated ? `${lead} Our top ${year} targets for the ${nickname}: ${list}.` : `${lead} Top ${year} fits for the ${nickname}: ${list}.`;
     if (text.length <= 160) return text;
   }
   return `${lead} The ${year} prospects who fit the ${nickname}' staff, every pick they own, and their full draft history.`;
@@ -390,6 +394,18 @@ export default function NFLTeamPage() {
     fetchTeamTargets(teamKey, staff).then((d) => { if (!cancelled) setTeamTargets(d); }).catch(() => {});
     return () => { cancelled = true; };
   }, [teamKey, staff, staffLoading]);
+  // The curated 2027 list (WX — utils/nflTargets.js): public once
+  // published; before that only an admin can read it (a preview).
+  const { isAdmin, authReady } = useIsAdmin();
+  const [curated, setCurated] = useState(null);
+  useEffect(() => {
+    if (!teamKey || !authReady) return undefined;
+    let cancelled = false;
+    setCurated(null);
+    getDoc(doc(db, NFL_TARGETS_DOC, teamKey)).then((s) => { if (!cancelled) setCurated(s.exists() ? s.data() : null); }).catch(() => { if (!cancelled) setCurated(null); });
+    return () => { cancelled = true; };
+  }, [teamKey, authReady, isAdmin]);
+  const curatedLive = !!curated?.published && (curated.featured?.length || curated.list?.length);
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
   const [showRail, setShowRail] = useState(() => typeof window !== "undefined" && railFits());
   // Mobile "stuck loading forever" watchdog — see the hook's own comment.
@@ -663,9 +679,11 @@ export default function NFLTeamPage() {
   const c1 = team.Color1 || BLUE;
   const c2 = team.Color2 || GOLD;
   const teamName = `${team.City} ${team.Team}`.trim();
-  const targetsYear = teamTargets?.eligible || "2027";
-  // Top five staff fits in the next class, two per position at most.
-  const targets = (() => {
+  const targetsYear = curatedLive ? TARGETS_YEAR : teamTargets?.eligible || "2027";
+  // The published list's first five, else the top five staff fits in the
+  // next class (two per position at most).
+  const targets = curatedLive ? [...byOrder(curated.featured), ...byOrder(curated.list)].slice(0, 5)
+    .map((p) => ({ F: p.first, L: p.last, S: p.school, P: p.pos, sl: p.slug })) : (() => {
     const perPos = {};
     return (teamTargets?.rows || []).filter((t) => {
       if (t.E !== targetsYear || (perPos[t.P] || 0) >= 2) return false;
@@ -678,8 +696,12 @@ export default function NFLTeamPage() {
   // tab's summary sentence for the next draft.
   const metaDescription = tab === "picks" && draftCapital
     ? capitalSentence(teamName, draftCapital)
-    : teamDescription(teamName, team.Team, targetsYear, targets);
+    : teamDescription(teamName, team.Team, targetsYear, targets, curatedLive);
   const pageUrl = `https://we-draft.com/nfl/${teamId}${TAB_PATH[tab]}`;
+  // The Targets page's link-preview image: the first featured player's draft
+  // card (api/draft-card.js) once the list is published.
+  const cardLead = tab === "targets" && curatedLive ? byOrder(curated.featured).find((p) => p.slug) : null;
+  const shareImage = cardLead ? draftCardImageUrl(cardLead.slug, TARGETS_YEAR, teamKey, { v: curated.updatedAt?.toMillis?.() || "" }) : "";
   // LogoDark/WordmarkDark are the dark-background-safe branding variants
   // (see AdminPanel.js's branding manager) — read straight and better
   // against the hero's saturated team-color gradient than the plain Logo1
@@ -712,7 +734,11 @@ export default function NFLTeamPage() {
         <meta property="og:description" content={metaDescription} />
         <meta property="og:url" content={pageUrl} />
         <meta property="og:site_name" content="We-Draft.com" />
-        <meta name="twitter:card" content="summary" />
+        {shareImage && <meta property="og:image" content={shareImage} />}
+        {shareImage && <meta property="og:image:width" content="1080" />}
+        {shareImage && <meta property="og:image:height" content="1350" />}
+        <meta name="twitter:card" content={shareImage ? "summary_large_image" : "summary"} />
+        {shareImage && <meta name="twitter:image" content={shareImage} />}
         <meta name="twitter:title" content={pageTitle} />
         <meta name="twitter:description" content={metaDescription} />
       </Helmet>
@@ -823,8 +849,9 @@ export default function NFLTeamPage() {
         </div>
 
         {/* ===== IN THE NEWS ===== */}
-        {/* In the right rail when there is one. */}
-        {!rail && <TeamNews teamKey={teamKey} c1={c1} c2={c2} isMobile={isMobile} />}
+        {/* In the right rail when there is one; on a phone, under the tab's
+            content instead (user — the targets come first). */}
+        {!rail && !isMobile && <TeamNews teamKey={teamKey} c1={c1} c2={c2} isMobile={isMobile} />}
 
         {/* ===== TABS ===== */}
         <div ref={tabsRef} role="tablist" style={{ scrollMarginTop: 80, display: "flex", gap: isMobile ? 6 : 8, marginBottom: isMobile ? 18 : 24, borderBottom: `3px solid ${tint(c1, "1f")}` }}>
@@ -902,7 +929,8 @@ export default function NFLTeamPage() {
         {tab === "targets" && (
           <div style={{ marginBottom: 32 }}>
             <SectionTitle color1={c1} color2={c2} isMobile={isMobile}>Draft Targets</SectionTitle>
-            <ProjectedPicks staff={staff} staffLoading={staffLoading} teamKey={teamKey} color1={c1} color2={c2} isMobile={isMobile} />
+            <TeamTargetsWX teamKey={teamKey} teamName={teamName} staff={staff} staffLoading={staffLoading} curated={curated} targets={teamTargets}
+              isAdmin={isAdmin} color1={c1} color2={c2} isMobile={isMobile} />
           </div>
         )}
 
@@ -946,6 +974,9 @@ export default function NFLTeamPage() {
         </div>
         </>}
 
+        {/* ===== IN THE NEWS (phones) — under the tab's content ===== */}
+        {isMobile && <TeamNews teamKey={teamKey} c1={c1} c2={c2} isMobile={isMobile} />}
+
         {/* Draft targets in words — visible but quiet, at the bottom of the
             Targets tab (same approach as StaffPage.jsx's): names the staff's
             top fits in the next class so searches pairing the team with a
@@ -957,8 +988,10 @@ export default function NFLTeamPage() {
               {teamName} {targetsYear} draft targets
             </h2>
             <p style={{ fontSize: 14, fontWeight: 600, color: "#4a5466", lineHeight: 1.65, margin: 0, fontFamily: "Arial, sans-serif" }}>
-              Based on the players the {team.Team}&apos; general manager, head coach and coordinators have drafted, the {targetsYear} prospects
-              who best fit the {teamName}&apos; draft history are{" "}
+              {curatedLive
+                ? <>We-Draft.com&apos;s top {targetsYear} draft targets for the {teamName} are{" "}</>
+                : <>Based on the players the {team.Team}&apos; general manager, head coach and coordinators have drafted, the {targetsYear} prospects
+              who best fit the {teamName}&apos; draft history are{" "}</>}
               {targets.map((t, i) => (
                 <Fragment key={t.sl}>
                   {i > 0 && (i < targets.length - 1 ? ", " : targets.length === 2 ? " and " : ", and ")}

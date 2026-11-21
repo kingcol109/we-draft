@@ -43,6 +43,9 @@ const BODY = "Arial, sans-serif";
 export const SIM_CSS = `
   [data-sim-fs]:fullscreen { background: #070d18; overflow: hidden; }
   [data-sim-fs]:fullscreen [data-sim-col] { max-width: none !important; padding: 0 !important; margin: 0 !important; }
+  /* A finished run's results stay fullscreen and scroll there, laid out like the page (pages/DraftSim.jsx FinalResults). */
+  [data-sim-fs]:fullscreen .wd-sim-final { height: calc(100vh / var(--pz, 1)); overflow-y: auto; box-sizing: border-box; }
+  [data-sim-fs]:fullscreen .wd-sim-final [data-sim-col] { max-width: 1200px !important; margin: 0 auto !important; padding: 16px 20px 40px !important; }
   .wd-fit-school { display: none; }
   @container (min-width: 300px) { .wd-fit-school { display: block; } }
   @keyframes wdSimFlip { from { opacity: 0; transform: perspective(600px) rotateX(-70deg); } to { opacity: 1; transform: none; } }

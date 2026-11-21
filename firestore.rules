@@ -1011,6 +1011,28 @@ service cloud.firestore {
       allow read: if true;
       allow write: if isAdmin();
     }
+    // "Meet the Class of 2030" (/class-of-2030, utils/classIntro.js) and the
+    // high school prospects page (/early-look, utils/earlyLook.js) with its
+    // dated editions. Private until the admin releases them (live == true) —
+    // unannounced picks and write-ups stay unreadable until then.
+    match /classIntro/{year} {
+      allow read: if isAdmin() || resource.data.live == true;
+      allow write: if isAdmin();
+    }
+    match /earlyLook/{id} {
+      allow read: if isAdmin() || resource.data.live == true;
+      allow write: if isAdmin();
+    }
+    match /earlyLookEditions/{date} {
+      allow read: if isAdmin() || resource.data.live == true;
+      allow write: if isAdmin();
+    }
+    // NFL teams' curated draft targets (/nfl/{team} Targets tab,
+    // utils/nflTargets.js) — private until the admin publishes a team's list.
+    match /nflTargets/{team} {
+      allow read: if isAdmin() || resource.data.published == true;
+      allow write: if isAdmin();
+    }
     // Portal News (/portal/news, utils/portalNews.js) — one doc, the
     // admin's picks: names, schools, (public CFBD) stats and write-ups.
     match /portalNews/{doc} {

@@ -72,6 +72,12 @@ const load = (rel) => import(pathToFileURL(path.join(SRC, rel)).href);
 
 const SEEDS = 8;
 const TARGETS_PER_TEAM = 20;
+// Hometown kids (user, 2026-11-21): a target whose home is near campus
+// scores extra — the full bonus within HOME.full miles, fading to nothing at
+// HOME.zero — and the bonus also lets him in a little under his commit bar
+// (home is a pull the A–F grade only partly captures).
+const HOME = { full: 100, zero: 400, bonus: 0.35, barRelief: 0.25 };
+const homeBoost = (miles) => (miles == null ? 0 : HOME.bonus * Math.max(0, Math.min(1, (HOME.zero - miles) / (HOME.zero - HOME.full))));
 const BOARD_CHUNK = 2500;
 // The fates on a roster row:
 //   r returning   on the projected 2027 roster (stayed)
@@ -352,6 +358,29 @@ async function buildPortalPages(db, { seeds = SEEDS, dry = false, log = () => {}
 
   // ── Write ──
   const simTargets = {}; // slug → the sim's suggestions (admin only)
+  // Admin targets to take off (user, 2026-11-21: "as teams fill positions"):
+  // slug → { [pid]: { why, by? } } — he committed or withdrew, or the
+  // team's need at his position is gone (the sim sees it Set, with no want
+  // left there) — usually because it signed someone; `by` names who.
+  const drops = {};
+  const adminTargets = (await db.collection("config").doc("portalTargets").get()).data()?.teams || {};
+  const dropsFor = (slug, needs, wants) => {
+    const out = {};
+    Object.keys(adminTargets[slug] || {}).forEach((pid) => {
+      const m = moveOf.get(pid);
+      if (m?.status === "c") {
+        out[pid] = { why: slugOfSchool(m.to) === slug ? `Committed to ${bySlug[slug].school}` : `Committed to ${m.to || "another school"}` };
+        return;
+      }
+      if (m?.status === "w") { out[pid] = { why: "Withdrew from the portal" }; return; }
+      const p = byId.get(pid);
+      if (!p) return;
+      if ((needs[p.pos] || 0) >= 0.5 || wants.some((w) => w.pos === p.pos)) return;
+      const by = (roster[slug] || []).filter((r) => r.f === "a" && r.pos === p.pos).map((r) => r.n);
+      out[pid] = { why: `${p.pos} is set${by.length ? "" : " — no open need there"}`, ...(by.length ? { by } : {}) };
+    });
+    return out;
+  };
   const teamDocs = Object.keys(fbs).filter((slug) => bySlug[slug]).map((slug) => {
     const needs = Object.fromEntries(Object.entries(needSum[slug] || {}).map(([k, v]) => [k, Math.round((v / seeds) * 100) / 100]));
     const wants = Object.entries(wantCount[slug] || {})
@@ -361,7 +390,7 @@ async function buildPortalPages(db, { seeds = SEEDS, dry = false, log = () => {}
     const scored = Object.entries(targetSum[slug] || {})
       .map(([id, t]) => {
         const [kind, fit] = Object.entries(t.by).sort((x, y) => y[1] - x[1])[0][0].split("|");
-        return { id, kind, fit, score: t.score / seeds };
+        return { id, kind, fit, score: t.score / seeds, mi: t.mi ?? null };
       })
       .sort((a, b) => b.score - a.score);
     const toRow = (t) => {
@@ -371,6 +400,7 @@ async function buildPortalPages(db, { seeds = SEEDS, dry = false, log = () => {}
           id: p.id, n: p.name, pos: p.pos, sub: p.sub || "", from: bySlug[p.team]?.school || "", s: p.stars, e: p.elig, ht: p.ht || null, wt: p.wt || null, st: p.state || "",
           slug: slugOfWd(p.wdId), live: m?.status === "u" ? 1 : 0,
           score: Math.round(t.score * 1000) / 1000, kind: t.kind, fit: t.fit,
+          ...(t.mi != null && t.mi <= HOME.zero ? { mi: t.mi } : {}),
         };
     };
     // Public: only players actually in the portal (user, 2026-11-17 —
@@ -379,6 +409,7 @@ async function buildPortalPages(db, { seeds = SEEDS, dry = false, log = () => {}
     // all, goes to the admin-only doc below.
     const targets = scored.filter((t) => moveOf.get(t.id)?.status === "u").slice(0, 40).map(toRow);
     simTargets[slug] = scored.slice(0, TARGETS_PER_TEAM).map(toRow);
+    drops[slug] = dropsFor(slug, needs, wants);
     return {
       slug, data: {
         slug, school: bySlug[slug].school, season, seeds, builtAt: FieldValue.serverTimestamp(),
@@ -424,12 +455,12 @@ async function buildPortalPages(db, { seeds = SEEDS, dry = false, log = () => {}
     projectedEntrants: Object.values(entered).filter((n) => n >= seeds / 2).length, maxTeamDocKB: Math.round(Math.max(0, ...sizes) / 1024),
     boardKB: Math.round(JSON.stringify(boardDocs[0].data).length / 1024), statPlayers: statIds.length, statsKB: Math.round(JSON.stringify(statDocs[0].data).length / 1024), durationMs: Date.now() - startedAt, dry,
   };
-  if (dry) return { ...out, sample: { ...teamDocs.find((t) => t.slug === "ohio-state")?.data, targets: simTargets["ohio-state"] } };
+  if (dry) return { ...out, sample: { ...teamDocs.find((t) => t.slug === "ohio-state")?.data, targets: simTargets["ohio-state"], drops: drops["ohio-state"] } };
 
   const prevStats = (await db.collection("compSnapshots").doc("_portal_stats").get()).data();
   // The sim's suggestions, projected entrants included: admin only
   // (offseason is admin-read — the Targets tab reads it).
-  await db.collection("offseason").doc("portalSimTargets").set({ season, builtAt: FieldValue.serverTimestamp(), teams: simTargets });
+  await db.collection("offseason").doc("portalSimTargets").set({ season, builtAt: FieldValue.serverTimestamp(), teams: simTargets, drops });
   const writes = [...teamDocs.map((t) => [`_portal_${t.slug}`, t.data]), ...boardDocs.map((b) => [b.id, b.data]), ...statDocs.map((b) => [b.id, b.data])];
   for (let i = 0; i < writes.length; i += 100) {
     const batch = db.batch();
@@ -506,10 +537,12 @@ function scoreTargets(st, { E, M, needSum, wantCount, targetSum }) {
         const fit = E.fitAt(st, slug, p);
         const base = M.schoolGrade(p, team, { nil: offer.nil, pt: fit.pt }, cfg);
         const overall = M.overallGrade(base, M.neutralProcess(cfg), cfg);
-        const ratio = overall / Math.max(1e-6, bar(p));
+        const miles = M.milesBetween(p.home, team.loc);
+        const hb = homeBoost(miles);
+        const ratio = overall / Math.max(1e-6, bar(p)) + hb * HOME.barRelief;
         if (ratio < 1) continue; // he wouldn't realistically pick it
-        const score = w.pri * Math.min(1.5, ratio);
-        if (!best[p.id] || score > best[p.id].score) best[p.id] = { score, kind: w.kind, fit: fit.fit };
+        const score = w.pri * Math.min(1.5, ratio) * (1 + hb);
+        if (!best[p.id] || score > best[p.id].score) best[p.id] = { score, kind: w.kind, fit: fit.fit, miles };
       }
     });
     // Summed over runs; the want and fit shown are the ones that carried the
@@ -517,6 +550,7 @@ function scoreTargets(st, { E, M, needSum, wantCount, targetSum }) {
     Object.entries(best).forEach(([id, b]) => {
       const t = (ts[id] = ts[id] || { score: 0, by: {} });
       t.score += b.score;
+      if (b.miles != null) t.mi = Math.round(b.miles);
       const k = `${b.kind}|${b.fit}`;
       t.by[k] = (t.by[k] || 0) + b.score;
     });

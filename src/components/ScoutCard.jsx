@@ -20,6 +20,7 @@ import { db } from "../firebase";
 import { communityFor, gradeLabel, gradeLook } from "../utils/communityGrades";
 import { fetchEspnSeason } from "./PlayerStatsCard";
 import { seasonHeadline } from "../utils/profileHub";
+import StateShape from "./StateShape";
 
 const HEAD = "'Arial Black', Arial, sans-serif";
 const BODY = "Arial, sans-serif";
@@ -42,7 +43,10 @@ const canHover = () => typeof window !== "undefined" && !!window.matchMedia?.("(
 // The card. front / back: what's on each face (the front's background —
 // frontBg — shows while its image loads); width: its width (CSS); label:
 // what a screen reader hears ("Dante Moore: flip his card"); radius.
-export function FlipCard({ front, back, frontBg, width, label, radius = 12 }) {
+// hintAt: where the "Flip" hint sits — "top" (right corner, the default), or
+// "corner": just a small, faint ↻ in the bottom right corner (the draft
+// card — the hint stays out of the graphic's way).
+export function FlipCard({ front, back, frontBg, width, label, radius = 12, hintAt = "top" }) {
   const [flipped, setFlipped] = useState(false);
   const hoverable = canHover();
   return (
@@ -53,10 +57,17 @@ export function FlipCard({ front, back, frontBg, width, label, radius = 12 }) {
       <div className="rs-card-inner">
         <div className="rs-face" style={{ background: frontBg }}>
           {front}
-          <span className="rs-flip-hint" aria-hidden="true" style={{
-            position: "absolute", right: "3cqw", top: "3cqw", padding: "1cqw 2.6cqw", borderRadius: 999, background: "rgba(0,0,0,0.55)", color: "#fff",
-            fontFamily: BODY, fontSize: "max(10px, 2.8cqw)", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase",
-          }}>↻ {hoverable ? "Flip" : "Tap to flip"}</span>
+          {hintAt === "corner" ? (
+            <span className="rs-flip-hint" aria-hidden="true" title="Flip" style={{
+              position: "absolute", right: "1.6cqw", bottom: "1.2cqw", width: "max(18px, 5cqw)", height: "max(18px, 5cqw)", borderRadius: "50%",
+              display: "grid", placeItems: "center", background: "rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.7)", fontFamily: BODY, fontSize: "max(11px, 3cqw)", fontWeight: 900, lineHeight: 1,
+            }}>↻</span>
+          ) : (
+            <span className="rs-flip-hint" aria-hidden="true" style={{
+              position: "absolute", right: "3cqw", top: "3cqw", padding: "1cqw 2.6cqw", borderRadius: 999, background: "rgba(0,0,0,0.55)", color: "#fff",
+              fontFamily: BODY, fontSize: "max(10px, 2.8cqw)", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase",
+            }}>↻ {hoverable ? "Flip" : "Tap to flip"}</span>
+          )}
         </div>
         <div className="rs-face rs-back">{back}</div>
       </div>
@@ -124,6 +135,7 @@ function CareerFit({ rows, t, rule, label }) {
             {i < all.length - 1 && <div aria-hidden="true" style={{ position: "absolute", left: `calc(${cq(dot / 2)} - 0.25cqw)`, top: cq(dot / 2), bottom: `-${cq(dot / 2)}`, width: "0.5cqw", background: rule }} />}
             <div style={{ position: "relative", width: cq(dot), height: cq(dot), flexShrink: 0, borderRadius: "50%", background: fill, display: "grid", placeItems: "center", overflow: "hidden", boxShadow: r.current || r.key === "portal" ? `0 0 0 ${cq(0.6)} ${t.accent}` : "none" }}>
               {src ? <img src={src} alt="" style={{ width: "70%", height: "70%", objectFit: "contain" }} />
+                : r.state ? <StateShape abbr={r.state} size="68%" glow={false} />
                 : <span style={{ fontSize: cq(2.4), fontWeight: 900, color: "#5f6b7a" }}>{r.fallback || ""}</span>}
             </div>
             <div style={{ minWidth: 0, flex: 1, display: "flex", alignItems: "center", gap: cq(2) }}>

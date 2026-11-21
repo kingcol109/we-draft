@@ -19,6 +19,8 @@ import PlayerHeaderShell from "./components/PlayerHeaderShell";
 import { NFL_PLAYER_PAGES } from "./utils/nflPlayerSlugs";
 import { prefetchPlayerFromUrl } from "./utils/playerPrefetch";
 import { isUnreleasedYear, isUnreleasedSlug, useIsAdmin } from "./utils/prospectYears";
+import { classIntroPath } from "./utils/classIntro";
+import { EARLY_LOOK } from "./utils/earlyLook";
 import { PreviewContext, usePreviewLink } from "./utils/previewLinks";
 import { WEEKLY_YEARS, MAIN_WEEKLY_YEAR, weeklyMockHref, weeklyYearHref, hasTeamPages } from "./utils/weeklyMockNews";
 import { hsPath } from "./utils/hsRanks";
@@ -119,6 +121,11 @@ const EventPage = lazy(() => import("./pages/EventPage"));
 const COMBINE_PROFILE_POSITIONS = ["QB", "RB", "WR", "TE", "OL", "EDGE", "DL", "LB", "DB"];
 // /risers/{year} — Draft Risers (utils/risers.js; Admin → Content → Rising Page).
 const Risers = lazy(() => import("./pages/Risers"));
+// /class-of-2030 — "Meet the Class of 2030" (utils/classIntro.js) and the
+// high school prospects page (utils/earlyLook.js, working name). Both
+// admin-only until released in Admin → Content (the pages gate themselves).
+const ClassIntro = lazy(() => import("./pages/ClassIntro"));
+const EarlyLook = lazy(() => import("./pages/EarlyLook"));
 // /map, /map/draft, /map/{team} — interactive 3D maps (deck.gl; utils/mapData.js).
 const MapPage = lazy(() => import("./pages/MapPage"));
 
@@ -256,6 +263,9 @@ function MainLayout() {
             <Route path="/risers" element={<Navigate to="/risers/2027" replace />} />
             <Route path="/risers/:year" element={<Risers />} />
             <Route path="/risers/:year/:edition" element={<Risers />} />
+            <Route path={classIntroPath()} element={<ClassIntro />} />
+            <Route path={EARLY_LOOK.path} element={<EarlyLook />} />
+            <Route path={`${EARLY_LOOK.path}/:edition`} element={<EarlyLook />} />
             <Route path="/news" element={<News />} />
             <Route path="/news/:id" element={<NewsArticle />} />
             {/* Same gate as the year/position routes (it passes the

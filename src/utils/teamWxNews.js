@@ -17,6 +17,7 @@
 import { RISER_YEARS, RISER_TYPES, loadRiserBoard, risersRanked, risersPath } from "./risers";
 import { loadPortalNewsBoard, newsPath, newsPosGroup, NEWS_POSITIONS } from "./portalNews";
 import { SBP_YEARS, loadPerfList, perfRanked, performancesPath } from "./seniorBowlPerf";
+import { classIntroTeamItem } from "./classIntro";
 
 const norm = (s) => String(s || "").trim().toLowerCase();
 const stamp = (d) => (d ? { toDate: () => d, toMillis: () => d.getTime() } : null);
@@ -80,6 +81,10 @@ async function seniorBowlItems(school) {
 export async function teamWxNewsItems(schoolName) {
   const school = norm(schoolName);
   if (!school) return [];
-  const [r, p, sb] = await Promise.all([riserItems(school).catch(() => []), portalItems(school).catch(() => []), seniorBowlItems(school).catch(() => [])]);
-  return [...r, ...p, ...sb];
+  const [r, p, sb, ci] = await Promise.all([
+    riserItems(school).catch(() => []), portalItems(school).catch(() => []), seniorBowlItems(school).catch(() => []),
+    // "Meet the Class of 2030": its signees, once released (utils/classIntro.js).
+    classIntroTeamItem(schoolName).then((it) => (it ? [{ ...it, publishedAt: stamp(toDate(it.publishedAt)) }] : [])).catch(() => []),
+  ]);
+  return [...r, ...p, ...sb, ...ci];
 }

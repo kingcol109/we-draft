@@ -64,6 +64,8 @@ export default function AdminTransferPortal({ allPlayers, setAllPlayers }) {
   const [entries, setEntries] = useState(null);
   const [syncing, setSyncing] = useState(false);
   const [message, setMessage] = useState("");
+  const setPageMessage = setMessage;
+  const [bulk, setBulk] = useState(null); // Accept all progress { done, total }
   const [busyKey, setBusyKey] = useState(null);
   const [showDone, setShowDone] = useState(false);
   // All Activity filters.
@@ -130,9 +132,12 @@ export default function AdminTransferPortal({ allPlayers, setAllPlayers }) {
     return next;
   }));
 
-  const apply = async (r) => {
+  // bulk: Accept all runs these one by one — it reports once at the end, so
+  // a row's own message and failure go back to it instead.
+  const apply = async (r, bulk = false) => {
     const { p, rec } = r;
-    setBusyKey(rowKey(r)); setMessage("");
+    const setMessage = bulk ? () => {} : setPageMessage;
+    if (!bulk) { setBusyKey(rowKey(r)); setMessage(""); }
     try {
       if (rec.action === "enter") {
         const fields = { InPortal: true, PortalEnteredAt: serverTimestamp(), PortalOriginalSchool: p.School || r.entry.originSchool || "", PortalSeasonYear: String(year - 1), PortalCycle: String(year) };
@@ -165,10 +170,40 @@ export default function AdminTransferPortal({ allPlayers, setAllPlayers }) {
       }
     } catch (e) {
       console.error("Transfer portal apply error:", e);
+      if (bulk) throw e;
       setMessage("Update failed — check console.");
     } finally {
-      setBusyKey(null);
+      if (!bulk) setBusyKey(null);
     }
+  };
+
+  // Accept all (user, 2026-11-21): every pending recommendation that isn't
+  // dismissed. Rows matched to more than one We-Draft player are left for a
+  // look (they could be the wrong player), and a player with two pending
+  // rows gets only his newest (rows are newest first).
+  const bulkRows = (() => {
+    const seen = new Set();
+    return pending.filter((r) => {
+      if (r.ambiguous || seen.has(r.p.id)) return false;
+      seen.add(r.p.id);
+      return true;
+    });
+  })();
+  const applyAll = async () => {
+    const rows = bulkRows;
+    if (!rows.length) return;
+    const enters = rows.filter((r) => r.rec.action === "enter").length;
+    if (!window.confirm(`Apply ${rows.length} CFBD update${rows.length === 1 ? "" : "s"}? ${enters} into the portal, ${rows.length - enters} resolved to a new school (current-class players move up a class).`)) return;
+    setBulk({ done: 0, total: rows.length }); setPageMessage("");
+    let ok = 0;
+    const failed = [];
+    for (const r of rows) {
+      try { await apply(r, true); ok += 1; } catch (e) { failed.push(`${r.p.First} ${r.p.Last}`); }
+      setBulk({ done: ok + failed.length, total: rows.length });
+    }
+    setBulk(null);
+    const skipped = pending.length - rows.length;
+    setPageMessage(`Applied ${ok} of ${rows.length}.${failed.length ? ` Failed: ${failed.join(", ")} (check console).` : ""}${skipped ? ` ${skipped} left to review (multiple matches).` : ""}`);
   };
 
   const setDismissed = async (r, on) => {
@@ -221,6 +256,11 @@ export default function AdminTransferPortal({ allPlayers, setAllPlayers }) {
           <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: 800, color: "#555", marginBottom: "10px" }}>
             <input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} /> Show up-to-date and dismissed
           </label>
+          {bulkRows.length > 0 && (
+            <button type="button" onClick={applyAll} disabled={!!bulk || !!busyKey} style={{ ...btn(true, "#2e7d32"), marginLeft: "14px", marginBottom: "10px", opacity: bulk ? 0.6 : 1 }}>
+              {bulk ? `Applying ${bulk.done}/${bulk.total}…` : `✓ Accept all CFBD changes (${bulkRows.length})`}
+            </button>
+          )}
           {visibleWd.length === 0 ? (
             <div style={{ padding: "24px", textAlign: "center", color: "#999", fontWeight: 700, border: "1px dashed #ccc", borderRadius: "8px" }}>
               {wdRows.length ? "Nothing to update — every matched We-Draft player is up to date." : "No We-Draft players in this portal yet."}

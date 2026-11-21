@@ -49,7 +49,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import PortalWindowBar from "../components/PortalWindowBar";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
 import { Helmet } from "react-helmet-async";
 import { db } from "../firebase";
 import LoadingSpinner from "../components/LoadingSpinner";
@@ -70,7 +70,8 @@ import {
   manualStands, sortRecommendations, starsWithLocks, teamRecommendations,
 } from "../utils/portalData";
 import { SUB_TABS, inSubTab } from "../utils/subPositions";
-import { STATE_ABBR } from "../utils/highSchoolMatch";
+import { STATE_ABBR, stateName } from "../utils/highSchoolMatch";
+import StateShape from "../components/StateShape";
 import { FBS_CONFERENCES, buildPortalTeams, portalTeamSlug } from "../utils/portalTeams";
 import { getSiteSnapshot } from "../utils/siteSnapshots";
 import { STAT_COLUMNS } from "../utils/portalStats";
@@ -79,6 +80,8 @@ const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
 const INK = "#0f1b2d";
 const SEASON = activePortalSeason();
+// Localhost-only preview of the Targets tab with 3 sample targets (?demo=1).
+const DEMO_TARGETS = typeof window !== "undefined" && ["localhost", "127.0.0.1"].includes(window.location.hostname) && new URLSearchParams(window.location.search).has("demo");
 // When the real portal officially opens (user, 2026-11-18) — until then an
 // empty team Movement section points to the Portal Sim.
 const PORTAL_OPENS = Date.UTC(2027, 0, 4, 5); // Jan 4, 2027, midnight Eastern
@@ -251,7 +254,7 @@ export default function TransferPortal({ view = "board", embedded = false }) {
   useEffect(() => {
     if ((teamSlug && teams && !teams[teamSlug]) || (position && tabParam)) navigate("/portal", { replace: true });
   }, [teamSlug, teams, position, tabParam, navigate]);
-  const TEAM_TABS = [["", "Movement"], ["roster", "2027 Roster"], ["needs", "Team Needs"], ["targets", "Targets"]];
+  const TEAM_TABS = [["", "Movement"], ["targets", "Targets"], ["roster", "2027 Roster"], ["needs", "Team Needs"]];
   const teamTab = TEAM_TABS.some(([k]) => k && k === tabParam) ? tabParam : "";
   const isTeam = !!teamSlug;
   // An old team tab (activity / additions / losses) → Movement.
@@ -271,6 +274,14 @@ export default function TransferPortal({ view = "board", embedded = false }) {
   // server/portal/public.js) found by pool id on his old school's page.
   const [card, setCard] = useState(null);
   const [cardRow, setCardRow] = useState(undefined); // undefined = looking
+  // The page behind holds still while the card is open.
+  const cardOpen = !!card;
+  useEffect(() => {
+    if (!cardOpen) return undefined;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, [cardOpen]);
   useEffect(() => {
     if (!card) return undefined;
     if (card.row) { setCardRow(card.row); return undefined; }
@@ -372,7 +383,21 @@ export default function TransferPortal({ view = "board", embedded = false }) {
   useEffect(() => {
     if (!teamSlug || teamTab !== "targets") return undefined;
     let c = false;
-    fetchPortalTargets().then((d) => { if (!c) setRecs(d); }).catch(() => { if (!c) setRecs({ teams: {}, players: {} }); });
+    fetchPortalTargets().then(async (d) => {
+      // Localhost preview (?demo=1, user 2026-11-21): the sim's top 3 for
+      // this team join as admin picks, in memory only — nothing is saved,
+      // and it never runs on the live site.
+      if (DEMO_TARGETS) {
+        const sim = (await getDoc(doc(db, "offseason", "portalSimTargets")).catch(() => null))?.data()?.teams?.[teamSlug] || [];
+        const pick = sim.filter((t) => d.teams?.[teamSlug]?.[t.id] == null).slice(0, 3);
+        d = {
+          ...d,
+          teams: { ...d.teams, [teamSlug]: { ...(d.teams?.[teamSlug] || {}), ...Object.fromEntries(pick.map((t) => [t.id, 0])) } },
+          players: { ...d.players, ...Object.fromEntries(pick.map((t) => [t.id, { n: t.n, pos: t.pos, sub: t.sub, from: t.from, s: t.s, e: t.e, ht: t.ht, wt: t.wt, st: t.st, slug: t.slug }])) },
+        };
+      }
+      if (!c) setRecs(d);
+    }).catch(() => { if (!c) setRecs({ teams: {}, players: {} }); });
     return () => { c = true; };
   }, [teamSlug, teamTab]);
 
@@ -1545,8 +1570,9 @@ export default function TransferPortal({ view = "board", embedded = false }) {
     // mostly players still on rosters — ordered by stars, never shown).
     const p = { id: t.id, poolId: t.id, First: first, Last: rest.join(" "), Slug: t.slug, Position: t.pos, SubPosition: t.sub, from: t.from, elig: t.e ?? null, HeightInches: t.ht, Weight: t.wt, State: t.st, stars: t.s, status: t.live ? "uncommitted" : "", hideStars: !t.live };
     const chipNodes = <div style={{ marginTop: "5px", display: "flex", flexWrap: "wrap", gap: "4px" }}>{chips.map(([text, color, bg]) => <span key={text} style={chipStyle(color, bg)}>{text}</span>)}</div>;
+    const stAbbr = t.st ? (String(t.st).length === 2 ? String(t.st).toUpperCase() : STATE_ABBR[t.st] || "") : "";
     if (isMobile) {
-      return <MobileRow p={p} toNode={<SchoolMark name={T} size={26} link={false} />} left={<span style={{ width: 18, flexShrink: 0, textAlign: "right", fontSize: "13px", fontWeight: 900, color: rank <= 3 ? GOLD : "#8a97ab" }}>{rank}</span>} extra={chipNodes} />;
+      return <MobileRow p={p} toNode={<ToCell p={{}} size={26} />} left={<span style={{ width: 18, flexShrink: 0, textAlign: "right", fontSize: "13px", fontWeight: 900, color: rank <= 3 ? GOLD : "#8a97ab" }}>{rank}</span>} extra={chipNodes} />;
     }
     return (
       <div className="wdb-row" style={{ display: "flex", alignItems: "center", gap: "14px", padding: "11px 18px", background: "#fff" }}>
@@ -1554,14 +1580,24 @@ export default function TransferPortal({ view = "board", embedded = false }) {
         <div style={{ width: 52, flexShrink: 0, display: "flex", justifyContent: "center" }}>{p.hideStars ? null : <TransferStars stars={t.s} />}</div>
         <EligChip p={p} />
         <span style={{ flexShrink: 0, width: 52, textAlign: "center", fontSize: "14px", fontWeight: 900, color: BLUE, background: "#eaf1ff", padding: "5px 0", borderRadius: "6px" }}>{t.sub || t.pos || "—"}</span>
-        <SchoolMark name={t.from} size={LOGO_COL_W} title={`From ${t.from}`} />
+        {/* From → ? (where he lands is still open), as on the board. */}
+        <div style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: "4px", padding: "5px 7px", borderRadius: "10px", background: "#f7f9fc", border: "1px solid #eef1f5" }}>
+          <SchoolMark name={t.from} size={34} title={`From ${t.from}`} />
+          <span aria-hidden="true" style={{ color: "#b8c2d1", fontWeight: 900, fontSize: "14px" }}>→</span>
+          <ToCell p={{}} size={34} />
+        </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <NameLink p={p} hover style={{ color: BLUE, fontWeight: 900, fontSize: "20px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0, display: "block" }} />
           {chipNodes}
         </div>
-        <div style={{ flexShrink: 0, textAlign: "right", fontSize: "13px", fontWeight: 800, color: "#5b6b84", lineHeight: 1.4 }}>
-          {[t.ht ? formatHeight(t.ht) : "", t.wt ? `${t.wt} lbs` : ""].filter(Boolean).join(" · ")}
-          {t.st && <div style={{ fontSize: "12px", fontWeight: 900 }}>{t.st}</div>}
+        {/* Size up big, then his home state as its /hs silhouette (user
+            2026-11-21) — the state's name on hover. */}
+        <div style={{ flexShrink: 0, textAlign: "right", lineHeight: 1.2 }}>
+          {t.ht && <div style={{ fontSize: "19px", fontWeight: 900, color: INK, fontVariantNumeric: "tabular-nums" }}>{formatHeight(t.ht)}</div>}
+          {t.wt && <div style={{ fontSize: "15px", fontWeight: 800, color: "#5b6b84", fontVariantNumeric: "tabular-nums" }}>{t.wt} lbs</div>}
+        </div>
+        <div style={{ width: 48, flexShrink: 0, display: "flex", justifyContent: "center" }}>
+          {stAbbr && <StateShape abbr={stAbbr} size={44} glow={false} title={stateName(stAbbr)} />}
         </div>
       </div>
     );
@@ -1689,7 +1725,10 @@ export default function TransferPortal({ view = "board", embedded = false }) {
         position: "fixed", inset: 0, zIndex: 2000, background: "rgba(15,27,45,0.55)", display: "flex", alignItems: isMobile ? "flex-end" : "center", justifyContent: "center", padding: isMobile ? 0 : "20px",
       }}>
         <div onClick={(e) => e.stopPropagation()} style={{
-          width: isMobile ? "100%" : "500px", maxHeight: isMobile ? "88vh" : "88vh", overflowY: "auto", background: "#fff",
+          // Divided by the site's CSS zoom (--pz) so the card really fits the
+          // screen and scrolls inside itself; contain keeps the wheel from
+          // carrying on to the page (user 2026-11-21).
+          width: isMobile ? "100%" : "500px", maxHeight: "calc(88vh / var(--pz, 1))", overflowY: "auto", overscrollBehavior: "contain", background: "#fff",
           borderRadius: isMobile ? "16px 16px 0 0" : "16px", boxShadow: "0 20px 50px rgba(0,0,0,0.3)", fontFamily: "'Arial Black', Arial, sans-serif",
         }}>
           {/* Header (the Portal Sim card's): his name on top, old school →

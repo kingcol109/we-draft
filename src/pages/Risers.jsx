@@ -294,7 +294,7 @@ export default function Risers() {
 function Hero({ year, isMobile, updated }) {
   return (
     <div style={{
-      position: "relative", overflow: "hidden", borderRadius: 20, color: "#fff", padding: isMobile ? "22px 16px 24px" : "30px 40px 32px",
+      position: "relative", overflow: "hidden", borderRadius: 20, color: "#fff", padding: isMobile ? "16px 16px 18px" : "22px 40px 24px", // trimmed (user 2026-11-21)
       background: `radial-gradient(circle at 8% 110%, ${RISER_TYPES.onFire.c1}bb 0, transparent 42%), radial-gradient(circle at 95% -10%, ${RISER_TYPES.breakout.c1}bb 0, transparent 45%), radial-gradient(circle at 60% 130%, ${RISER_TYPES.up.c1}88 0, transparent 40%), ${NAVY}`,
       boxShadow: "0 16px 40px rgba(7,13,24,0.35)",
     }}>
@@ -311,14 +311,14 @@ function Hero({ year, isMobile, updated }) {
             }}>{y}</Link>
           ))}
         </nav>
-        <h1 style={{ margin: isMobile ? "16px 0 0" : "22px 0 0", fontWeight: 900, textTransform: "uppercase", letterSpacing: "-0.02em", lineHeight: 0.9 }}>
-          <span style={{ display: "block", fontSize: isMobile ? 30 : 52, color: "rgba(255,255,255,0.92)", letterSpacing: "0.02em" }}>{year} NFL Draft</span>{" "}
-          <span style={{ display: "block", fontSize: isMobile ? 76 : 150, background: `linear-gradient(100deg, #ffffff 25%, ${GOLD} 95%)`, WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent", paddingBottom: 6 }}>Risers</span>
+        <h1 style={{ margin: isMobile ? "12px 0 0" : "14px 0 0", fontWeight: 900, textTransform: "uppercase", letterSpacing: "-0.02em", lineHeight: 0.9 }}>
+          <span style={{ display: "block", fontSize: isMobile ? 26 : 44, color: "rgba(255,255,255,0.92)", letterSpacing: "0.02em" }}>{year} NFL Draft</span>{" "}
+          <span style={{ display: "block", fontSize: isMobile ? 62 : 120, background: `linear-gradient(100deg, #ffffff 25%, ${GOLD} 95%)`, WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent", paddingBottom: 6 }}>Risers</span>
         </h1>
-        <div style={{ marginTop: isMobile ? 6 : 10, fontSize: isMobile ? 14 : 20, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.12em", color: "rgba(255,255,255,0.8)" }}>Prospects on the rise</div>
+        <div style={{ marginTop: isMobile ? 4 : 6, fontSize: isMobile ? 13 : 18, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.12em", color: "rgba(255,255,255,0.8)" }}>Prospects on the rise</div>
         {updated && (
           <div style={{
-            marginTop: isMobile ? 14 : 18, display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 12px 6px 10px", borderRadius: 999,
+            marginTop: isMobile ? 10 : 12, display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 12px 6px 10px", borderRadius: 999,
             background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.22)", backdropFilter: "blur(4px)",
           }}>
             <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: "50%", background: "#4ade80", boxShadow: "0 0 0 3px rgba(74,222,128,0.25), 0 0 10px #4ade80" }} />

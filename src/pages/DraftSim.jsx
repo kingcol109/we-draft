@@ -54,6 +54,7 @@ import useSimBadges from "../components/draftSim/useSimBadges";
 import { BadgeToasts } from "../components/draftSim/SimBadges";
 import { RECENT_PATH, COMMUNITY_PATH } from "../utils/draftSim/publicSims";
 import MarginAds from "../components/MarginAds";
+import { useFullscreenHandoff, useSiteFullscreen } from "../components/SiteFullscreenButton";
 import { cssRect, viewportCssHeight } from "../utils/pageZoom";
 
 const BODY = "Arial, sans-serif";
@@ -139,7 +140,19 @@ export default function DraftSim({ page = null }) {
   // Carrying a finished run over to the next class (carryOver below) — loading it.
   const [carrying, setCarrying] = useState(false);
   useEffect(() => { setDoneTab(null); }, [config]);
-  const openDoneTab = (t) => { setDoneTab(t); window.scrollTo(0, 0); };
+  // Full screen on the sim is always the sim's own, ad-free view (user,
+  // 2026-11-21): a run that starts while the whole site is full screen
+  // takes it over (SiteFullscreenButton.jsx useFullscreenHandoff), and the
+  // setup screen drops the gutter ads while the site is full screen.
+  const simFsRef = useRef(null);
+  const siteFullscreen = useSiteFullscreen();
+  useFullscreenHandoff(simFsRef, !!config && !(doneTab && doneTab !== "new") && !!setup && !error);
+  const openDoneTab = (t) => {
+    // Those tabs sit outside the fullscreen wrapper (it's hidden for them).
+    if (t !== "new" && document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+    setDoneTab(t);
+    window.scrollTo(0, 0);
+  };
 
   // The whole page dark while it's up — the strip the body's navbar padding
   // leaves above the stage, the footer and anything under it (SIM_CSS).
@@ -324,7 +337,7 @@ export default function DraftSim({ page = null }) {
             {/* data-sim-fs: what fullscreen takes (SimBroadcast.jsx SIM_FS) — it
                 outlives each run, so a double stays fullscreen from 2027 through
                 the screen in between into 2028. */}
-            <div data-sim-fs="" style={doneAway ? { display: "none" } : undefined}>
+            <div ref={simFsRef} data-sim-fs="" style={doneAway ? { display: "none" } : undefined}>
               <SimErrorBoundary key={config.seed} isMobile={isMobile}
                 onRestart={() => (config.carry ? carryOver({ ...config.carry.prev, config: config.carry.first }) : start(rerunOf(config)))}
                 onSettings={() => openSettings(config.teams, config.board, optsOf(firstOf(config)))}>
@@ -358,7 +371,7 @@ export default function DraftSim({ page = null }) {
       {/* Homage NFL ads in the gutters, desktop only, in the sim's dark
           colors: the user's team (the first, if several) by default, else
           random. */}
-      {setup && !error && (
+      {setup && !error && !siteFullscreen && (
         <MarginAds contentRef={contentRef} isMobile={isMobile} horizontalPadding={20} dark
           preferTeam={adTeam(config ? config.teams : tab === "new" ? setupTeams : [])}
           teamLogos={adLogos(setup.branding)} watch={[!!config, tab]} />
@@ -379,13 +392,14 @@ const adLogos = (branding) => Object.fromEntries(
   Object.entries(branding || {}).map(([t, b]) => [t, b.LogoDark || b.Logo1]).filter(([, logo]) => logo),
 );
 
-// The finished run's results: out of fullscreen first (they sit under the
-// page's tabs, which fullscreen would leave behind).
+// The finished run's results. A fullscreen sim stays fullscreen (user,
+// 2026-11-21 — ending a mock used to drop out): the results and their tabs
+// render inside the fullscreen wrapper, so they scroll in it there
+// (SimBroadcast.jsx SIM_CSS .wd-sim-final). Only opening another tab
+// (My Drafts, Community — outside the wrapper) leaves fullscreen
+// (openDoneTab).
 function FinalResults({ children }) {
-  useEffect(() => {
-    if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
-  }, []);
-  return children;
+  return <div className="wd-sim-final">{children}</div>;
 }
 
 // Anything the live sim throws: a way back in instead of a blank page.

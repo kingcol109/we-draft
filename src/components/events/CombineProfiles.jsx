@@ -506,7 +506,7 @@ function Leaderboard({ ev, m, s, metrics, board, setBoard, brands, isMobile }) {
             const medal = <span style={{ width: 30, height: 30, borderRadius: 999, background: md.bg, color: md.ink, display: "grid", placeItems: "center", fontSize: 14, fontWeight: 900, boxShadow: "0 2px 6px rgba(0,0,0,0.25)", flexShrink: 0 }}>{i + 1}</span>;
             const nameBlock = (
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: isMobile ? 15 : 17, fontWeight: 900, lineHeight: 1.15, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}><PlayerName p={t} /></div>
+                <div style={{ fontSize: isMobile ? 15 : String(t.name || "").length > 20 ? 15 : 17, fontWeight: 900, lineHeight: 1.15, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}><PlayerName p={t} /></div>
                 <div style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.8)", fontFamily: BODY_FONT, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                   {t.school ? <Link to={schoolHref(t.school)} style={{ color: "inherit", textDecoration: "none" }}>{t.school}</Link> : null} · {t.year}
                 </div>
@@ -526,21 +526,23 @@ function Leaderboard({ ev, m, s, metrics, board, setBoard, brands, isMobile }) {
                 </div>
               );
             }
-            // Desktop: two columns — medal, the result and his name on the left;
-            // his school's logo and where he was drafted on the right.
+            // Desktop: medal and his school's logo on top; the result with
+            // where he was drafted beside it; his name across the full width
+            // at the bottom (user 2026-11-21: names were cut off sharing a
+            // column with the draft pick).
             return (
-              <div key={`${t.name}-${t.year}`} style={{ ...cardStyle, padding: "16px 16px 14px 18px", display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 12, minHeight: 168 }}>
-                <div style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", minWidth: 0, gap: 8 }}>
+              <div key={`${t.name}-${t.year}`} style={{ ...cardStyle, padding: "16px 16px 14px 18px", display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 8, minHeight: 168, minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
                   {medal}
-                  <div style={{ fontSize: 40, fontWeight: 900, lineHeight: 1, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{fmt(m.key, t.value)}</div>
-                  {nameBlock}
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", justifyContent: "space-between", gap: 10 }}>
-                  <span style={{ width: 64, height: 64, display: "grid", placeItems: "center", background: "rgba(255,255,255,0.1)", borderRadius: 14 }}>
-                    {logo ? <img src={logo} alt="" style={{ width: 48, height: 48, objectFit: "contain" }} /> : null}
+                  <span style={{ width: 56, height: 56, flexShrink: 0, display: "grid", placeItems: "center", background: "rgba(255,255,255,0.1)", borderRadius: 14 }}>
+                    {logo ? <img src={logo} alt="" style={{ width: 42, height: 42, objectFit: "contain" }} /> : null}
                   </span>
+                </div>
+                <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 10 }}>
+                  <div style={{ fontSize: 40, fontWeight: 900, lineHeight: 1, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{fmt(m.key, t.value)}</div>
                   <DraftMark t={t} logos={nflLogos} dark />
                 </div>
+                {nameBlock}
               </div>
             );
           })}
