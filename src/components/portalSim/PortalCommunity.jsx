@@ -20,6 +20,7 @@ import { Link } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { useAuth } from "../../context/AuthContext";
 import { getSiteSnapshot } from "../../utils/siteSnapshots";
+import { fetchPortalTeamPage } from "../../utils/portalData";
 import { renderShareImage } from "../../utils/exportImages";
 import { textOn } from "../../utils/teamColors";
 import ShareSheet, { ShareIcon, ShareImagePreview, shareActions } from "../ShareSheet";
@@ -67,6 +68,24 @@ const colorLogo = (b) => b?.LogoDark || b?.Logo1 || "";
 const Logo = ({ src, size, alt = "" }) => (src
   ? <img src={src} alt={alt} title={alt} style={{ width: size, height: size, objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.visibility = "hidden"; }} />
   : <span style={{ width: size, flexShrink: 0 }} />);
+
+// A player's ESPN headshot (pool ids are CFBD = ESPN ids) in a circle.
+// No headshot → his school's logo fills the circle (user, 2026-11-22);
+// badge: that logo small on the corner, only while the headshot shows.
+export function PlayerFace({ id, size = 40, ring = "#1f2b42", logo = "", badge = false }) {
+  const [ok, setOk] = useState(true);
+  const face = ok && id;
+  const b = Math.round(size * 0.42);
+  return (
+    <span style={{ position: "relative", flexShrink: 0, display: "inline-flex" }}>
+      <span style={{ width: size, height: size, borderRadius: "50%", background: "#1a2438", border: `2px solid ${ring}`, boxSizing: "border-box", overflow: "hidden", display: "inline-flex", alignItems: face ? "flex-end" : "center", justifyContent: "center" }}>
+        {face ? <img src={`https://a.espncdn.com/i/headshots/college-football/players/full/${id}.png`} alt="" onError={() => setOk(false)} style={{ height: "125%", width: "auto", maxWidth: "none", objectFit: "cover", marginBottom: "-12%" }} />
+          : logo ? <img src={logo} alt="" style={{ width: "66%", height: "66%", objectFit: "contain" }} /> : null}
+      </span>
+      {badge && face && logo && <img src={logo} alt="" style={{ position: "absolute", right: -4, bottom: -3, width: b, height: b, objectFit: "contain", background: "#0e1626", borderRadius: "50%", padding: 1, border: "1px solid #1f2b42" }} />}
+    </span>
+  );
+}
 
 // ── Tabs: New Portal · My Classes · Community (the Draft Sim's SetupTabs). ──
 // thisRun: over a finished run — "New Portal" reads "This Portal".
@@ -297,6 +316,20 @@ function Insights({ branding, isMobile }) {
     return () => { live = false; };
   }, [period, now]);
   const ins = useMemo(() => (data ? portalInsights(data.runs) : null), [data]);
+  // Most signed → their We-Draft profiles (user, 2026-11-22), from each
+  // player's old team page roster (cached reads; no profile → no link).
+  const [profiles, setProfiles] = useState({});
+  useEffect(() => {
+    let live = true;
+    (ins?.topPlayers || []).forEach((p) => {
+      if (!p.from) return;
+      fetchPortalTeamPage(p.from).then((d) => {
+        const row = (d?.roster || []).find((r) => String(r.id) === String(p.id));
+        if (live && row?.slug) setProfiles((m) => ({ ...m, [p.id]: row.slug }));
+      }).catch(() => {});
+    });
+    return () => { live = false; };
+  }, [ins]);
   const head = (
     <Helmet>
       <title>Transfer Portal Sim Community Insights | We-Draft.com</title>
@@ -376,23 +409,52 @@ function Insights({ branding, isMobile }) {
                   ))}
                 </div>
               </div>
-              <div style={{ ...PANEL, padding: 14 }}>
-                <div style={heading}>MOST SIGNED TRANSFERS</div>
-                <div style={{ color: SUB, fontSize: 12, marginBottom: 8 }}>The players users sign most — and where they take them most.</div>
-                {ins.topPlayers.map((p, i) => (
-                  <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", borderTop: i ? "1px solid #18233a" : "none", minWidth: 0 }}>
-                    <span style={{ color: "#6f7f99", fontWeight: 900, fontSize: 11, width: 18, textAlign: "right" }}>{i + 1}</span>
-                    <TransferStars stars={p.stars} size="sm" />
-                    <span style={{ color: "#fff", fontWeight: 900, fontSize: 13, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
-                    <span style={{ color: SUB, fontSize: 11, flexShrink: 0 }}>{p.pos}</span>
-                    <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 4, flexShrink: 0 }} title={`Most often to ${nameOf(p.dest)} (${p.destN})`}>
-                      <Logo src={darkLogo(branding[p.from])} size={16} alt={p.fromSchool} />
-                      <span style={{ color: SUB, fontSize: 11 }}>→</span>
-                      <Logo src={darkLogo(branding[p.dest])} size={16} alt={nameOf(p.dest)} />
-                    </span>
-                    <span style={{ width: 42, textAlign: "right", color: "#dbe4f0", fontSize: 12, fontWeight: 800, flexShrink: 0 }}>{p.n}×</span>
-                  </div>
-                ))}
+              {/* Most signed (user, 2026-11-22): the number is how many
+                  times users signed him, in every class; the logos are the
+                  three schools that signed him most, each with its count. */}
+              <div style={{ ...PANEL, padding: 0 }}>
+                <div style={{ padding: "14px 14px 10px", background: "linear-gradient(180deg, #13233f 0%, #0e1626 100%)", borderBottom: "1px solid #1f2b42" }}>
+                  <div style={{ ...heading, marginBottom: 4 }}>MOST SIGNED TRANSFERS</div>
+                  <div style={{ color: SUB, fontSize: 12, lineHeight: 1.45 }}>How many times users signed each player across every class, and the schools that signed him most.</div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 14px", borderBottom: "1px solid #18233a", ...label, fontSize: 9 }}>
+                  <span style={{ width: 22 }} />
+                  <span style={{ flex: 1 }}>PLAYER</span>
+                  <span style={{ width: isMobile ? 54 : 66, textAlign: "center" }}>TIMES SIGNED</span>
+                  <span style={{ width: isMobile ? 108 : 138, textAlign: "left" }}>SIGNED MOST BY</span>
+                </div>
+                {ins.topPlayers.map((p, i) => {
+                  const dests = p.dests || [{ t: p.dest, n: p.destN }];
+                  return (
+                    <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 14px", borderTop: i ? "1px solid #18233a" : "none", minWidth: 0, background: i === 0 ? "rgba(246,162,29,0.07)" : "transparent" }}>
+                      <span style={{ width: 22, flexShrink: 0, textAlign: "center", color: i < 3 ? GOLD : "#6f7f99", fontWeight: 900, fontSize: i < 3 ? 16 : 13 }}>{i + 1}</span>
+                      <PlayerFace id={p.id} size={isMobile ? 38 : 44} logo={darkLogo(branding[p.from])} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        {profiles[p.id]
+                          ? <Link to={`/player/${profiles[p.id]}`} title="We-Draft.com profile" style={{ display: "block", color: "#fff", fontWeight: 900, fontSize: isMobile ? 13 : 15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: "underline", textDecorationColor: "rgba(255,255,255,0.3)", textUnderlineOffset: 3 }}>{p.name}</Link>
+                          : <div style={{ color: "#fff", fontWeight: 900, fontSize: isMobile ? 13 : 15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>}
+                        <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 3, minWidth: 0 }}>
+                          <TransferStars stars={p.stars} size="sm" />
+                          <span style={{ color: "#9fc3ff", fontSize: 11, fontWeight: 900 }}>{p.pos}</span>
+                          <Logo src={darkLogo(branding[p.from])} size={14} alt={p.fromSchool} />
+                          {!isMobile && <span style={{ color: SUB, fontSize: 11, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>from {p.fromSchool}</span>}
+                        </div>
+                      </div>
+                      <span style={{ width: isMobile ? 54 : 66, flexShrink: 0, textAlign: "center" }} title={`Signed ${p.n} time${p.n === 1 ? "" : "s"} in all`}>
+                        <span style={{ display: "block", color: "#fff", fontSize: isMobile ? 18 : 22, fontWeight: 900, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>{p.n}</span>
+                        <span style={{ display: "block", color: SUB, fontSize: 9, fontWeight: 900, letterSpacing: "0.08em", marginTop: 2 }}>TIMES</span>
+                      </span>
+                      <span style={{ width: isMobile ? 108 : 138, flexShrink: 0, display: "flex", justifyContent: "flex-start", gap: isMobile ? 4 : 6 }}>
+                        {dests.map((d) => (
+                          <span key={d.t} title={`${nameOf(d.t)}: signed him ${d.n} time${d.n === 1 ? "" : "s"}`} style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", gap: 2, width: isMobile ? 32 : 40, padding: "4px 0", borderRadius: 8, background: "#121c2f" }}>
+                            <Logo src={darkLogo(branding[d.t])} size={isMobile ? 20 : 24} alt={nameOf(d.t)} />
+                            <span style={{ color: "#dbe4f0", fontSize: 10, fontWeight: 900, fontVariantNumeric: "tabular-nums" }}>{d.n}×</span>
+                          </span>
+                        ))}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
             {data.totals.runs > ins.runs && <div style={{ color: SUB, fontSize: 11, fontWeight: 700 }}>Totals count every portal users have closed; the lists come from the newest {ins.runs.toLocaleString()}.</div>}
@@ -597,6 +659,13 @@ export const ClassStory = forwardRef(function ClassStory({ rec, branding }, ref)
         {shown.length === 0 && <div style={{ padding: "26px 16px", textAlign: "center", fontWeight: 900, fontSize: 18, opacity: 0.85 }}>Ran it back — no portal signings.</div>}
         {shown.map((p, i) => (
           <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "0 16px", height: 46, borderTop: i ? "1px solid rgba(255,255,255,0.08)" : "none" }}>
+            {/* His headshot (user, 2026-11-22) — a blank circle if ESPN has none. */}
+            {/* No headshot (the export hides an image it can't load) → his
+                old school's logo underneath shows through. */}
+            <span style={{ position: "relative", width: 38, height: 38, borderRadius: "50%", background: "rgba(255,255,255,0.12)", border: `2px solid ${c2}`, boxSizing: "border-box", overflow: "hidden", flexShrink: 0, display: "inline-flex", alignItems: "flex-end", justifyContent: "center" }}>
+              {colorLogo(branding[p.from]) && <img src={colorLogo(branding[p.from])} alt="" style={{ position: "absolute", left: "17%", top: "17%", width: "66%", height: "66%", objectFit: "contain" }} />}
+              <img src={`https://a.espncdn.com/i/headshots/college-football/players/full/${p.id}.png`} alt="" style={{ position: "relative", height: "125%", width: "auto", maxWidth: "none", marginBottom: "-12%" }} />
+            </span>
             <span style={{ width: 62, color: GOLD, fontSize: 15, letterSpacing: "-1px", flexShrink: 0 }}>{starText(p.stars)}</span>
             <span style={{ width: 44, flexShrink: 0, textAlign: "center", fontSize: 13, fontWeight: 900, background: "rgba(255,255,255,0.14)", borderRadius: 6, padding: "3px 0" }}>{p.pos}</span>
             <span style={{ flex: 1, minWidth: 0, fontWeight: 900, fontSize: 19, textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</span>
@@ -616,7 +685,7 @@ export const ClassStory = forwardRef(function ClassStory({ rec, branding }, ref)
 });
 
 // ── Final screen: on to the Draft Sim. ──
-// toNfl: how many of the user's players left for the draft.
+// toNfl: how many of the user's players left for the draft with a draft grade.
 export function DraftSimPromo({ toNfl = 0, school, isMobile }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 12 : 18, flexWrap: "wrap", padding: isMobile ? "14px" : "16px 22px", background: "radial-gradient(500px 180px at 10% -40%, #12305c 0%, #070d18 75%), #070d18", borderTop: `2px solid ${GOLD}`, borderBottom: `1px solid ${LINE}` }}>
@@ -627,7 +696,7 @@ export function DraftSimPromo({ toNfl = 0, school, isMobile }) {
         </div>
         <div style={{ fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.8)", marginTop: 4, lineHeight: 1.45 }}>
           {toNfl > 0
-            ? `${toNfl} ${school ? `${school} ` : ""}${toNfl === 1 ? "player" : "players"} headed to the draft. See where they land: make every pick in the Mock Draft Simulator, trade up or down and get a grade for your class.`
+            ? `${toNfl} ${school ? `${school} ` : ""}${toNfl === 1 ? "player is" : "players are"} heading to the draft. See where they land: make every pick in the Mock Draft Simulator, trade up or down and get a grade for your class.`
             : "Make every pick in the Mock Draft Simulator: draft for one team or all 32, trade up or down and get a live grade from the analyst desk."}
         </div>
       </div>

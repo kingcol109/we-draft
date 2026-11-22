@@ -301,7 +301,14 @@ export const DEFAULT_CONFIG = {
     // Names per position on the staff's full list (engine staffSuggestions).
     suggest: 6,
     near: { full: 75, zero: 450, max: 0.035 },
-    recs: { perWant: 2, max: 12, keep: 20, look: 30, reach: 0.1, lateReach: 0.08, headStart: 0.5, lateDrop: 1, longReach: 0.22, longshots: 2, longshotUntil: 3, tierPenalty: 0.08, budgetShare: 0.6, localMiles: 200 },
+    // Odds (user, 2026-11-22): per need at most one long shot, then a name
+    // more realistic than the first (saferBy more landable, or half a star
+    // lower), then for the big needs (hole / upgrade / QB) a fallback — the
+    // most landable who can help (landable ≥ safeRatio), down to
+    // fallbackDrop stars under the want's bar. Before anyone's on him, his
+    // likely suitors (tier ≤ idealTier + suitorTier) stand in: your fit vs
+    // the suitorRank-th best of them (4th: a real contender, not his dream school).
+    recs: { perWant: 2, max: 14, keep: 20, fallbackDrop: 0.75, saferBy: 0.04, safeRatio: 0.95, suitorTier: 0.5, suitorRank: 4, look: 30, reach: 0.1, lateReach: 0.08, headStart: 0.5, lateDrop: 1, longReach: 0.22, longshots: 2, longshotUntil: 3, tierPenalty: 0.08, budgetShare: 0.6, localMiles: 200 },
   },
 
   // CPU schools' offers (user, 2026-11-14). An open offer counts as a

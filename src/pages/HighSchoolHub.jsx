@@ -78,10 +78,10 @@ const STYLE = `
   .wd-hub-name:hover { text-decoration: underline !important; }
   .wd-hub-scroll::-webkit-scrollbar { height: 0; }
   .wd-hub-flip { perspective: 1400px; height: 100%; }
-  .wd-hub-flip-inner { position: relative; height: 100%; display: grid; transition: transform .65s cubic-bezier(.2,.7,.2,1); transform-style: preserve-3d; }
-  .wd-hub-flip.on .wd-hub-flip-inner { transform: rotateY(180deg); }
-  @media (hover: hover) { .wd-hub-flip.can:hover .wd-hub-flip-inner { transform: rotateY(180deg); } }
-  .wd-hub-face { backface-visibility: hidden; -webkit-backface-visibility: hidden; transition: visibility 0s linear .32s; }
+  .wd-hub-flip-inner { position: relative; height: 100%; display: grid; transition: transform .6s cubic-bezier(.45,.05,.55,.95); transform-style: preserve-3d; }
+  .wd-hub-flip.on .wd-hub-flip-inner { transform: rotateY(-180deg); } /* right edge comes toward the viewer */
+  @media (hover: hover) { .wd-hub-flip.can:hover .wd-hub-flip-inner { transform: rotateY(-180deg); } }
+  .wd-hub-face { backface-visibility: hidden; -webkit-backface-visibility: hidden; transition: visibility 0s linear .3s; } /* swap at 90° — half of the flip's symmetric .6s */
   .wd-hub-back { visibility: hidden; }
   .wd-hub-flip.on .wd-hub-front { visibility: hidden; }
   .wd-hub-flip.on .wd-hub-back { visibility: visible; }
@@ -734,9 +734,13 @@ function TopCard({ it, isMobile }) {
       ...faceBase, position: "relative", transform: "rotateY(180deg)", color: "#fff", background: backBg,
       border: `${team ? 2 : 1}px solid ${team ? c2 : NAVY}`, padding: isMobile ? "12px 14px 16px" : "16px 18px 20px", display: "flex", flexDirection: "column",
     }}>
-      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
-        <span style={{ fontSize: "10px", fontWeight: 900, letterSpacing: "0.16em", textTransform: "uppercase", color: GOLD }}>{it.listTitle}</span>
-        <span style={{ marginLeft: "auto", fontSize: "10px", fontWeight: 900, color: "rgba(255,255,255,0.6)", textTransform: "uppercase", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name}</span>
+      {/* The school's name as the back's title (user, 2026-11-22 — it was a
+          tiny gray label), the list's name under it. */}
+      <div style={{ display: "flex", alignItems: "flex-start", gap: "8px", marginBottom: "8px", paddingBottom: "10px", borderBottom: "1px solid rgba(255,255,255,0.14)" }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontFamily: DISPLAY, fontSize: isMobile ? "24px" : "30px", lineHeight: 1.02, letterSpacing: "0.01em", textTransform: "uppercase", color: "#fff", textShadow: "0 2px 8px rgba(0,0,0,0.35)", overflowWrap: "anywhere" }}>{it.name}</div>
+          <div style={{ marginTop: "4px", fontSize: "10px", fontWeight: 900, letterSpacing: "0.16em", textTransform: "uppercase", color: GOLD }}>{it.listTitle}</div>
+        </div>
         <button type="button" onClick={toggle} aria-label="Flip back" style={{ border: "none", background: "rgba(255,255,255,0.18)", color: "#fff", borderRadius: "999px", width: "24px", height: "24px", cursor: "pointer", fontWeight: 900, padding: 0, flexShrink: 0 }}>↺</button>
       </div>
       <div style={{ display: "flex", flexDirection: "column", flex: 1, justifyContent: "center" }}>

@@ -15,16 +15,17 @@
 // Tabs: Current Players | Drafted | Rankings (position by position).
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
+import { collection, doc, documentId, getDoc, getDocs, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { averageGradesFor, gradeLabel } from "../utils/communityGrades";
 import { Helmet } from "react-helmet-async";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
 import { useSchools } from "../components/DraftArchiveList";
-import { currentDraftClass } from "../utils/eligibility";
+import { currentDraftClass, inHighSchool } from "../utils/eligibility";
 import { POS_GROUPS, rankText, stateAbbr, hsPath } from "../utils/hsRanks";
 import { STATE_NAME } from "../utils/highSchoolMatch";
+import { decodeGrade, starsFromDraft } from "../utils/portalStars.mjs";
 import { isUnreleasedYear, isUnreleasedSlug, useIsAdmin } from "../utils/prospectYears";
 
 const BLUE = "#0055a5";
@@ -107,43 +108,8 @@ function sanitizeUrl(url) {
 const directImage = (url) => sanitizeUrl(url).replace(/^https?:\/\/(www\.)?imgur\.com\//i, "https://i.imgur.com/");
 
 const NEWS_LIMIT = 8;
-// Players tab order: graded We-Draft players first, best grade first.
+// Players tab tiebreak (after transfer stars): community grade, best first.
 const GRADE_ORDER = ["Early First Round", "Middle First Round", "Late First Round", "Second Round", "Third Round", "Fourth Round", "Fifth Round", "Sixth Round", "Seventh Round", "UDFA"];
-
-// Same grade scale/labels/display map TeamPage.js's own Prospects list
-// uses — duplicated here per this codebase's per-file convention.
-const gradeDisplay = (g) => {
-  const map = {
-    "Early First Round":  { short: "1st", bg: "#3B6D11", border: "#27500A" },
-    "Middle First Round": { short: "1st", bg: "#3B6D11", border: "#27500A" },
-    "Late First Round":   { short: "1st", bg: "#3B6D11", border: "#27500A" },
-    "Second Round":       { short: "2nd", bg: "#0F6E56", border: "#085041" },
-    "Third Round":        { short: "3rd", bg: "#185FA5", border: "#0C447C" },
-    "Fourth Round":       { short: "4th", bg: "#BA7517", border: "#854F0B" },
-    "Fifth Round":        { short: "5th", bg: "#BA7517", border: "#854F0B" },
-    "Sixth Round":        { short: "6th", bg: "#993C1D", border: "#712B13" },
-    "Seventh Round":      { short: "7th", bg: "#993C1D", border: "#712B13" },
-    "UDFA":                { short: "U",   bg: "#A32D2D", border: "#791F1F" },
-  };
-  return map[g] || null;
-};
-
-function GradeBadge({ grade }) {
-  const gd = gradeDisplay(grade);
-  if (!gd) return null;
-  return (
-    <div style={{
-      width: "58px", height: "42px", borderRadius: "5px",
-      backgroundColor: gd.bg, border: `2px solid ${gd.border}`,
-      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-    }}>
-      <span style={{ fontSize: "15px", fontWeight: 900, color: "#fff", lineHeight: 1 }}>{gd.short}</span>
-      <span style={{ fontSize: "6px", fontWeight: 800, color: "rgba(255,255,255,0.85)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-        {grade === "UDFA" ? "UDFA" : "ROUND"}
-      </span>
-    </div>
-  );
-}
 
 // ── Shared sidebar card shell — TeamPage.js's SidebarCard: hairline
 // border, rounded, a solid team-color header. ──
@@ -270,7 +236,10 @@ export default function HighSchoolTeamPage() {
         ]);
         // An unreleased class (utils/prospectYears.js) only shows to admins.
         const allAlumni = allPlayersSnap.docs.map((d) => ({ id: d.id, ...d.data() })).filter(sameState)
-          .filter((p) => isAdmin || !isUnreleasedYear(p.Eligible));
+          .filter((p) => isAdmin || !isUnreleasedYear(p.Eligible))
+          // Still in high school (the class of 2027 today): not on these
+          // pages at all, admins included (user, 2026-11-22).
+          .filter((p) => !inHighSchool(p));
         if (cancelled) return;
         const idx = alumniSnap?.data() || {};
         setStats(idx.stats ? { stats: idx.stats, totals: idx.totals || {}, draftFrom: idx.draftFrom, draftTo: idx.draftTo } : null);
@@ -283,8 +252,10 @@ export default function HighSchoolTeamPage() {
         const C = Number(currentDraftClass());
         const rows = cfbd.map((r) => {
           const wd = r.id ? byId[r.id] : null;
-          return { key: `c${r.c}`, name: r.n, pos: wd?.Position || r.pos, college: wd?.School || r.s, hsClass: r.rc || Number(wd?.RecruitYear) || null, stars: r.st, id: wd?.id || null, slug: wd?.Slug || (r.slug && (isAdmin || !isUnreleasedSlug(r.slug)) ? r.slug : null) };
+          return { key: `c${r.c}`, name: r.n, pos: wd?.Position || r.pos, college: wd?.School || r.s, hsClass: r.rc || Number(wd?.RecruitYear) || null, stars: r.st, teamId: r.t ?? null, id: wd?.id || null, slug: wd?.Slug || (r.slug && (isAdmin || !isUnreleasedSlug(r.slug)) ? r.slug : null) };
         });
+        // A CFBD row with a high-school class still to come — same rule.
+        for (let i = rows.length - 1; i >= 0; i -= 1) if (rows[i].hsClass && rows[i].hsClass >= C) rows.splice(i, 1);
         const inList = new Set(rows.map((r) => r.id).filter(Boolean));
         allAlumni.filter((p) => !inList.has(p.id) && Number(p.Eligible) >= C).forEach((p) => rows.push({
           key: p.id, name: `${p.First || ""} ${p.Last || ""}`.trim(), pos: p.Position, college: p.School,
@@ -293,11 +264,32 @@ export default function HighSchoolTeamPage() {
         // Community grade per We-Draft player — one snapshot read
         // (utils/communityGrades.js), not a query per player.
         const avgs = await averageGradesFor(rows.map((r) => r.id).filter(Boolean));
-        rows.forEach((r) => { r.grade = r.id ? gradeLabel(avgs[r.id]) : null; });
+        rows.forEach((r) => { r.avg = r.id ? avgs[r.id] : null; r.grade = r.id ? gradeLabel(r.avg) : null; });
+        // Best first by our transfer stars (utils/portalStars.mjs — not shown
+        // here, just the order; user, 2026-11-22), then community grade,
+        // recruiting stars, class.
         const gi = (g) => (g ? GRADE_ORDER.indexOf(g) : 99);
-        rows.sort((a, b) => gi(a.grade) - gi(b.grade) || (a.hsClass || 9999) - (b.hsClass || 9999) || a.name.localeCompare(b.name));
+        const order = (list) => [...list].sort((a, b) => (b.ts || 0) - (a.ts || 0) || gi(a.grade) - gi(b.grade)
+          || (Number(b.stars) || 0) - (Number(a.stars) || 0) || (a.hsClass || 9999) - (b.hsClass || 9999) || a.name.localeCompare(b.name));
         if (cancelled) return;
-        setPlayers(rows);
+        setPlayers(order(rows));
+        // Transfer stars: the built grade per college (portalStars/{CFBD team
+        // id}), the admin's lock over it (config/portalGrades). A We-Draft
+        // player with no CFBD row goes by his draft grade. Re-sorts when in.
+        const teamIds = [...new Set(rows.map((r) => r.teamId).filter((t) => t != null).map(String))];
+        Promise.all([
+          Promise.all(teamIds.map((t) => getDoc(doc(db, "portalStars", t)).then((d) => d.data()?.rows || {}).catch(() => ({})))),
+          getDoc(doc(db, "config", "portalGrades")).then((d) => d.data()?.rows || {}).catch(() => ({})),
+        ]).then(([teamRows, locks]) => {
+          const built = Object.assign({}, ...teamRows);
+          rows.forEach((r) => {
+            const cid = r.key.startsWith("c") ? r.key.slice(1) : null;
+            const code = (cid && locks[cid]) || (r.id && locks[`wd:${r.id}`]);
+            const locked = code ? decodeGrade(code).s : null;
+            r.ts = locked || (cid && built[cid]?.[0]) || (r.avg != null ? starsFromDraft(r.avg) : null) || 0;
+          });
+          if (!cancelled) setPlayers(order(rows));
+        });
 
         // Drafted: precomputed with the rest (historical + the latest class's
         // picks), newest first.
@@ -507,8 +499,10 @@ function HeroStateMark({ abbr, geo, color1, color2 }) {
     return `${(px + rr * Math.cos(a)).toFixed(2)},${(py + rr * Math.sin(a)).toFixed(2)}`;
   }).join(" ");
   return (
-    <svg aria-hidden="true" viewBox={`${x0 - pad} ${y0 - pad} ${w + pad * 2} ${h + pad * 2}`} preserveAspectRatio="xMidYMid meet"
-      style={{ position: "absolute", top: "3%", right: "4%", height: "94%", width: "42%", zIndex: 0, pointerEvents: "none", overflow: "visible" }}>
+    // Pinned to the banner's right edge (xMax) — a narrow state like
+    // California used to float toward the middle of a wide box.
+    <svg aria-hidden="true" viewBox={`${x0 - pad} ${y0 - pad} ${w + pad * 2} ${h + pad * 2}`} preserveAspectRatio="xMaxYMid meet"
+      style={{ position: "absolute", top: "4%", right: "2.5%", height: "92%", width: "26%", zIndex: 0, pointerEvents: "none", overflow: "visible" }}>
       <defs>
         {/* The banner runs color1 → color2 left to right and the state
             sits on the color2 end — so it's filled with color1, edged in color2. */}
@@ -588,13 +582,15 @@ function HeroCard({ school, color1, color2, isMobile, heroLogo, cityState, geo }
 
       <div style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center", gap: isMobile ? "16px" : "28px" }}>
         {heroLogo && <HeroLogo src={sanitizeUrl(heroLogo)} alt={`${school.Name}${school.Mascot ? ` ${school.Mascot}` : ""} logo`} glow={!school.LogoDark} size={isMobile ? 84 : 150} />}
-        <div style={{ flex: 1, minWidth: 0 }}>
+        {/* With the state mark, the text keeps clear of the right side it sits on. */}
+        <div style={{ flex: 1, minWidth: 0, paddingRight: !isMobile && geo ? "26%" : 0 }}>
           {/* The page's <h1>: "Buford Wolves Football" — the name and mascot
-              look as before; "Football" rides small after the mascot. */}
+              show; "Football" is there for search but not shown. */}
           <h1 style={{ margin: 0, fontWeight: 400 }}>
             <span style={{
               display: "block", fontFamily: "'Anton', 'Arial Black', Arial, sans-serif",
-              fontSize: isMobile ? "clamp(22px, 7vw, 30px)" : "clamp(38px, 4.2vw, 56px)", color: "#fff",
+              // Big on a computer (user, 2026-11-21); a long name steps down so it stays on one line or two.
+              fontSize: isMobile ? "clamp(22px, 7vw, 30px)" : school.Name.length > 14 ? "clamp(44px, 4.8vw, 68px)" : "clamp(56px, 6.2vw, 92px)", color: "#fff",
               lineHeight: 1.05, letterSpacing: "0.02em",
               textTransform: "uppercase", wordBreak: "break-word", textShadow: "0 2px 8px rgba(0,0,0,0.4)",
             }}>
@@ -602,12 +598,13 @@ function HeroCard({ school, color1, color2, isMobile, heroLogo, cityState, geo }
             </span>
             <span style={{
               display: "block", fontFamily: "'Anton', 'Arial Black', Arial, sans-serif",
-              fontSize: isMobile ? "clamp(16px, 5vw, 22px)" : "clamp(24px, 3vw, 36px)",
+              fontSize: isMobile ? "clamp(16px, 5vw, 22px)" : "clamp(28px, 3.4vw, 46px)",
               color: "rgba(255,255,255,0.88)", lineHeight: 1.05, letterSpacing: "0.02em",
               textTransform: "uppercase", wordBreak: "break-word", textShadow: "0 2px 8px rgba(0,0,0,0.4)",
             }}>
               {school.Mascot ? `${school.Mascot} ` : ""}
-              <span style={{ fontSize: "0.5em", letterSpacing: "0.12em", color: "rgba(255,255,255,0.7)", verticalAlign: "middle" }}>Football</span>
+              {/* Not shown (user, 2026-11-21) — kept in the <h1> for search and screen readers. */}
+              <span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }}>Football</span>
             </span>
           </h1>
           {cityState && (
@@ -687,7 +684,10 @@ function RankStrip({ stats, state, color1, isMobile, loading }) {
 }
 
 // The school's five highest NFL draft picks (lowest overall pick; `Pick`
-// is the overall number in both historical and the latest class).
+// is the overall number in both historical and the latest class). Three or more: tiles across, the name leading
+// with the team's logo, the draft slot a small tag (user, 2026-11-22 — the
+// old "R1" headline drowned the name). One or two: full-width pick cards —
+// a lone tile stretched across the column looked empty.
 function TopPicks({ archive, color1, color2, isMobile, loading }) {
   const colleges = useSchools(archive.map((r) => r.School));
   const nfl = useNflTeams();
@@ -695,53 +695,70 @@ function TopPicks({ archive, color1, color2, isMobile, loading }) {
   const top = archive.filter((r) => Number(r.Pick) > 0)
     .sort((a, b) => Number(a.Pick) - Number(b.Pick) || Number(b.Year) - Number(a.Year)).slice(0, 5);
   if (!top.length) return null;
+  const teamOf = (r) => (r.nflAbbr ? nfl.byAbbr[r.nflAbbr] : nfl.byName[r["NFL Team"]]);
+  const head = (
+    <div style={{ display: "flex", alignItems: "baseline", gap: "10px", marginBottom: "10px" }}>
+      <span style={{ fontFamily: "'Anton', 'Arial Black', Arial, sans-serif", fontSize: isMobile ? "20px" : "24px", color: SIDE_INK, textTransform: "uppercase", letterSpacing: "0.02em" }}>
+        {top.length === 1 ? "Highest Draft Pick" : "Highest Draft Picks"}
+      </span>
+      {top.length > 1 && <span style={{ fontSize: "11px", fontWeight: 900, color: "#8a94a3", textTransform: "uppercase", letterSpacing: "0.1em" }}>Top {top.length}</span>}
+    </div>
+  );
+  if (top.length < 3) {
+    return (
+      <div style={{ marginBottom: "20px" }}>
+        <style>{`.wd-hs-dp { transition: transform .15s ease, box-shadow .15s ease; } a.wd-hs-dp:hover { transform: translateY(-2px); box-shadow: 0 12px 24px rgba(0,0,0,0.22); }`}</style>
+        {head}
+        <div style={{ display: "grid", gap: "10px" }}>
+          {top.map((r, i) => <DraftPickCard key={r.id} r={r} team={teamOf(r)} college={colleges[r.School]} color1={color1} color2={color2} isMobile={isMobile} featured={i === 0} />)}
+        </div>
+      </div>
+    );
+  }
   return (
     <div style={{ marginBottom: isMobile ? 0 : "20px" }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: "10px", marginBottom: "10px" }}>
-        <span style={{ fontFamily: "'Anton', 'Arial Black', Arial, sans-serif", fontSize: isMobile ? "20px" : "24px", color: SIDE_INK, textTransform: "uppercase", letterSpacing: "0.02em" }}>
-          Highest Draft Picks
-        </span>
-        <span style={{ fontSize: "11px", fontWeight: 900, color: "#8a94a3", textTransform: "uppercase", letterSpacing: "0.1em" }}>Top {top.length}</span>
-      </div>
+      {head}
       <div style={{
         display: isMobile ? "flex" : "grid", gridTemplateColumns: `repeat(${top.length}, minmax(0, 1fr))`, gap: isMobile ? "10px" : "12px",
         overflowX: isMobile ? "auto" : "visible", paddingBottom: isMobile ? "6px" : 0, scrollSnapType: isMobile ? "x mandatory" : undefined,
       }}>
         {top.map((r, i) => {
-          const team = r.nflAbbr ? nfl.byAbbr[r.nflAbbr] : nfl.byName[r["NFL Team"]];
+          const team = teamOf(r);
           const c = colleges[r.School];
           const name = r.Player || "—";
+          const sp = name.indexOf(" ");
+          const first = sp > 0 ? name.slice(0, sp) : name;
+          const rest = sp > 0 ? name.slice(sp + 1) : "";
+          const logo = team?.LogoDark || team?.Logo1 || "";
+          const cLogo = c?.LogoDark || c?.Logo1 || "";
+          const c1 = team?.Color1 || color1;
+          const c2 = team?.Color2 || color2;
           const card = (
             <div className="wd-hs-pick" style={{
               position: "relative", overflow: "hidden", borderRadius: "14px", height: "100%", boxSizing: "border-box",
-              padding: isMobile ? "14px 14px 12px" : "16px 16px 14px", color: "#fff",
-              border: `2px solid ${i === 0 ? GOLD : color2}`, boxShadow: "0 8px 20px rgba(0,0,0,0.2)",
-              background: `linear-gradient(rgba(0,0,0,${i === 0 ? 0.28 : 0.42}), rgba(0,0,0,0.55)), linear-gradient(150deg, ${color1} 0%, ${color1} 45%, ${color2} 100%)`,
+              padding: isMobile ? "14px 14px 12px" : "14px 14px 12px", color: "#fff", display: "flex", flexDirection: "column", gap: "10px",
+              border: `2px solid ${i === 0 ? GOLD : "rgba(0,0,0,0.08)"}`, boxShadow: "0 8px 20px rgba(0,0,0,0.2)",
+              background: teamFill(c1, c2, color1),
               animation: `wdHsPickIn .45s ease-out ${i * 0.07}s both`,
             }}>
-              {team?.LogoDark || team?.Logo1 ? (
-                <img src={team.LogoDark || team.Logo1} alt="" aria-hidden="true" style={{ position: "absolute", right: "-18%", bottom: "-14%", width: "78%", opacity: 0.16, pointerEvents: "none" }} />
-              ) : null}
-              <div style={{ position: "relative", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "6px" }}>
-                <div>
-                  <div style={{ fontSize: "10px", fontWeight: 900, letterSpacing: "0.14em", textTransform: "uppercase", color: i === 0 ? GOLD : "rgba(255,255,255,0.7)" }}>
-                    {r.Year} Draft
-                  </div>
-                  {/* Round first ("R1"), the overall pick under it. */}
-                  <div style={{ fontFamily: "'Anton', 'Arial Black', Arial, sans-serif", fontSize: isMobile ? "40px" : "46px", lineHeight: 1, textShadow: "0 3px 10px rgba(0,0,0,0.35)" }}>
-                    {r.Round ? `R${r.Round}` : "—"}
-                  </div>
-                  <div style={{ fontSize: "10px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.7)" }}>Pick {Number(r.Pick)}</div>
-                </div>
-                {team?.LogoDark || team?.Logo1 ? (
-                  <img src={team.LogoDark || team.Logo1} alt={team.Team || ""} title={`${team.City || ""} ${team.Team || ""}`.trim()} style={{ width: isMobile ? "34px" : "38px", height: isMobile ? "34px" : "38px", objectFit: "contain", filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.4))" }} />
-                ) : null}
+              <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px" }}>
+                {logo ? <img src={logo} alt={team?.Team || ""} title={`${team?.City || ""} ${team?.Team || ""}`.trim()} style={{ width: "48px", height: "48px", objectFit: "contain", filter: "drop-shadow(0 2px 6px rgba(0,0,0,0.45))" }} /> : <span />}
+                {/* Round and pick on one line, the year under it. */}
+                <span style={{ textAlign: "right", textTransform: "uppercase" }}>
+                  <span style={{ display: "block", fontFamily: "'Anton', 'Arial Black', Arial, sans-serif", fontSize: "20px", lineHeight: 1.05, letterSpacing: "0.03em", textShadow: "0 2px 6px rgba(0,0,0,0.35)", whiteSpace: "nowrap" }}>
+                    {r.Round ? `Rd ${r.Round}` : ""}{Number(r.Pick) > 0 ? ` · #${Number(r.Pick)}` : ""}
+                  </span>
+                  <span style={{ display: "block", marginTop: "3px", fontSize: "10px", fontWeight: 900, letterSpacing: "0.14em", color: i === 0 ? GOLD : "rgba(255,255,255,0.75)" }}>{r.Year} Draft</span>
+                </span>
               </div>
-              <div style={{ position: "relative", marginTop: "12px", fontSize: isMobile ? "15px" : "16px", fontWeight: 900, lineHeight: 1.15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
-              <div style={{ position: "relative", display: "flex", alignItems: "center", gap: "6px", marginTop: "6px", minWidth: 0 }}>
-                {r.Position && <span style={{ flexShrink: 0, background: "rgba(255,255,255,0.18)", borderRadius: "4px", padding: "2px 6px", fontSize: "10px", fontWeight: 900 }}>{r.Position}</span>}
-                {(c?.logoDark || c?.Logo1) && <img src={c.logoDark || c.Logo1} alt="" style={{ width: "16px", height: "16px", objectFit: "contain", flexShrink: 0 }} />}
-                <span style={{ fontSize: "11px", fontWeight: 800, color: "rgba(255,255,255,0.8)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.School}</span>
+              <div style={{ position: "relative", fontFamily: "'Anton', 'Arial Black', Arial, sans-serif", fontSize: name.length > 16 ? "19px" : "22px", lineHeight: 1.05, letterSpacing: "0.02em", textTransform: "uppercase", textShadow: "0 2px 6px rgba(0,0,0,0.4)", overflowWrap: "anywhere" }}>
+                <span style={{ display: "block" }}>{first}</span>
+                <span style={{ display: "block" }}>{rest || " "}</span>
+              </div>
+              <div style={{ position: "relative", display: "flex", alignItems: "center", gap: "6px", minWidth: 0, marginTop: "auto" }}>
+                {r.Position && <span style={{ flexShrink: 0, background: "#fff", color: colorLightness(c1) < 0.85 ? c1 : SIDE_INK, borderRadius: "4px", padding: "2px 6px", fontSize: "10px", fontWeight: 900 }}>{r.Position}</span>}
+                {cLogo && <img src={cLogo} alt="" style={{ width: "16px", height: "16px", objectFit: "contain", flexShrink: 0 }} />}
+                <span style={{ fontSize: "11px", fontWeight: 800, color: "rgba(255,255,255,0.85)", lineHeight: 1.15, overflowWrap: "anywhere" }}>{r.School}</span>
               </div>
             </div>
           );
@@ -766,7 +783,7 @@ function StateBoardSidebar({ board, school, sideC1 }) {
     <SidebarCard
       title={`Top ${abbr} Programs`}
       color1={sideC1}
-      headerRight={<Link to={`/hs/rankings?scope=${abbr}`} style={sideHeaderLinkStyle}>All</Link>}
+      headerRight={<Link to={`/hs/${abbr.toLowerCase()}`} style={sideHeaderLinkStyle}>All</Link>}
     >
       <div style={{ padding: "8px 14px 6px", fontSize: "10px", fontWeight: 900, color: "#7a8594", textTransform: "uppercase", letterSpacing: "0.1em", borderBottom: `1px solid ${SIDE_LINE_2}` }}>
         Most players in college football
@@ -807,7 +824,7 @@ function MoreHsLinks({ school, sideC1 }) {
   const links = [
     st && { to: `/hs/${st}`, title: `${stateName} High Schools`, note: "Top programs in college football" },
     st && { to: `/hs/${st}/nfl`, title: `${stateName} NFL Draft Picks`, note: "Schools with the most picks" },
-    st && { to: `/hs/rankings?scope=${abbr}`, title: `${abbr} Rankings`, note: "Full state rankings" },
+    st && { to: `/hs/${abbr.toLowerCase()}`, title: `${abbr} High Schools`, note: "The state page" },
     { to: "/hs", title: "All States", note: "National hub + heatmap" },
     { to: "/hs/nfl", title: "National NFL Draft", note: "Every pick by high school" },
     { to: "/hs/rankings", title: "National Rankings", note: "Every high school, ranked" },
@@ -886,75 +903,115 @@ function ListCard({ title, color1, color2, isMobile, children }) {
   );
 }
 
-function ColHead({ cols, color1 }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 16px", background: `${color1}f0` }}>
-      {cols.map(([label, style], i) => (
-        <div key={i} style={{ fontSize: "10px", fontWeight: 900, color: "rgba(255,255,255,0.85)", textTransform: "uppercase", letterSpacing: "0.06em", ...style }}>{label}</div>
-      ))}
-    </div>
-  );
-}
-
 function Empty({ children }) {
   return <div style={{ padding: "40px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "14px" }}>{children}</div>;
 }
 
-// A college (or NFL team) with its logo; linked to its team page.
-function TeamCell({ name, logo, to, color }) {
-  const inner = (
-    <>
-      {logo ? <img src={logo} alt="" style={{ width: "22px", height: "22px", objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} /> : <span style={{ width: "22px", flexShrink: 0 }} />}
-      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name || ""}</span>
-    </>
-  );
-  const style = { display: "flex", alignItems: "center", gap: "8px", minWidth: 0, fontSize: "13px", fontWeight: 800, color: color || "#444", textDecoration: "none" };
-  return to ? <Link to={to} style={style}>{inner}</Link> : <div style={style}>{inner}</div>;
+// The headshots of the We-Draft players among them (playerPhotos, 30 ids a
+// query): { [id]: url }.
+function useHeadshots(ids) {
+  const [shots, setShots] = useState({});
+  const key = ids.join(",");
+  useEffect(() => {
+    if (!ids.length) return undefined;
+    let off = false;
+    const groups = [];
+    for (let i = 0; i < ids.length; i += 30) groups.push(ids.slice(i, i + 30));
+    Promise.all(groups.map((g) => getDocs(query(collection(db, "playerPhotos"), where(documentId(), "in", g))).catch(() => null)))
+      .then((snaps) => {
+        const out = {};
+        snaps.forEach((s) => s?.docs.forEach((d) => { const u = d.data().headshot?.url; if (u) out[d.id] = u; }));
+        if (!off) setShots(out);
+      });
+    return () => { off = true; };
+  }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
+  return shots;
 }
 
-const collegeSlug = (school) => String(school || "").toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9\s]/g, "").trim().replace(/\s+/g, "-");
-const COL_D = { cls: "52px", pos: "52px", grade: "58px" };
-
-// Everyone from the school in college now (CFBD + We-Draft). Only We-Draft
-// players link (and carry a community grade).
+// Everyone from the school in college now (CFBD + We-Draft), one card a row (user,
+// 2026-11-21 — "better than an excel table"): his headshot (any player —
+// ESPN's when We-Draft.com has none) with his college's logo on its corner,
+// his name, position, recruiting stars and class, his college. No grade on
+// the card (user, 2026-11-22). Only We-Draft players link. Ordered by
+// transfer stars, best first (the loader's order).
 function PlayersTab({ players, schoolName, color1, color2, isMobile }) {
   const colleges = useSchools(players.map((p) => p.college));
+  const shots = useHeadshots(players.map((p) => p.id).filter(Boolean));
   if (players.length === 0) return <Empty>No college players from {schoolName} on file yet.</Empty>;
-  const collegeW = isMobile ? "24px" : "200px";
-  const COL = isMobile ? { cls: "38px", pos: "42px", grade: "46px" } : COL_D;
   return (
     <ListCard title={`${schoolName} in College (${players.length})`} color1={color1} color2={color2} isMobile={isMobile}>
-      <ColHead color1={color1} cols={[
-        ["Class", { width: COL.cls, flexShrink: 0, textAlign: "center" }], ["Pos", { width: COL.pos, flexShrink: 0, textAlign: "center" }],
-        ["Player", { flex: 1 }], [isMobile ? "" : "College", { width: collegeW, flexShrink: 0 }], ["Grade", { width: COL.grade, flexShrink: 0, textAlign: "center" }],
-      ]} />
-      {players.map((p, i) => {
-        const c = colleges[p.college];
-        const row = (
-          <>
-            <div style={{ flexShrink: 0, width: COL.cls, textAlign: "center", fontSize: isMobile ? "13px" : "15px", fontWeight: 900, color: "#444" }}>{p.hsClass || "—"}</div>
-            <div style={{ flexShrink: 0, width: COL.pos, textAlign: "center" }}>
-              {p.pos ? <span style={{ display: "block", background: color1, color: "#fff", fontSize: isMobile ? "10px" : "11px", fontWeight: 900, padding: isMobile ? "3px 2px" : "4px 6px", borderRadius: "4px", textTransform: "uppercase" }}>{p.pos}</span> : <span style={{ color: "#ddd" }}>—</span>}
-            </div>
-            <div style={{ flex: 1, minWidth: 0, fontWeight: 900, fontSize: isMobile ? "15px" : "18px", color: p.slug ? color1 : "#333", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {p.name}
-            </div>
-            <div style={{ flexShrink: 0, width: collegeW, minWidth: 0 }}>
-              <TeamCell name={isMobile ? "" : p.college} logo={c?.Logo1} />
-            </div>
-            <div style={{ flexShrink: 0, width: COL.grade, display: "flex", justifyContent: "center" }}>{p.grade ? <GradeBadge grade={p.grade} /> : null}</div>
-          </>
-        );
-        const style = { display: "flex", alignItems: "center", gap: isMobile ? "8px" : "10px", padding: isMobile ? "10px 8px" : "12px 16px", background: "#fff", textDecoration: "none", borderBottom: i < players.length - 1 ? "1px solid #f0f0f0" : "none" };
-        return p.slug ? (
-          <Link key={p.key} to={`/player/${p.slug}`} style={style}
-            onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
-          >{row}</Link>
-        ) : <div key={p.key} style={style}>{row}</div>;
-      })}
+      <style>{`.wd-hs-pc { transition: transform .15s ease, box-shadow .15s ease; } a.wd-hs-pc:hover { transform: translateY(-2px); box-shadow: 0 10px 22px rgba(0,0,0,0.12), 0 0 0 1.5px ${color1}; }`}</style>
+      {/* One card per row — never two across (user, 2026-11-21). */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: isMobile ? "8px" : "10px", padding: isMobile ? "10px" : "14px", background: "#f5f7fa" }}>
+        {players.map((p) => <CollegePlayerCard key={p.key} p={p} college={colleges[p.college]} photo={p.id ? shots[p.id] : ""} color1={color1} color2={color2} isMobile={isMobile} />)}
+      </div>
     </ListCard>
   );
+}
+
+// A team's card fill: its colors under a dark wash (a white or gold primary
+// still reads as the team, and white text stays readable).
+function teamFill(c1, c2, fallback) {
+  const a = c1 && colorLightness(c1) < 0.85 ? c1 : (c2 || fallback);
+  const b = c2 && c2 !== a ? c2 : a;
+  return `linear-gradient(90deg, rgba(0,0,0,0.5) 0%, rgba(0,0,0,0.22) 55%, rgba(0,0,0,0.38) 100%), linear-gradient(115deg, ${a} 0%, ${a} 55%, ${b} 100%)`;
+}
+
+// One player now in college, dressed in his college's colors (user,
+// 2026-11-22 — "more team themed"): the college logo sits inside the card as
+// a big watermark on the right, not floating beside it.
+function CollegePlayerCard({ p, college, photo, color1, color2, isMobile }) {
+  const logo = college?.LogoDark || college?.Logo1 || "";
+  const discLogo = college?.Logo1 || logo;
+  const c1 = college?.Color1 || color1;
+  const c2 = college?.Color2 || color2;
+  const S = isMobile ? 56 : 66;
+  // His We-Draft.com photo, else ESPN's college headshot by his CFBD id (the
+  // same id ESPN uses — TransferPortal.jsx); the college logo if neither loads.
+  const cid = p.key.startsWith("c") ? p.key.slice(1) : "";
+  const espn = /^\d+$/.test(cid) ? `https://a.espncdn.com/i/headshots/college-football/players/full/${cid}.png` : "";
+  const [bad, setBad] = useState({});
+  const shot = [photo, espn].find((u) => u && !bad[u]) || "";
+  const stars = Math.max(0, Math.min(5, Number(p.stars) || 0));
+  const body = (
+    <>
+      {logo && (
+        <img src={logo} alt="" aria-hidden="true" loading="lazy" style={{
+          position: "absolute", right: isMobile ? "-6%" : "4%", top: "50%", transform: "translateY(-50%) rotate(-8deg)",
+          height: isMobile ? "150%" : "170%", maxWidth: "45%", objectFit: "contain", opacity: 0.2, pointerEvents: "none",
+        }} />
+      )}
+      <span style={{ position: "relative", width: S, height: S, flexShrink: 0 }}>
+        <span style={{ position: "absolute", inset: 0, borderRadius: "50%", overflow: "hidden", background: shot ? `radial-gradient(circle at 50% 30%, ${c1}66, ${c1})` : "#fff", boxShadow: `0 0 0 3px #fff, 0 4px 12px rgba(0,0,0,0.35)`, display: "grid", placeItems: "center" }}>
+          {shot
+            ? <img src={shot} alt="" loading="lazy" onError={() => setBad((m) => ({ ...m, [shot]: true }))} style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "top" }} />
+            : discLogo && <img src={discLogo} alt="" loading="lazy" style={{ width: "68%", height: "68%", objectFit: "contain" }} />}
+        </span>
+        {shot && discLogo && (
+          <span style={{ position: "absolute", right: -6, bottom: -4, width: S * 0.44, height: S * 0.44, borderRadius: "50%", background: "#fff", boxShadow: "0 1px 4px rgba(0,0,0,0.35)", display: "grid", placeItems: "center" }}>
+            <img src={discLogo} alt="" loading="lazy" style={{ width: "72%", height: "72%", objectFit: "contain" }} />
+          </span>
+        )}
+      </span>
+      <span style={{ position: "relative", flex: 1, minWidth: 0, display: "grid", gap: "6px" }}>
+        <span style={{ fontFamily: "'Anton', 'Arial Black', Arial, sans-serif", fontWeight: 400, fontSize: isMobile ? "19px" : "24px", color: "#fff", lineHeight: 1.05, letterSpacing: "0.02em", textTransform: "uppercase", textShadow: "0 2px 6px rgba(0,0,0,0.4)", overflowWrap: "anywhere" }}>{p.name}</span>
+        <span style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", fontFamily: "Arial, sans-serif", fontSize: "12px", fontWeight: 800, color: "rgba(255,255,255,0.85)" }}>
+          {p.pos && <span style={{ background: "#fff", color: c1 && colorLightness(c1) < 0.85 ? c1 : SIDE_INK, borderRadius: "5px", padding: "2px 7px", fontWeight: 900, fontSize: "11px", letterSpacing: "0.04em" }}>{p.pos}</span>}
+          {stars > 0 && <span title={`${stars}-star recruit`} style={{ color: GOLD, letterSpacing: "1px", fontSize: "13px" }}>{"★".repeat(stars)}<span style={{ color: "rgba(255,255,255,0.3)" }}>{"★".repeat(5 - stars)}</span></span>}
+          {p.hsClass && <span>Class of {p.hsClass}</span>}
+        </span>
+        {p.college && (
+          <span style={{ fontFamily: "Arial, sans-serif", fontSize: isMobile ? "12px" : "13px", fontWeight: 900, color: "#fff", letterSpacing: "0.08em", textTransform: "uppercase", opacity: 0.95, overflowWrap: "anywhere" }}>{p.college}</span>
+        )}
+      </span>
+    </>
+  );
+  const style = {
+    position: "relative", overflow: "hidden", display: "flex", alignItems: "center", gap: isMobile ? "12px" : "16px",
+    padding: isMobile ? "12px" : "14px 18px", minWidth: 0, borderRadius: "12px", background: teamFill(c1, c2, color1),
+    borderLeft: `5px solid ${c2 || color2}`, boxShadow: "0 4px 12px rgba(0,0,0,0.12)", textDecoration: "none", color: "#fff",
+  };
+  return p.slug ? <Link to={`/player/${p.slug}`} className="wd-hs-pc" style={style}>{body}</Link> : <div className="wd-hs-pc" style={style}>{body}</div>;
 }
 
 // Position by position: how many are in college and drafted, and where that
@@ -1011,7 +1068,7 @@ function RankingsTab({ stats, school, color1, color2, isMobile }) {
       })}
       <div style={{ padding: "10px 16px", borderTop: `1px solid ${SIDE_LINE_2}`, background: SIDE_SOFT, display: "flex", justifyContent: "space-between", gap: "10px", flexWrap: "wrap", fontSize: "12px", fontWeight: 700, color: "#7a8594" }}>
         <span>Ranked among {Number(stats.totals?.nat || 0).toLocaleString()} high schools nationally, {Number(stats.totals?.state || 0).toLocaleString()} in {abbr}.</span>
-        <Link to={`/hs/rankings?scope=${abbr}`} style={{ color: color1, fontWeight: 900, textDecoration: "none" }}>Full rankings →</Link>
+        <Link to={`/hs/${abbr.toLowerCase()}`} style={{ color: color1, fontWeight: 900, textDecoration: "none" }}>Full rankings →</Link>
       </div>
     </ListCard>
   );
@@ -1033,44 +1090,92 @@ function useNflTeams() {
   return teams;
 }
 
-// Alumni drafted into the NFL: year, round and pick, college, NFL team.
-// Only this year's class (still We-Draft players) links to a player page.
+// Alumni drafted into the NFL, one pick card a row in the NFL team's colors
+// (user, 2026-11-22 — "more pick themed"; DraftPickCard). Newest first, or
+// by draft position. Only this year's class (still We-Draft
+// players) links to a player page.
 function ArchiveTab({ archive, schoolName, color1, color2, isMobile }) {
   const colleges = useSchools(archive.map((r) => r.School));
   const nfl = useNflTeams();
+  const [sort, setSort] = useState("year");
   if (archive.length === 0) return <Empty>No draft history on file for {schoolName} yet.</Empty>;
-  const w = isMobile ? { yr: "40px", pick: "58px", team: "28px" } : { yr: "52px", pick: "110px", team: "190px" };
+  const pickNo = (r) => Number(r.Pick) || 9999;
+  const list = sort === "pick"
+    ? [...archive].sort((a, b) => pickNo(a) - pickNo(b) || Number(b.Year) - Number(a.Year))
+    : archive;
+  const chip = (key, label) => (
+    <button type="button" onClick={() => setSort(key)} aria-pressed={sort === key} style={{
+      border: `1.5px solid ${sort === key ? color1 : "#d5dbe4"}`, background: sort === key ? color1 : "#fff", color: sort === key ? "#fff" : "#3a4352",
+      borderRadius: "999px", padding: "6px 14px", fontSize: "12px", fontWeight: 900, letterSpacing: "0.04em", cursor: "pointer", fontFamily: "Arial, sans-serif",
+    }}>{label}</button>
+  );
   return (
     <ListCard title={`${schoolName} in the NFL Draft (${archive.length})`} color1={color1} color2={color2} isMobile={isMobile}>
-      <ColHead color1={color1} cols={[
-        ["Year", { width: w.yr, flexShrink: 0, textAlign: "center" }], ["Pick", { width: w.pick, flexShrink: 0 }],
-        ["Player", { flex: 1 }], [isMobile ? "" : "College", { width: w.team, flexShrink: 0 }], [isMobile ? "" : "NFL Team", { width: w.team, flexShrink: 0 }],
-      ]} />
-      {archive.map((r, i) => {
-        const team = r.nflAbbr ? nfl.byAbbr[r.nflAbbr] : nfl.byName[r["NFL Team"]];
-        const teamName = team ? `${team.City} ${team.Team}` : r["NFL Team"] || r.nflAbbr;
-        const c = colleges[r.School];
-        const name = r.Player || [r.First, r.Last].filter(Boolean).join(" ") || "—";
-        const pick = r.Round ? (isMobile ? `R${r.Round} · ${r.Pick}` : `Rd ${r.Round} · Pick ${r.Pick}`) : "—";
-        return (
-          <div key={r.id} style={{ display: "flex", alignItems: "center", gap: "10px", padding: isMobile ? "10px 12px" : "12px 16px", borderBottom: i < archive.length - 1 ? "1px solid #f0f0f0" : "none" }}>
-            <div style={{ flexShrink: 0, width: w.yr, textAlign: "center", fontSize: "15px", fontWeight: 900, color: "#444" }}>{r.Year || "—"}</div>
-            <div style={{ flexShrink: 0, width: w.pick, fontSize: "12px", fontWeight: 900, color: "#666", whiteSpace: "nowrap" }}>{pick}</div>
-            <div style={{ flex: 1, minWidth: 0, fontWeight: 900, fontSize: isMobile ? "15px" : "17px", color: r.Slug ? color1 : "#333", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {r.Slug ? <Link to={`/player/${r.Slug}`} style={{ color: "inherit", textDecoration: "none" }}>{name}</Link> : name}
-              {r.Position ? <span style={{ marginLeft: "8px", fontSize: "11px", fontWeight: 900, color: "#999" }}>{r.Position}</span> : null}
-            </div>
-            <div style={{ flexShrink: 0, width: w.team, minWidth: 0 }}>
-              <TeamCell name={isMobile ? "" : r.School} logo={c?.Logo1} to={c ? `/team/${c.Slug || collegeSlug(r.School)}` : null} />
-            </div>
-            <div style={{ flexShrink: 0, width: w.team, minWidth: 0 }}>
-              <TeamCell name={isMobile ? "" : teamName} logo={team?.Logo1} to={team ? `/nfl/${team.abbr.toLowerCase()}` : null} />
-            </div>
-          </div>
-        );
-      })}
+      <style>{`.wd-hs-dp { transition: transform .15s ease, box-shadow .15s ease; } a.wd-hs-dp:hover { transform: translateY(-2px); box-shadow: 0 12px 24px rgba(0,0,0,0.22); }`}</style>
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", padding: isMobile ? "10px 10px 0" : "14px 14px 0", background: "#f5f7fa" }}>
+        <span style={{ fontSize: "10px", fontWeight: 900, color: "#7a8594", textTransform: "uppercase", letterSpacing: "0.1em", marginRight: "2px" }}>Sort</span>
+        {chip("year", "Newest")}
+        {chip("pick", "Draft Position")}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: isMobile ? "8px" : "10px", padding: isMobile ? "10px" : "14px", background: "#f5f7fa" }}>
+        {list.map((r) => {
+          const team = r.nflAbbr ? nfl.byAbbr[r.nflAbbr] : nfl.byName[r["NFL Team"]];
+          return <DraftPickCard key={r.id} r={r} team={team} college={colleges[r.School]} color1={color1} color2={color2} isMobile={isMobile} />;
+        })}
+      </div>
     </ListCard>
   );
+}
+
+// One pick, full width in the NFL team's colors (user, 2026-11-22): the
+// team's logo big beside the name, the name leading (the draft slot is a
+// small tag, not the headline), the team's wordmark faded on the right.
+function DraftPickCard({ r, team, college, color1, color2, isMobile, featured = false }) {
+  const name = r.Player || [r.First, r.Last].filter(Boolean).join(" ") || "—";
+  const teamName = team ? `${team.City || ""} ${team.Team || ""}`.trim() : r["NFL Team"] || r.nflAbbr || "";
+  const logo = team?.LogoDark || team?.Logo1 || "";
+  const word = team?.WordmarkDark || team?.Wordmark || "";
+  const cLogo = college?.LogoDark || college?.Logo1 || "";
+  const c1 = team?.Color1 || color1;
+  const c2 = team?.Color2 || color2;
+  const L = isMobile ? 52 : 74;
+  const slot = [r.Year && `${r.Year}`, r.Round && `Round ${r.Round}`, Number(r.Pick) > 0 && `Pick ${Number(r.Pick)}`].filter(Boolean).join(" · ");
+  const body = (
+    <>
+      {word && (
+        <img src={word} alt="" aria-hidden="true" loading="lazy" style={{
+          position: "absolute", right: isMobile ? "-10%" : "2%", top: "50%", transform: "translateY(-50%) rotate(-6deg)",
+          width: isMobile ? "62%" : "44%", maxHeight: "120%", objectFit: "contain", opacity: 0.16, pointerEvents: "none",
+        }} />
+      )}
+      {logo
+        ? <img src={logo} alt={teamName} title={teamName} loading="lazy" style={{ position: "relative", width: L, height: L, objectFit: "contain", flexShrink: 0, filter: "drop-shadow(0 3px 8px rgba(0,0,0,0.45))" }} />
+        : <span style={{ width: L, flexShrink: 0 }} />}
+      <span style={{ position: "relative", flex: 1, minWidth: 0, display: "grid", gap: "7px" }}>
+        <span style={{ fontFamily: "'Anton', 'Arial Black', Arial, sans-serif", fontSize: isMobile ? "20px" : "26px", color: "#fff", lineHeight: 1.05, letterSpacing: "0.02em", textTransform: "uppercase", textShadow: "0 2px 6px rgba(0,0,0,0.4)", overflowWrap: "anywhere" }}>{name}</span>
+        <span style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", fontFamily: "Arial, sans-serif", fontSize: "12px", fontWeight: 800, color: "rgba(255,255,255,0.9)" }}>
+          {slot && (
+            <span style={{ background: featured ? GOLD : "rgba(0,0,0,0.35)", color: featured ? "#1a1f2b" : "#fff", border: featured ? "none" : "1px solid rgba(255,255,255,0.25)", borderRadius: "5px", padding: "2px 8px", fontWeight: 900, fontSize: "11px", letterSpacing: "0.06em", textTransform: "uppercase" }}>{slot}</span>
+          )}
+          {r.Position && <span style={{ background: "#fff", color: colorLightness(c1) < 0.85 ? c1 : SIDE_INK, borderRadius: "5px", padding: "2px 7px", fontWeight: 900, fontSize: "11px", letterSpacing: "0.04em" }}>{r.Position}</span>}
+          {r.School && (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", minWidth: 0 }}>
+              {cLogo && <img src={cLogo} alt="" loading="lazy" style={{ width: "18px", height: "18px", objectFit: "contain", flexShrink: 0 }} />}
+              {r.School}
+            </span>
+          )}
+        </span>
+      </span>
+    </>
+  );
+  const style = {
+    position: "relative", overflow: "hidden", display: "flex", alignItems: "center", gap: isMobile ? "12px" : "18px",
+    padding: isMobile ? "12px 14px" : "14px 20px", minWidth: 0, borderRadius: "12px", background: teamFill(c1, c2, color1),
+    borderLeft: `5px solid ${featured ? GOLD : c2}`, boxShadow: "0 4px 12px rgba(0,0,0,0.14)", textDecoration: "none", color: "#fff",
+  };
+  return r.Slug && !isUnreleasedSlug(r.Slug)
+    ? <Link to={`/player/${r.Slug}`} className="wd-hs-dp" style={style}>{body}</Link>
+    : <div style={style}>{body}</div>;
 }
 
 // In The News — the college team page's sidebar (TeamPage.js NewsSidebar):

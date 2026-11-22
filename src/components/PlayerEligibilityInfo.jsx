@@ -23,6 +23,13 @@
 //                        the /hs pages' own, user 2026-11-21; it replaced
 //                        the uploaded stateSilhouettes images), else the
 //                        state's shorthand ("TX").
+//                        Optional, hand-entered (only Dylan Raiola so far,
+//                        user 2026-11-22): players.PastCommits ["Ohio State",
+//                        …] — schools he committed to before signing, oldest
+//                        first, shown between the colleges and the high
+//                        school as "Committed"; players.PastHighSchools
+//                        [{ Name, City, State }] — high schools before the
+//                        one he graduated from, oldest first, under it.
 //   Hometown / Born / Age  players.Hometown / Birthday when entered, else the
 //                        ESPN athlete record (useEspnBio) — shown only if known
 //   Accolades            under each stop: national awards won there (ESPN,
@@ -194,6 +201,20 @@ function useHighSchool(name, state) {
   }, [name, state]);
   return found;
 }
+// Several earlier high schools at once (players.PastHighSchools): [hs | null].
+function usePastHighSchools(list) {
+  const [found, setFound] = useState([]);
+  const key = (list || []).map((x) => `${x.Name}|${x.State}`).join(";");
+  useEffect(() => {
+    setFound([]);
+    if (!key) return undefined;
+    let cancelled = false;
+    Promise.all(key.split(";").map((k) => { const [n, st] = k.split("|"); return findHighSchool(n, stateName(st)).catch(() => null); }))
+      .then((hs) => { if (!cancelled) setFound(hs); });
+    return () => { cancelled = true; };
+  }, [key]);
+  return found;
+}
 
 const GAP = 12; // between stops
 // fallback: the marker's text with no logo (default: the name's initials).
@@ -349,8 +370,11 @@ export function useCareerPath(player, espnId, draft) {
   const eventYear = player?.Declared || draft ? Number(player?.Eligible) || null : null;
   const eventData = useEventYear(eventYear);
   const eventRows = playerEvents(eventData, player?.id, eventYear);
-  const brands = useSchools([...stops.filter((s) => s.Level !== "JUCO").map((s) => s.School), ...eventRows.map((r) => r.school).filter(Boolean)]);
+  const pastCommits = Array.isArray(player?.PastCommits) ? [...player.PastCommits].reverse() : [];
+  const pastHs = Array.isArray(player?.PastHighSchools) ? [...player.PastHighSchools].reverse() : [];
+  const brands = useSchools([...stops.filter((s) => s.Level !== "JUCO").map((s) => s.School), ...pastCommits, ...eventRows.map((r) => r.school).filter(Boolean)]);
   const { hs } = useHighSchool(player?.HighSchool, player?.State);
+  const pastHsDocs = usePastHighSchools(pastHs);
   const stillInSchool = Number(player?.Eligible) >= Number(currentDraftClass());
   // A promoted recruit still in high school: the college is where they're
   // committed (not current), and the high school is the current stop.
@@ -428,6 +452,11 @@ export function useCareerPath(player, espnId, draft) {
       to: s.Level !== "JUCO" && brands[s.School] ? `/team/${brands[s.School].slug || teamSlug(s.School)}` : null,
       accolades: s.Level === "JUCO" ? [] : awardsAt(i, s),
     })),
+    // Schools he committed to before the one he signed with, newest first.
+    ...pastCommits.map((school) => ({
+      key: `commit-${school}`, name: school, brand: brands[school] || null, span: "Committed",
+      to: brands[school] ? `/team/${brands[school].slug || teamSlug(school)}` : null, accolades: [],
+    })),
     ...(player?.HighSchool ? [{
       key: "hs", name: player.HighSchool, label: "High School",
       brand: hs?.Logo1 ? hs : null,
@@ -442,6 +471,16 @@ export function useCareerPath(player, espnId, draft) {
       // The school's state page (/hs/ga) — user, 2026-11-20.
       to: hsStateAbbr ? `/hs/${hsStateAbbr.toLowerCase()}` : null,
     }] : []),
+    // High schools before that one, newest first — just the school.
+    ...pastHs.map((x, i) => {
+      const doc = pastHsDocs[i] || null;
+      const ab = STATE_ABBR[stateName(x.State)] || null;
+      return {
+        key: `hs-${x.Name}-${i}`, name: x.Name, label: "High School", brand: doc?.Logo1 ? doc : null,
+        state: ab, fallback: ab, sub: [x.City || doc?.City, stateName(x.State)].filter(Boolean).join(", "),
+        accolades: [], to: ab ? `/hs/${ab.toLowerCase()}` : null,
+      };
+    }),
   ];
   return { rows, hometown, born, age };
 }

@@ -8,10 +8,16 @@
 //   All time        every closed portal (portalSimResults — what Community →
 //                   Insights counts) and the classes users saved / shared.
 //   Latest          the newest closed portals: school, signings, grade, NIL.
+//   Schools         which schools people play (user, 2026-11-22): runs
+//                   started / finished per school, all time, from
+//                   portalSimTeams (utils/portalSim/usage.js) — counting
+//                   began 2026-11-22; sortable, plus the schools nobody's used.
 import { useEffect, useState } from "react";
 import { collection, collectionGroup, count, getAggregateFromServer, getDocs, limit, orderBy, query, where, documentId } from "firebase/firestore";
 import { db } from "../firebase";
-import { PORTAL_DAILY, statsDay } from "../utils/portalSim/usage";
+import { PORTAL_DAILY, PORTAL_TEAMS, statsDay } from "../utils/portalSim/usage";
+import SIM_TEAMS from "../utils/portalSim/simTeams";
+import { useBranding } from "./portalSim/PortalCommunity";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -28,6 +34,10 @@ export default function AdminPortalSimStats() {
   const [days, setDays] = useState(null);
   const [totals, setTotals] = useState(null);
   const [latest, setLatest] = useState(null);
+  const [schools, setSchools] = useState(null);
+  const [sortBy, setSortBy] = useState("started");
+  const [showUnused, setShowUnused] = useState(false);
+  const branding = useBranding();
   const [error, setError] = useState("");
   const [nonce, setNonce] = useState(0);
 
@@ -36,21 +46,23 @@ export default function AdminPortalSimStats() {
     setError("");
     const range = lastDays(DAYS);
     const load = async () => {
-      const [daily, results, saved, shared, recent] = await Promise.all([
+      const [daily, results, saved, shared, recent, teams] = await Promise.all([
         getDocs(query(collection(db, PORTAL_DAILY), where(documentId(), ">=", range[range.length - 1]))),
         getAggregateFromServer(collection(db, "portalSimResults"), { n: count() }),
         getAggregateFromServer(collectionGroup(db, "portalSims"), { n: count() }).catch(() => null),
         getAggregateFromServer(collection(db, "publicPortalSims"), { n: count() }),
         getDocs(query(collection(db, "portalSimResults"), orderBy("createdAt", "desc"), limit(15))),
+        getDocs(collection(db, PORTAL_TEAMS)).catch((e) => { console.warn("Portal sim school stats:", e?.code || e); return { docs: [] }; }),
       ]);
       const byDay = Object.fromEntries(daily.docs.map((d) => [d.id, d.data()]));
       return {
         days: range.map((day) => ({ day, started: byDay[day]?.started || 0, finished: byDay[day]?.finished || 0 })),
         totals: { results: results.data().n, saved: saved ? saved.data().n : null, shared: shared.data().n },
         latest: recent.docs.map((d) => ({ id: d.id, ...d.data() })),
+        schools: teams.docs.map((d) => ({ team: d.id, started: d.data().started || 0, finished: d.data().finished || 0, lastAt: d.data().lastAt?.toDate?.() || null })),
       };
     };
-    load().then((r) => { if (!live) return; setDays(r.days); setTotals(r.totals); setLatest(r.latest); })
+    load().then((r) => { if (!live) return; setDays(r.days); setTotals(r.totals); setLatest(r.latest); setSchools(r.schools); })
       .catch((e) => { console.error("Portal sim stats load error:", e); if (live) setError(e.message || "Couldn't load the stats."); });
     return () => { live = false; };
   }, [nonce]);
@@ -69,6 +81,24 @@ export default function AdminPortalSimStats() {
       {sub && <div style={{ fontSize: 12, color: "#667", fontWeight: 700 }}>{sub}</div>}
     </div>
   );
+
+  const schoolName = (t) => SIM_TEAMS[t] || branding?.[t]?.School || t;
+  const sorters = {
+    school: (a, b) => schoolName(a.team).localeCompare(schoolName(b.team)),
+    started: (a, b) => b.started - a.started || b.finished - a.finished,
+    finished: (a, b) => b.finished - a.finished || b.started - a.started,
+    rate: (a, b) => (b.started ? b.finished / b.started : -1) - (a.started ? a.finished / a.started : -1) || b.started - a.started,
+    last: (a, b) => (b.lastAt?.getTime() || 0) - (a.lastAt?.getTime() || 0),
+  };
+  const used = [...schools].sort(sorters[sortBy]);
+  const usedSet = new Set(schools.map((r) => r.team));
+  const unused = Object.keys(SIM_TEAMS).filter((t) => !usedSet.has(t)).sort((a, b) => schoolName(a).localeCompare(schoolName(b)));
+  const schoolMax = Math.max(1, ...schools.map((r) => r.started));
+  const schoolStarts = sum("started", schools);
+  const sortTh = (key, text, extra = {}) => (
+    <th style={{ ...th, cursor: "pointer", color: sortBy === key ? BLUE : th.color, ...extra }} onClick={() => setSortBy(key)}>{text}{sortBy === key ? " ▾" : ""}</th>
+  );
+  const logoOf = (t) => branding?.[t]?.Logo1 || branding?.[t]?.LogoDark || "";
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
@@ -112,6 +142,65 @@ export default function AdminPortalSimStats() {
             </tbody>
           </table>
         </div>
+      </div>
+
+      <div style={card}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
+          <div style={{ fontWeight: 900, color: "#111" }}>Schools</div>
+          <div style={{ fontSize: 12, color: "#667", fontWeight: 700 }}>
+            {used.length} of {Object.keys(SIM_TEAMS).length} schools played · all time, counting began Nov 22, 2026 · click a column to sort
+          </div>
+        </div>
+        {used.length === 0 ? <div style={{ color: "#667", fontSize: 13 }}>No school counts yet.</div> : (
+          <div style={{ overflowX: "auto", maxHeight: 560, overflowY: "auto" }}>
+            <table style={{ borderCollapse: "collapse", width: "100%" }}>
+              <thead style={{ position: "sticky", top: 0, background: "#fff" }}>
+                <tr>
+                  <th style={th}>#</th>
+                  {sortTh("school", "School")}
+                  {sortTh("started", "Started")}
+                  {sortTh("finished", "Finished")}
+                  {sortTh("rate", "Finish rate")}
+                  <th style={th}>Share</th>
+                  {sortTh("last", "Last played")}
+                  <th style={{ ...th, width: "30%" }} />
+                </tr>
+              </thead>
+              <tbody>
+                {used.map((r, i) => (
+                  <tr key={r.team}>
+                    <td style={{ ...td, color: "#667" }}>{i + 1}</td>
+                    <td style={{ ...td, fontWeight: 800 }}>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                        {logoOf(r.team) ? <img src={logoOf(r.team)} alt="" style={{ width: 20, height: 20, objectFit: "contain" }} onError={(e) => { e.currentTarget.style.visibility = "hidden"; }} /> : <span style={{ width: 20 }} />}
+                        {schoolName(r.team)}
+                      </span>
+                    </td>
+                    <td style={{ ...td, fontWeight: 900, color: BLUE }}>{r.started}</td>
+                    <td style={{ ...td, fontWeight: 900, color: "#b26a00" }}>{r.finished}</td>
+                    <td style={td}>{rate(r.finished, r.started)}</td>
+                    <td style={td}>{schoolStarts ? `${((r.started / schoolStarts) * 100).toFixed(1)}%` : "—"}</td>
+                    <td style={td}>{r.lastAt ? r.lastAt.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—"}</td>
+                    <td style={td}>
+                      <div style={{ display: "grid", gap: 2 }}>
+                        <span style={{ display: "block", height: 6, width: `${(r.started / schoolMax) * 100}%`, background: BLUE, borderRadius: 3 }} />
+                        <span style={{ display: "block", height: 6, width: `${(r.finished / schoolMax) * 100}%`, background: GOLD, borderRadius: 3 }} />
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {unused.length > 0 && (
+          <div style={{ marginTop: 10 }}>
+            <button type="button" onClick={() => setShowUnused((v) => !v)} style={{ border: "none", background: "none", color: BLUE, fontWeight: 800, cursor: "pointer", padding: 0 }}>
+              {showUnused ? "▾" : "▸"} Not played yet ({unused.length})
+            </button>
+            {showUnused && <div style={{ fontSize: 13, color: "#444", marginTop: 6, lineHeight: 1.6 }}>{unused.map(schoolName).join(" · ")}</div>}
+          </div>
+        )}
       </div>
 
       <div style={card}>

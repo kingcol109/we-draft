@@ -51,6 +51,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import DepartureIcon, { GRAD_ICON, NFL_ICON } from "../DepartureIcon";
 import { CareerStop, useCareerPath } from "../PlayerEligibilityInfo";
 import { CoachTags, CoachButtons, RecQuote, RecChip } from "./StaffParts";
+import PopLayer, { popMaxHeight } from "./PopLayer";
 import { lockScroll } from "../../utils/scrollLock";
 import { fetchPortalTeamPage } from "../../utils/portalData";
 import { currentDraftClass } from "../../utils/eligibility";
@@ -322,10 +323,13 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
   ].filter(Boolean);
 
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 20000, background: "rgba(3,7,14,0.72)", display: "flex", alignItems: isMobile ? "stretch" : "flex-start", justifyContent: "center", padding: isMobile ? 0 : "70px 16px 24px", overflowY: "auto", overscrollBehavior: "contain" }}>
+    <PopLayer>
+    {/* Over the page (PopLayer) and scrolling inside the card itself —
+        user, 2026-11-22: the popups didn't scroll. */}
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 20000, background: "rgba(3,7,14,0.72)", display: "flex", alignItems: isMobile ? "stretch" : "center", justifyContent: "center", padding: isMobile ? 0 : 20, overscrollBehavior: "contain", fontFamily: "Arial, sans-serif" }}>
       <div role="dialog" aria-label={p.name} onClick={(e) => e.stopPropagation()} className="wd-sim-pop wd-sim-scroll" style={{
         position: "relative", width: "100%", maxWidth: 860, background: "#0e1626", border: isMobile ? "none" : `1px solid ${LINE}`, borderRadius: isMobile ? 0 : 18, overflow: "hidden", color: INK,
-        maxHeight: isMobile ? "100%" : "none", overflowY: isMobile ? "auto" : "hidden", overflowX: "hidden", overscrollBehavior: "contain", boxShadow: "0 20px 60px rgba(0,0,0,0.6)",
+        maxHeight: isMobile ? "100%" : popMaxHeight(40), overflowY: "auto", overflowX: "hidden", overscrollBehavior: "contain", boxShadow: "0 20px 60px rgba(0,0,0,0.6)",
       }}>
         <style>{CELEBRATE_CSS}</style>
         {/* Header, in his school's colors (his new one once he's committed):
@@ -691,6 +695,7 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
         </div>
       </div>
     </div>
+    </PopLayer>
   );
 }
 

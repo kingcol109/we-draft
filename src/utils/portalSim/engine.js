@@ -465,7 +465,14 @@ export function userOffer(state, slug, pid, { nil }) {
   const hit = offerHit(state, slug, p, amount);
   // since: interest builds from his first day on your board; made: the
   // window you first offered (an offer lands the window after).
-  const offer = { nil: amount, window: state.window, since: p.offers[slug]?.since ?? evalSince ?? state.window, made: p.offers[slug]?.made ?? state.window };
+  // Market Watch entrants (user, 2026-11-22): CPU schools contact and offer
+  // them as Market Watch closes (endMarket — stamped "made" at split.at,
+  // interest from split.at + 1). Your first-window moves on them count the
+  // same, so the head start never costs you.
+  const sp = state.cfg.split;
+  const marketNew = sp && p.enteredWindow === sp.at + 1 && state.window === sp.at + 1;
+  const firstMade = marketNew ? sp.at : state.window;
+  const offer = { nil: amount, window: state.window, since: p.offers[slug]?.since ?? evalSince ?? state.window, made: p.offers[slug]?.made ?? firstMade };
   const teams = state.teams;
   const q = {
     ...p,
@@ -708,6 +715,25 @@ function cpuStaff(state) {
 // recruit who hasn't played much — never "steps in and replaces"),
 // target (the admin's targets for your school — always), then the want's
 // own: hole / upgrade / talent / depth / body.
+// Before anyone's on him (the evaluation period — user, 2026-11-22: every
+// pick read "Realistic"), his likely suitors stand in: the programs good
+// enough for him (tier within recs.suitorTier of cfg.idealTier for his
+// stars) — your fit against the one he'd rank recs.suitorRank-th (2nd: a
+// real contender, not just his dream school). Cached per state.
+const SUITORS = new WeakMap();
+function suitorBest(state, slug, p) {
+  let m = SUITORS.get(state);
+  if (!m) { m = new Map(); SUITORS.set(state, m); }
+  const key = `${slug}|${p.id}`;
+  if (m.has(key)) return m.get(key);
+  const r = state.cfg.staff?.recs || {};
+  const maxTier = (state.cfg.idealTier?.[p.stars] ?? 4.5) + (r.suitorTier ?? 0.5);
+  const grades = Object.values(state.teams).filter((t) => t.slug !== slug && t.slug !== p.team && !t.fcs && !t.academy && (t.tier ?? 3) <= maxTier)
+    .map((t) => gradeOffer(state, t.slug, p, likelyOffer(state, t.slug, p)).base).sort((a, b) => b - a);
+  const v = grades[Math.min(grades.length - 1, (r.suitorRank ?? 2) - 1)] ?? 0;
+  m.set(key, v);
+  return v;
+}
 export function landable(state, slug, p) {
   const r = state.cfg.staff?.recs || {};
   // On fit (his A–F grade of each school — what you can't change by
@@ -721,6 +747,7 @@ export function landable(state, slug, p) {
     const g = gradeOffer(state, k, p, likelyOffer(state, k, p));
     if (g.base > best) { best = g.base; lead = g.held + g.coach; }
   });
+  if (!slugs.length) best = suitorBest(state, slug, p);
   const ratio = best > mine && best > 0 ? mine / best : 1;
   const gap = (state.teams[slug]?.tier ?? 3) - (state.cfg.idealTier?.[p.stars] ?? 4.5);
   return { value: ratio - lead * (r.headStart ?? 0.5) - Math.max(0, gap - 0.5) * (r.tierPenalty ?? 0.08), rivals: slugs.length };
@@ -772,45 +799,84 @@ function staffRecs(state) {
       fresh[pid] = {
         by: "HC", kind: upside(p) ? "upside" : "target", pos: p.pos, pri: 3 + 1 / (1 + (Number(rank) || 9)), w: state.window, lost: null,
         miles: miles != null ? Math.round(miles) : null, rivals: state.window > evalW ? land.rivals : null, longshot: land.value < 1 - reach,
+        odds: land.value < 1 - reach ? "longshot" : "realistic",
         have: have[p.pos] || 0, goal: team.portalTarget?.[p.pos] ?? null,
       };
       used.add(pid);
     });
     const perWant = s.recs?.perWant ?? 2;
     const max = s.recs?.max ?? 12;
-    // One pass per want kind block keeps a hole ahead of a depth body.
+    // Every name carries its odds (user, 2026-11-22): "longshot" (a reach —
+    // the risk is worth the reward), "realistic" (we can win this one) or
+    // "fallback" (a safe option we'd very likely land). For one need the
+    // staff never stacks the best names: at most ONE long shot, then a
+    // name more realistic than the first, then — for the big needs — a
+    // fallback. "No QB? Go get the best one — and have a real plan B."
+    const fallDrop = R.fallbackDrop ?? 0.75;
+    const better = (a, b) => a.ratio >= b.ratio + (R.saferBy ?? 0.04) || a.level <= b.level - 0.5;
     for (const x of wants) {
       if (count >= max) break;
-      const cands = portal.filter((p) => p.team !== slug && !p.cut?.[slug] && !used.has(p.id) && p.ask <= available * (s.recs?.budgetShare ?? 0.6))
+      // Everyone near the want (down to fallDrop under its bar — fallbacks
+      // come from here), with how good he is to you and how landable.
+      const pool = portal.filter((p) => p.team !== slug && !p.cut?.[slug] && !used.has(p.id) && p.ask <= available * (s.recs?.budgetShare ?? 0.6))
         .map((p) => ({ p, level: seenEff(state, slug, p) }))
-        // Late (past recs.longshotUntil), the bar drops toward the best
-        // left (recs.lateDrop stars by the end): you missed — bring guys in.
-        .filter(({ p, level }) => fitsWant(x, p, level) || (!early && fitsWant({ ...x, min: x.min - (R.lateDrop ?? 1) * progressOf(state, state.window) }, p, level)))
+        .filter(({ p, level }) => fitsWant({ ...x, min: x.min - Math.max(fallDrop, early ? 0 : (R.lateDrop ?? 1) * progressOf(state, state.window)) }, p, level))
         .sort((a, b) => b.level - a.level)
-        .slice(0, s.recs?.look ?? 30)
+        .slice(0, (s.recs?.look ?? 30) * 2)
         .map(({ p, level }) => {
           const land = landable(state, slug, p);
           const miles = M.milesBetween(p.home, team.loc);
           const near = miles != null && miles <= (R.localMiles ?? 200) ? 0.15 : 0;
-          return { p, level, ratio: land.value, rivals: land.rivals, miles, longshot: land.value < 1 - reach, score: (level - x.min + 1) * Math.min(1, land.value) + near };
+          // Meets the want — or, late (past recs.longshotUntil), the bar
+          // drops toward the best left (recs.lateDrop stars by the end).
+          const meets = fitsWant(x, p, level) || (!early && fitsWant({ ...x, min: x.min - (R.lateDrop ?? 1) * progressOf(state, state.window) }, p, level));
+          return { p, level, meets, ratio: land.value, rivals: land.rivals, miles, longshot: land.value < 1 - reach, score: (level - x.min + 1) * Math.min(1, land.value) + near };
         })
-        .filter((c) => c.ratio >= 1 - reach || (early && c.ratio >= 1 - (R.longReach ?? 0.22)))
-        .sort((a, b) => a.longshot - b.longshot || b.score - a.score)
-        .slice(0, perWant + 2);
-      let here = 0;
-      for (const c of cands) {
-        if (count >= max || here >= perWant) break;
-        // Long shots: a couple a window at most.
-        if (c.longshot) {
-          if (longshots >= (R.longshots ?? 2)) continue;
-          longshots += 1;
+        .filter((c) => c.ratio >= 1 - reach || (early && c.ratio >= 1 - (R.longReach ?? 0.22)));
+      const top = pool.filter((c) => c.meets).sort((a, b) => b.score - a.score);
+      const urgent = x.kind === "hole" || x.kind === "upgrade" || x.pos === "QB";
+      const picks = [];
+      // 1. The best name for the job — a long shot only while there's room
+      //    for one (recs.longshots a window).
+      const roomForLong = longshots < (R.longshots ?? 2);
+      const first = top.find((c) => !c.longshot || roomForLong);
+      if (first) { picks.push([first, first.longshot ? "longshot" : "realistic"]); if (first.longshot) longshots += 1; }
+      // 2. A realistic one, and more realistic than the first.
+      if (perWant >= 2) {
+        const ok2 = (c) => c !== first && !c.longshot && (!first || first.longshot || better(c, first));
+        // Nobody at the bar? A realistic name a little under it.
+        let second = top.find(ok2) || [...pool].sort((a, b) => b.score - a.score).find(ok2);
+        // The big needs always get a realistic name (user, 2026-11-22: "if
+        // they recommend one, they should recommend a second more realistic
+        // one") — anyone who'd still beat what's here now.
+        if (!second && urgent && x.cur != null) {
+          second = portal.filter((p) => p.pos === x.pos && (!x.sub || !p.sub || p.sub === x.sub) && p.team !== slug && !p.cut?.[slug] && !used.has(p.id) && p.id !== first?.p.id && p.ask <= available * (s.recs?.budgetShare ?? 0.6))
+            .map((p) => ({ p, level: seenEff(state, slug, p) })).filter((c) => c.level > x.cur + 0.1)
+            .sort((a, b) => b.level - a.level).slice(0, s.recs?.look ?? 30)
+            .map((c) => { const land = landable(state, slug, c.p); const miles = M.milesBetween(c.p.home, team.loc); return { ...c, ratio: land.value, rivals: land.rivals, miles, longshot: land.value < 1 - reach, score: (c.level - x.cur) * Math.min(1, land.value) }; })
+            .filter((c) => !c.longshot).sort((a, b) => b.score - a.score)[0] || null;
         }
-        here += 1;
+        if (second) picks.push([second, "realistic"]);
+      }
+      // 3. The big needs get a fallback: the most landable player who can
+      //    still help (we'd be his clear favorite).
+      if (urgent || perWant >= 3) {
+        const taken = new Set(picks.map(([c]) => c.p.id));
+        const safe = pool.filter((c) => !taken.has(c.p.id) && !c.longshot && c.ratio >= (R.safeRatio ?? 1))
+          .sort((a, b) => Math.min(1, b.ratio) - Math.min(1, a.ratio) || b.level - a.level)[0];
+        const last = picks[picks.length - 1]?.[0];
+        if (safe && (!last || safe.ratio >= last.ratio + (R.saferBy ?? 0.04) || (safe.ratio >= last.ratio && safe.level <= last.level - 0.25))) picks.push([safe, "fallback"]);
+      }
+      for (const [c, odds] of picks) {
+        if (count >= max) break;
         // Replacing a big loss: one he left at this position, about this
         // good — each named once where there's a choice.
         const replacing = x.kind === "hole" || x.kind === "upgrade" || x.kind === "body" || x.kind === "depth";
         const near = replacing ? (lostAt[x.pos] || []).filter((l) => effOf(l, cfg) <= c.level + 1) : [];
-        const lost = near.find((l) => !lostUsed.has(l.id)) || near[0] || null;
+        // Each loss is "replaced" once (user, 2026-11-22: three names all
+        // "replacing" the same player read the same) — the rest speak to
+        // the want itself.
+        const lost = near.find((l) => !lostUsed.has(l.id)) || null;
         if (lost) lostUsed.add(lost.id);
         // A depth / numbers want he'd start for reads as an upgrade.
         const starts = (x.kind === "depth" || x.kind === "body") && fitAt(state, slug, c.p).fit === "starter";
@@ -824,7 +890,8 @@ function staffRecs(state) {
         fresh[c.p.id] = {
           by, kind, pos: x.pos, pri: Math.round(x.pri * 100) / 100, w: state.window,
           lost: lost && kind === "replace" ? { pid: lost.id, why: lost.status === "declared" ? "nfl" : "portal" } : null,
-          longshot: c.longshot,
+          longshot: odds === "longshot",
+          odds: kind === "fallback" ? "fallback" : odds,
           miles: c.miles != null ? Math.round(c.miles) : null,
           // Who else is on him — only once boards exist (after the evaluation period).
           rivals: state.window > (cfg.board?.evalWindow ?? 1) ? c.rivals : null,

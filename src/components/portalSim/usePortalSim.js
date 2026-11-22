@@ -43,7 +43,7 @@ export default function usePortalSim({ data, team, seed, live = false, frequency
   // The real portal (user, 2026-11-18) skips both opening windows — the
   // real decisions are made — and opens on a recap of who left and why.
   const start = useCallback(() => {
-    countPortalSim("started"); // Admin → Portal Sim Stats (utils/portalSim/usage.js)
+    countPortalSim("started", team); // Admin → Portal Sim Stats (utils/portalSim/usage.js)
     if (live) {
       const r = openLivePortal(state);
       post(r.state, r.summary.events);
@@ -57,7 +57,7 @@ export default function usePortalSim({ data, team, seed, live = false, frequency
     post(next, next.log.slice(state.log.length));
     setRecap(null);
     setPhase("window");
-  }, [state, post, live]);
+  }, [state, post, live, team]);
   const apply = useCallback((r) => {
     if (r.error) { setError(r.error); return false; }
     setError("");

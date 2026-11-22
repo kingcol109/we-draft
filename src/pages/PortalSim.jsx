@@ -54,7 +54,7 @@ import LoadingSpinner from "../components/LoadingSpinner";
 import TransferStars from "../components/TransferStars";
 import usePortalSim from "../components/portalSim/usePortalSim";
 import PlayerCard from "../components/portalSim/PlayerCard";
-import { Briefing, StaffStrip, OnHim, RecQuote, RecChip, lastOf, CoachChip } from "../components/portalSim/StaffParts";
+import { Briefing, StaffStrip, OnHim, RecQuote, RecChip, OddsTag, lastOf, CoachChip, NeedCards, WR_BG, GRID, MONO } from "../components/portalSim/StaffParts";
 import { ROLE_SHORT, ROLE_COLOR, marketReport } from "../utils/portalSim/staff";
 import { DndContext, DragOverlay, PointerSensor, TouchSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
@@ -65,7 +65,7 @@ import { mergeConfig } from "../utils/portalSim/config";
 import { FBS_CONFERENCES } from "../utils/portalTeams";
 import { retainOdds, urgencyOf, teamNeeds, tiesOf, competitive, needLevelOf, effOf, gradeOffer, likelyOffer, releaseValue } from "../utils/portalSim/engine";
 import { gradeLabel } from "../utils/gradeScale";
-import { SimTabs, MyClasses, PortalCommunity, SaveClassButton, ShareClass, DraftSimPromo, useBranding } from "../components/portalSim/PortalCommunity";
+import { SimTabs, MyClasses, PortalCommunity, SaveClassButton, ShareClass, DraftSimPromo, useBranding, PlayerFace } from "../components/portalSim/PortalCommunity";
 import PortalTutorial from "../components/portalSim/PortalTutorial";
 import { useScrollLock } from "../utils/scrollLock";
 import { CLASSES_PATH, COMMUNITY_PATH, RECENT_PATH, recordPortalResult } from "../utils/portalSim/publicSims";
@@ -876,7 +876,7 @@ function PortalTab({ sim, team, brand, isMobile }) {
         return (
           <div key={p.id}>
             <PlayerRow cols={cols} p={p} brand={brand} isMobile={isMobile} onOpen={sim.openCard}
-              tag={!cols || isMobile ? <RecChip state={sim.state} pid={p.id} rec={recs[p.id]} compact={isMobile} /> : null}
+              tag={(!cols || isMobile) && recs[p.id] ? <><RecChip state={sim.state} pid={p.id} rec={recs[p.id]} compact={isMobile} /><OddsTag rec={recs[p.id]} /></> : null}
               note={mine ? <span style={{ fontSize: isMobile ? 11 : 12, fontWeight: 900, color: "#7ee2a8" }}>{isMobile ? `Your offer ${money(mine.nil)}` : money(mine.nil)}</span> : null}
               right={(
               <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 5 : 8, flexShrink: 0 }}>
@@ -1167,6 +1167,123 @@ function SortRow({ id, children }) {
     </div>
   );
 }
+// A player on YOUR board (user, 2026-11-22: "they should feel different
+// than those just in the portal") — a card, not a list line: your rank in a
+// block, his headshot with his school's logo on it, the staff's odds on him
+// (Long shot / Realistic / Fallback) and the coaches working him, then where
+// you stand (#2 of 5 · in it, ▲/▼ since last window), an interest meter
+// (board interest + coaching, out of what can be built), your offer — or a
+// "Make offer" that opens his card — and Drop.
+function BoardCard({ sim, p, i, team, brand, isMobile, evalPeriod, was, handle = null, target = false, coachColor = null }) {
+  const { state } = sim;
+  const cfg = state.cfg;
+  const mine = brand(team) || {};
+  const c1 = mine.Color1 || BLUE;
+  const from = brand(p.team, p) || {};
+  const rec = sim.recs[p.id];
+  const [text, color, rank] = boardStanding(state, p, team, evalPeriod);
+  const before = was[p.id];
+  const moved = rank && before ? before - rank : 0;
+  const built = p.coach?.[team] || 0;
+  const held = gradeOffer(state, team, p, likelyOffer(state, team, p)).held;
+  const meterMax = (cfg.earlyInterest?.cap ?? 0.12) + (cfg.staff?.cap ?? 0.09);
+  const offer = p.offers[team];
+  const top3 = i < 3;
+  const meter = (
+    <div title={`Interest built: board ${Math.round(held * 100)} + coaches ${Math.round(built * 100)}`} style={{ minWidth: 0 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, fontWeight: 900, letterSpacing: "0.1em", color: SUB }}>
+        <span>INTEREST</span><span style={{ color: held + built > 0 ? GOLD : SUB }}>+{Math.round((held + built) * 100)}</span>
+      </div>
+      <div style={{ display: "flex", height: 6, borderRadius: 3, background: "#1a2438", overflow: "hidden", marginTop: 3 }}>
+        <span style={{ width: `${Math.min(100, (held / meterMax) * 100)}%`, background: GOLD }} />
+        <span style={{ width: `${Math.min(100, (built / meterMax) * 100)}%`, background: "#4da3ff" }} />
+      </div>
+    </div>
+  );
+  const standingEl = (
+    <div style={{ minWidth: 0 }}>
+      <div style={{ fontSize: isMobile ? 12 : 14, fontWeight: 900, color, whiteSpace: "nowrap" }}>
+        {text}
+        {moved ? <span title={before ? `#${before} when you ended last window` : undefined} style={{ marginLeft: 6, fontSize: 12, color: moved > 0 ? "#7ee2a8" : "#ff8a7a" }}>{moved > 0 ? `▲${moved}` : `▼${-moved}`}</span> : null}
+      </div>
+    </div>
+  );
+  const offerEl = p.status !== "portal" ? null : offer ? (
+    <button type="button" onClick={() => sim.openCard(p.id)} title="Your offer — open his card to change it" style={{ all: "unset", cursor: "pointer", textAlign: "center", padding: isMobile ? "3px 8px" : "6px 10px", borderRadius: 10, background: "rgba(46,125,50,0.16)", border: "1px solid #2e7d32", minWidth: isMobile ? 0 : 84 }}>
+      <div style={{ fontSize: 9, fontWeight: 900, letterSpacing: "0.1em", color: "#7ee2a8" }}>YOUR OFFER</div>
+      <div style={{ fontSize: isMobile ? 13 : 16, fontWeight: 900, color: "#fff" }}>{money(offer.nil)}</div>
+    </button>
+  ) : evalPeriod ? null : (
+    <button type="button" onClick={() => sim.openCard(p.id)} style={{ all: "unset", cursor: "pointer", textAlign: "center", padding: isMobile ? "5px 9px" : "8px 12px", borderRadius: 10, border: `1px dashed ${GOLD}`, color: GOLD, fontSize: 11, fontWeight: 900, letterSpacing: "0.06em", whiteSpace: "nowrap", minWidth: isMobile ? 0 : 84, boxSizing: "border-box" }}>MAKE OFFER</button>
+  );
+  const face = (
+    <PlayerFace id={p.id} size={isMobile ? 40 : 54} ring={from.Color1 || LINE} logo={from.LogoDark || from.Logo1 || ""} badge />
+  );
+  const nameEl = (
+    <button type="button" onClick={(e) => { e.stopPropagation(); sim.openCard(p.id); }} style={{ all: "unset", cursor: "pointer", fontWeight: 900, fontSize: isMobile ? 15 : 18, lineHeight: 1.15, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{p.name}</button>
+  );
+  const facts = (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3, fontSize: 11, fontWeight: 800, color: SUB, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden" }}>
+      <TransferStars stars={p.stars} size="sm" />
+      <span style={{ color: "#9fc3ff", fontWeight: 900 }}>{p.sub || p.pos}</span>
+      {!isMobile && <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{state.teams[p.team]?.school} · {p.elig} yr{p.elig === 1 ? "" : "s"} left · {ROLE_LABEL[p.role] || "—"}</span>}
+      {isMobile && <span>{p.elig} yr{p.elig === 1 ? "" : "s"}</span>}
+    </div>
+  );
+  const tags = (rec || STAFF_ON(sim, p.id)) ? (
+    <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 5, flexWrap: "wrap" }}>
+      {rec && <OddsTag rec={rec} />}
+      {rec && <RecChip state={state} pid={p.id} rec={rec} compact />}
+      <OnHim sim={sim} pid={p.id} />
+    </div>
+  ) : null;
+  const shell = {
+    position: "relative", borderRadius: 14, overflow: "hidden",
+    background: `linear-gradient(100deg, color-mix(in srgb, ${c1} ${top3 ? 22 : 12}%, #0e1626) 0%, #0e1626 38%)`,
+    border: `1px solid ${target ? coachColor || GOLD : top3 ? `color-mix(in srgb, ${c1} 45%, ${LINE})` : LINE}`,
+    boxShadow: target ? `0 0 0 1px ${coachColor || GOLD}55` : "0 4px 14px rgba(0,0,0,0.25)",
+  };
+  if (isMobile) {
+    return (
+      <div style={{ ...shell, margin: "6px 8px 6px 6px", padding: "9px 10px", display: "flex", gap: 10, alignItems: "flex-start" }}>
+        {face}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {nameEl}
+          {facts}
+          {tags}
+          <div style={{ display: "grid", gap: 5, marginTop: 7, maxWidth: 240 }}>{standingEl}{meter}</div>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
+          {offerEl}
+          <ContactBtn sim={sim} pid={p.id} />
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div style={{ ...shell, display: "flex", alignItems: "stretch", minHeight: 78 }}>
+      {/* Rank block — the drag handle. */}
+      <span {...(handle || {})} title="Drag to reorder" style={{ flexShrink: 0, width: 58, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, cursor: handle ? "grab" : undefined, touchAction: "none", userSelect: "none", background: top3 ? `color-mix(in srgb, ${c1} 55%, #0b1322)` : "#0b1322", borderRight: `1px solid ${LINE}` }}>
+        <span style={{ fontSize: 24, fontWeight: 900, lineHeight: 1, color: top3 ? "#fff" : SUB, fontVariantNumeric: "tabular-nums" }}>{i + 1}</span>
+        <span style={{ fontSize: 11, color: top3 ? "rgba(255,255,255,0.6)" : "#5b6b84", letterSpacing: "-1px" }}>⋮⋮</span>
+      </span>
+      <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 14, padding: "10px 14px" }}>
+        {face}
+        <div style={{ flex: "1 1 auto", minWidth: 0 }}>
+          {nameEl}
+          {facts}
+          {tags}
+        </div>
+        <div style={{ width: 170, flexShrink: 0, display: "grid", gap: 6 }}>{standingEl}{meter}</div>
+        <div style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 8 }}>
+          {offerEl}
+          <ContactBtn sim={sim} pid={p.id} />
+        </div>
+      </div>
+    </div>
+  );
+}
+const STAFF_ON = (sim, pid) => Object.values(sim.staff || {}).includes(pid);
 function BoardTab({ sim, team, brand, isMobile }) {
   const { state, view } = sim;
   const evalPeriod = sim.board.evalPeriod;
@@ -1221,48 +1338,6 @@ function BoardTab({ sim, team, brand, isMobile }) {
     signed: view.signings.filter((p) => posGroup(x).includes(p.pos)).length,
   }));
   const was = sim.rankWas;
-  const standingLine = (p, i) => {
-    const [text, color, rank] = boardStanding(state, p, team, evalPeriod);
-    const before = was[p.id];
-    const moved = rank && before ? before - rank : 0;
-    const built = p.coach?.[team] || 0;
-    const offer = p.offers[team];
-    const held = gradeOffer(state, team, p, likelyOffer(state, team, p)).held;
-    return (
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0, flexWrap: isMobile ? "wrap" : "nowrap", justifyContent: "flex-end" }}>
-        <RecChip state={state} pid={p.id} rec={sim.recs[p.id]} />
-        <OnHim sim={sim} pid={p.id} />
-        <span style={{ fontSize: 12, fontWeight: 800, color: SUB, textAlign: "right" }}>
-          {offer ? <><span style={{ color: "#7ee2a8" }}>Your offer {money(offer.nil)}</span><br /></> : null}
-          <span style={{ color }}>{text}</span>
-          {moved ? <span title={`#${before} when you ended last window`} style={{ marginLeft: 6, fontWeight: 900, color: moved > 0 ? "#7ee2a8" : "#ff8a7a" }}>{moved > 0 ? `▲${moved}` : `▼${-moved}`}</span> : null}
-          {held > 0 || built > 0 ? <><br /><span style={{ color: GOLD }}>{held > 0 ? `Interest +${Math.round(held * 100)}` : ""}{held > 0 && built > 0 ? " · " : ""}{built > 0 ? `coaches +${Math.round(built * 100)}` : ""}</span></> : null}
-        </span>
-        <ContactBtn sim={sim} pid={p.id} />
-      </div>
-    );
-  };
-  // Phones: the same, in the row's slots — coach pick and coaches on him by
-  // the name, your offer on line 2, the standing (one line) and Drop on the right.
-  const boardTag = (p) => <><RecChip state={state} pid={p.id} rec={sim.recs[p.id]} compact /><OnHim sim={sim} pid={p.id} /></>;
-  // Line 2 carries the standing (and its move since last window); the right
-  // side, your offer as a short figure and Drop.
-  const boardNote = (p) => {
-    const [text, color, rank] = boardStanding(state, p, team, evalPeriod);
-    const before = was[p.id];
-    const moved = rank && before ? before - rank : 0;
-    return (
-      <span style={{ color, fontWeight: 900 }}>
-        {text}{moved ? <span style={{ marginLeft: 4, color: moved > 0 ? "#7ee2a8" : "#ff8a7a" }}>{moved > 0 ? `▲${moved}` : `▼${-moved}`}</span> : null}
-      </span>
-    );
-  };
-  const standingShort = (p) => (
-    <>
-      {p.offers[team] && <span title="Your offer" style={{ fontSize: 11, fontWeight: 900, color: "#7ee2a8", whiteSpace: "nowrap" }}>{money(p.offers[team].nil)}</span>}
-      <ContactBtn sim={sim} pid={p.id} />
-    </>
-  );
   // Your staff's picks you haven't contacted — by position, best stars
   // first, then last name; passed ones at the bottom.
   const recIds = Object.keys(sim.recs);
@@ -1275,7 +1350,7 @@ function BoardTab({ sim, team, brand, isMobile }) {
   // Contact first; Pass in red.
   const recRow = ({ p, rec }, isPassed) => (
     <div key={p.id} style={{ opacity: isPassed ? 0.6 : 1 }}>
-      <PlayerLine p={p} brand={brand} isMobile={isMobile} onOpen={sim.openCard} flush={!isPassed && !!rec} tag={<RecChip state={state} pid={p.id} rec={rec} compact={isMobile} />} right={(
+      <PlayerLine p={p} brand={brand} isMobile={isMobile} onOpen={sim.openCard} flush={!isPassed && !!rec} tag={rec ? <><RecChip state={state} pid={p.id} rec={rec} compact={isMobile} /><OddsTag rec={rec} /></> : null} right={(
         <span style={{ display: "inline-flex", alignItems: "center", gap: isMobile ? 5 : 8 }}>
           <ContactBtn sim={sim} pid={p.id} />
           <button type="button" onClick={() => sim.pass(p.id)} style={isPassed ? { ...pillBtn(false), padding: "5px 10px" } : { ...pillBtn(false), padding: "5px 10px", color: "#ff8a7a", borderColor: "#5c1f28" }}>{isPassed ? "Restore" : "Pass"}</button>
@@ -1296,15 +1371,22 @@ function BoardTab({ sim, team, brand, isMobile }) {
         ) : null}
       </DragOverlay>
       <EvalBanner sim={sim} isMobile={isMobile} />
-      {/* Needs by position — on board, signed. */}
+      {/* Needs by position (user, 2026-11-22: the counts were hard to
+          read) — the position in its need color, then a big number on your
+          board, and a signed badge. */}
       <div style={{ display: "flex", gap: 6, padding: "10px 12px", borderBottom: `1px solid ${LINE}`, overflowX: "auto" }}>
         {strip.map(({ x, v, on, signed }) => {
           const [, label, color] = needLevelOf(v);
           return (
-            <div key={x} title={label} style={{ flex: "1 0 auto", minWidth: 58, textAlign: "center", padding: "6px 6px", borderRadius: 10, background: "#111a2b", border: `1px solid ${color}55`, borderTop: `3px solid ${color}` }}>
-              <div style={{ fontSize: 13, fontWeight: 900, color }}>{x}</div>
-              <div style={{ fontSize: 10, fontWeight: 800, color: SUB, whiteSpace: "nowrap" }}>{on} on board</div>
-              {signed > 0 && <div style={{ fontSize: 10, fontWeight: 900, color: "#7ee2a8", whiteSpace: "nowrap" }}>{signed} signed</div>}
+            <div key={x} title={`${x}: ${label} · ${on} on your board${signed ? ` · ${signed} signed` : ""}`} style={{ flex: "1 0 auto", minWidth: isMobile ? 58 : 66, padding: "6px 8px 7px", borderRadius: 10, background: "#111a2b", border: `1px solid ${color}55`, borderTop: `3px solid ${color}` }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+                <span style={{ fontSize: 13, fontWeight: 900, color }}>{x}</span>
+                {signed > 0 && <span style={{ fontSize: 10, fontWeight: 900, color: "#0e1626", background: "#7ee2a8", borderRadius: 999, padding: "0 6px", lineHeight: "15px" }} title={`${signed} signed`}>✓{signed}</span>}
+              </div>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginTop: 2 }}>
+                <span style={{ fontSize: 20, fontWeight: 900, lineHeight: 1, color: on ? INK : "#3a4a66", fontVariantNumeric: "tabular-nums" }}>{on}</span>
+                <span style={{ fontSize: 9, fontWeight: 900, letterSpacing: "0.08em", color: SUB, textTransform: "uppercase" }}>on board</span>
+              </div>
             </div>
           );
         })}
@@ -1322,26 +1404,23 @@ function BoardTab({ sim, team, brand, isMobile }) {
                 <button type="button" aria-label={`Move ${p.name} down`} disabled={i === board.length - 1} onClick={() => sim.move(p.id, i + 1)} style={{ all: "unset", cursor: i === board.length - 1 ? "default" : "pointer", color: i === board.length - 1 ? "#2a3a58" : INK, fontSize: 13, padding: "4px 8px", lineHeight: 1 }}>▼</button>
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <PlayerLine p={p} brand={brand} isMobile onOpen={sim.openCard} flush tag={boardTag(p)} note={boardNote(p)} right={standingShort(p)} />
+                <BoardCard sim={sim} p={p} i={i} team={team} brand={brand} isMobile evalPeriod={evalPeriod} was={was} />
               </div>
             </div>
           ))
         ) : (
           <SortableContext items={board.map((p) => p.id)} strategy={verticalListSortingStrategy}>
+            <div style={{ height: 6 }} />
             {board.map((p, i) => (
               <SortRow key={p.id} id={p.id}>
                 {({ handle }) => (
-                  <div onClick={() => tapRow(p.id)} style={{ display: "flex", alignItems: "center", borderBottom: `1px solid ${LINE}`, cursor: armed ? "copy" : undefined, background: armed || dragging ? "rgba(246,162,29,0.05)" : undefined, boxShadow: dragging ? `inset 3px 0 0 ${ROLE_COLOR[dragging]}` : undefined }}>
-                    <span {...handle} title="Drag to reorder" style={{ flexShrink: 0, cursor: "grab", touchAction: "none", padding: isMobile ? "0 4px 0 8px" : "0 4px 0 12px", color: "#5b6b84", fontWeight: 900, userSelect: "none", display: "inline-flex", alignItems: "center", gap: 6 }}>
-                      ⋮⋮<span style={{ width: 18, textAlign: "right", color: i < 3 ? GOLD : SUB, fontSize: 13 }}>{i + 1}</span>
-                    </span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <PlayerLine p={p} brand={brand} isMobile={isMobile} onOpen={sim.openCard} flush right={standingLine(p, i)} />
-                    </div>
+                  <div onClick={() => tapRow(p.id)} style={{ padding: "4px 12px", cursor: armed ? "copy" : undefined }}>
+                    <BoardCard sim={sim} p={p} i={i} team={team} brand={brand} isMobile={false} evalPeriod={evalPeriod} was={was} handle={handle} target={!!(armed || dragging)} coachColor={dragging ? ROLE_COLOR[dragging] : armed ? GOLD : null} />
                   </div>
                 )}
               </SortRow>
             ))}
+            <div style={{ height: 8 }} />
           </SortableContext>
         )}
       </Section>
@@ -1668,34 +1747,87 @@ function MarketTab({ sim, team, brand, isMobile }) {
   const country = events.filter((e) => e.kind === "entered").length;
   const report = marketReport(state, team);
   const asks = events.filter((e) => e.kind === "demand").length + Object.values(state.players).filter((p) => p.considering === "demand").length;
+  const b = brand(team) || {};
+  const c1 = b.Color1 || BLUE;
+  const c2 = b.Color2 || GOLD;
+  const myLogo = b.LogoDark || b.Logo1 || "";
+  const avgStars = report.signed.length ? report.signed.reduce((t, p) => t + p.stars, 0) / report.signed.length : 0;
+  const filledN = report.signed.length ? new Set(report.signed.map((p) => p.pos)).size : 0;
+  const stat = (k, v) => (
+    <div style={{ background: "rgba(0,0,0,0.32)", borderRadius: 12, padding: isMobile ? "7px 10px" : "8px 14px", minWidth: 0 }}>
+      <div style={{ fontSize: 9, fontWeight: 900, letterSpacing: "0.14em", opacity: 0.8 }}>{k}</div>
+      <div style={{ fontSize: isMobile ? 18 : 24, fontWeight: 900, lineHeight: 1.1 }}>{v}</div>
+    </div>
+  );
   return (
     <>
-      <div style={{ padding: "14px 16px", borderBottom: `1px solid ${LINE}`, fontSize: 13, fontWeight: 700, color: SUB, lineHeight: 1.5 }}>
-        <b style={{ color: GOLD, letterSpacing: "0.08em" }}>MARKET WATCH</b> · The signing wave is over. Settle your roster, then the portal reopens for {state.cfg.split?.after ?? 4} more windows.
-        <span style={{ display: "block", marginTop: 4, color: "#9fc3ff" }}>Around the country: {country} new name{country === 1 ? "" : "s"} in the portal · {asks} star{asks === 1 ? "" : "s"} asked for the market rate.</span>
-      </div>
-      {/* The head coach's halftime read, and the second half's priorities. */}
-      <div style={{ padding: "12px 16px", borderBottom: `1px solid ${LINE}`, display: "flex", gap: 12, alignItems: "flex-start" }}>
-        <CoachChip role="HC" size="md" />
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.12em", color: SUB, marginBottom: 4 }}>HEAD COACH · HALFTIME</div>
-          {report.lines.map((l) => <div key={l} style={{ fontSize: isMobile ? 14 : 15, fontWeight: 800, fontStyle: "italic", lineHeight: 1.45, marginBottom: 3 }}>“{l}”</div>)}
-          {report.priorities.length > 0 && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8, alignItems: "center" }}>
-              <span style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.12em", color: SUB }}>NEXT WINDOW</span>
-              {report.priorities.slice(0, 5).map(({ pos, level }) => {
-                const [, label, color] = needLevelOf(level);
-                return <span key={pos} title={label} style={{ fontSize: 12, fontWeight: 900, color, border: `1px solid ${color}88`, borderRadius: 999, padding: "2px 10px" }}>{pos}</span>;
-              })}
-            </div>
-          )}
+      {/* First-half haul (user, 2026-11-22: "should feel like you made
+          signings and it's exciting") — a signing-day board in your colors,
+          each signing revealed as a card. */}
+      <div style={{ position: "relative", overflow: "hidden", background: `linear-gradient(115deg, ${c1} 0%, color-mix(in srgb, ${c1} 70%, #000) 60%, color-mix(in srgb, ${c2} 40%, #000) 100%)`, borderBottom: `3px solid ${c2}` }}>
+        <div style={{ position: "absolute", inset: 0, backgroundImage: GRID, backgroundSize: "28px 28px", opacity: 0.6 }} />
+        {myLogo && <img src={myLogo} alt="" aria-hidden="true" style={{ position: "absolute", right: -40, top: -40, height: isMobile ? 200 : 300, opacity: 0.1, pointerEvents: "none" }} />}
+        <div style={{ position: "relative", padding: isMobile ? "16px 14px" : "20px 22px" }}>
+          <div style={{ fontFamily: MONO, fontSize: 11, fontWeight: 800, letterSpacing: "0.2em", opacity: 0.85 }}>MARKET WATCH · HALFTIME</div>
+          <div style={{ fontSize: isMobile ? 26 : 38, fontWeight: 900, textTransform: "uppercase", lineHeight: 1, marginTop: 4, textShadow: "3px 3px 0 rgba(0,0,0,0.3)" }}>{report.signed.length ? "First-half haul" : "No signings yet"}</div>
+          <div style={{ display: "grid", gridTemplateColumns: `repeat(${isMobile ? 2 : 4}, minmax(0, 1fr))`, gap: 8, marginTop: 14 }}>
+            {stat("SIGNED", report.signed.length)}
+            {stat("NIL SPENT", money(report.spent || 0))}
+            {stat("AVG STARS", report.signed.length ? `${avgStars.toFixed(1)}★` : "—")}
+            {stat("POSITIONS ADDED", filledN)}
+          </div>
         </div>
       </div>
-      <Section title={`Your first half · signed (${report.signed.length})`}>
-        {report.signed.length === 0 ? <Empty>No signings yet.</Empty> : report.signed.map((p) => (
-          <PlayerLine key={p.id} p={p} brand={brand} to={team} isMobile={isMobile} onOpen={sim.openCard} right={<span style={{ fontSize: 12, fontWeight: 900, color: "#7ee2a8" }}>{money(p.deal?.nil || 0)}</span>} />
-        ))}
-      </Section>
+      {report.signed.length > 0 && (
+        <div style={{ padding: isMobile ? "10px 8px 4px" : "14px 16px 6px", background: WR_BG }}>
+          {report.signed.map((p, i) => {
+            const from = brand(p.team, p) || {};
+            return (
+              <div key={p.id} className="wd-sim-pop" style={{ animationDelay: `${0.15 + i * 0.14}s`, position: "relative", overflow: "hidden", display: "flex", alignItems: "center", gap: isMobile ? 10 : 16, marginBottom: 8, padding: isMobile ? "10px 10px" : "12px 16px", borderRadius: 14, background: `linear-gradient(100deg, color-mix(in srgb, ${c1} 38%, #0e1626) 0%, #0e1626 55%)`, border: `1px solid color-mix(in srgb, ${c1} 50%, ${LINE})`, borderLeft: `5px solid ${c2}` }}>
+                {myLogo && <img src={myLogo} alt="" aria-hidden="true" style={{ position: "absolute", right: isMobile ? -20 : 120, top: "50%", transform: "translateY(-50%)", height: 120, opacity: 0.06, pointerEvents: "none" }} />}
+                <PlayerFace id={p.id} size={isMobile ? 48 : 64} ring={c2} logo={from.LogoDark || from.Logo1 || ""} />
+                <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.14em", color: "#0e1626", background: "#7ee2a8", borderRadius: 4, padding: "2px 6px" }}>SIGNED</span>
+                    <TransferStars stars={p.stars} size="sm" />
+                    <span style={{ fontSize: 12, fontWeight: 900, color: "#9fc3ff" }}>{p.sub || p.pos}</span>
+                  </div>
+                  <button type="button" onClick={() => sim.openCard(p.id)} style={{ all: "unset", cursor: "pointer", display: "block", marginTop: 4, fontSize: isMobile ? 17 : 22, fontWeight: 900, textTransform: "uppercase", lineHeight: 1.1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{p.name}</button>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 5, fontSize: 12, fontWeight: 800, color: SUB, minWidth: 0 }}>
+                    <Logo b={from} size={18} />
+                    {!isMobile && <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{state.teams[p.team]?.school}</span>}
+                    <span style={{ color: c2, fontWeight: 900 }}>→</span>
+                    <Logo b={b} size={20} />
+                    {!isMobile && <span style={{ color: INK, whiteSpace: "nowrap" }}>{b.School}</span>}
+                  </div>
+                </div>
+                <div style={{ textAlign: "right", flexShrink: 0, position: "relative" }}>
+                  <div style={{ fontSize: 9, fontWeight: 900, letterSpacing: "0.12em", color: SUB }}>NIL</div>
+                  <div style={{ fontSize: isMobile ? 16 : 22, fontWeight: 900, color: "#7ee2a8" }}>{money(p.deal?.nil || 0)}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {/* The head coach's halftime REPORT — the window-1 briefing again:
+          one read of the first half, then his three priorities. */}
+      <div style={{ background: WR_BG, backgroundImage: GRID, backgroundSize: "28px 28px", borderTop: `1px solid #24324d`, borderBottom: `1px solid ${LINE}`, padding: isMobile ? "14px 12px 16px" : "18px 22px 20px" }}>
+        <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
+          <CoachChip role="HC" size="md" />
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontFamily: MONO, fontSize: 11, fontWeight: 700, letterSpacing: "0.18em", color: GOLD }}>HEAD COACH · HALFTIME REPORT</div>
+            <div style={{ marginTop: 6, fontSize: isMobile ? 15 : 19, fontWeight: 900, lineHeight: 1.4 }}>“{report.intro}”</div>
+          </div>
+        </div>
+        {report.top.length > 0 && (
+          <>
+            <div style={{ fontFamily: MONO, fontSize: 11, fontWeight: 700, letterSpacing: "0.18em", color: SUB, margin: "18px 0 10px" }}>SECOND-HALF PRIORITIES</div>
+            <NeedCards top={report.top} isMobile={isMobile} />
+          </>
+        )}
+        <div style={{ marginTop: 14, fontSize: 12, fontWeight: 700, color: "#9fc3ff" }}>Around the country: {country} new name{country === 1 ? "" : "s"} in the portal · {asks} star{asks === 1 ? "" : "s"} asked for the market rate. The portal reopens for {state.cfg.split?.after ?? 4} more windows.</div>
+      </div>
       {report.missed.length > 0 && (
         <Section tone="gone" title={`Missed (${report.missed.length})`}>
           {report.missed.map((p) => (
@@ -2077,6 +2209,9 @@ function Final({ state, team, run, branding, brand, isMobile, onRerun, onSetting
   const pursuedAway = pursued.filter(({ e }) => e && e.to !== team);
   const pursuedOpen = pursued.filter(({ e }) => !e);
   const toNfl = departed.filter((p) => p.status === "declared").length;
+  // The Draft Sim pitch counts only players with a draft grade (user,
+  // 2026-11-22) — out-of-eligibility players without one aren't prospects.
+  const toDraft = departed.filter((p) => p.status === "declared" && p.dg != null).length;
   const kept = state.log.filter((e) => e.kind === "retained" && e.team === team).length;
   const b = brand(team) || {};
   const c1 = b.Color1 || BLUE;
@@ -2153,7 +2288,7 @@ function Final({ state, team, run, branding, brand, isMobile, onRerun, onSetting
       </div>
 
       {/* On to the Draft Sim. */}
-      <DraftSimPromo toNfl={toNfl} school={rec.school} isMobile={isMobile} />
+      <DraftSimPromo toNfl={toDraft} school={rec.school} isMobile={isMobile} />
 
       {/* Your class, revealed one by one, reading down two columns. */}
       <Section title={`Your portal class (${signings.length})`}>
@@ -2162,7 +2297,7 @@ function Final({ state, team, run, branding, brand, isMobile, onRerun, onSetting
             {signings.map(({ e, p }, i) => (
               <div key={p.id} className="wd-sim-pop" style={{ animationDelay: `${0.25 + i * 0.12}s`, display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", borderBottom: `1px solid ${LINE}`, minWidth: 0 }}>
                 <span style={{ width: 22, textAlign: "right", fontWeight: 900, color: i < 3 ? GOLD : SUB, flexShrink: 0 }}>{i + 1}</span>
-                <Headshot id={p.id} />
+                <PlayerFace id={p.id} size={42} logo={brand(p.team)?.LogoDark || brand(p.team)?.Logo1 || ""} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 900, fontSize: 15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3, fontSize: 11, fontWeight: 800, color: SUB, minWidth: 0 }}>
@@ -2257,15 +2392,6 @@ function Final({ state, team, run, branding, brand, isMobile, onRerun, onSetting
         </div>
       </Section>
     </div>
-  );
-}
-// His ESPN headshot (CFBD ids are ESPN ids), or a blank circle.
-function Headshot({ id, size = 42 }) {
-  const [ok, setOk] = useState(true);
-  return (
-    <span style={{ width: size, height: size, borderRadius: "50%", background: "#1a2438", overflow: "hidden", flexShrink: 0, display: "inline-flex", alignItems: "flex-end", justifyContent: "center" }}>
-      {ok && <img src={`https://a.espncdn.com/i/headshots/college-football/players/full/${id}.png`} alt="" onError={() => setOk(false)} style={{ height: "125%", width: "auto", maxWidth: "none", objectFit: "cover", objectPosition: "center top", marginBottom: "-12%" }} />}
-    </span>
   );
 }
 

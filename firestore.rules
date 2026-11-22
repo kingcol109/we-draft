@@ -502,6 +502,15 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly(['started', 'finished'])
         && bumpedByOne('started') && bumpedByOne('finished');
     }
+    // Same two counters per school played (utils/portalSim/usage.js), all
+    // time, plus when it was last played — Admin → Portal Sim Stats → Schools.
+    match /portalSimTeams/{team} {
+      allow read: if isAdmin();
+      allow create, update: if team.matches('^[a-z0-9-]{1,63}$')
+        && request.resource.data.keys().hasOnly(['started', 'finished', 'lastAt'])
+        && bumpedByOne('started') && bumpedByOne('finished')
+        && request.resource.data.lastAt == request.time;
+    }
     // Every closed Transfer Portal Sim run (utils/portalSim/publicSims.js
     // recordPortalResult), saved or not — Community → Insights counts them.
     // No user on them. Anyone (signed in or not) adds one, well-formed;

@@ -90,7 +90,7 @@ const recorded = new Set(); // runs already recorded this session (key: team-see
 export async function recordPortalResult(key, rec) {
   if (recorded.has(key)) return;
   recorded.add(key);
-  countPortalSim("finished"); // the day's counter (utils/portalSim/usage.js)
+  countPortalSim("finished", String(rec.team || "")); // the day's counter (utils/portalSim/usage.js)
   const signings = (rec.signings || []).slice(0, 80).map((p) => ({
     id: String(p.id), name: String(p.name || ""), pos: String(p.pos || ""), stars: Number(p.stars) || 0,
     from: String(p.from || ""), fromSchool: String(p.fromSchool || ""), nil: Math.round(Number(p.nil) || 0),
@@ -133,7 +133,8 @@ const groupOf = (pos) => POS_GROUP[pos] || pos;
 
 // runs: portalSimResults docs → the lists.
 //   topTeams     the schools users run, most first
-//   topPlayers   the transfers signed most (where they go most)
+//   topPlayers   the transfers signed most (total times) and the 3
+//                schools users take each to most (dests)
 //   mostValued   the transfer users pay the most NIL on average
 //                (signed 2+ times when anyone has been)
 //   positions    how users value each position: average NIL per signing
@@ -160,8 +161,10 @@ export function portalInsights(runs) {
     });
   });
   const all = Object.values(players).map((p) => {
-    const [dest, destN] = Object.entries(p.to).sort((a, b) => b[1] - a[1])[0];
-    return { ...p, avgNil: p.nil / p.n, dest, destN };
+    // Where users take him, most often first (user, 2026-11-22: show the
+    // top 3) — dests [{ t, n }]; dest / destN stay for older readers.
+    const dests = Object.entries(p.to).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([t, n]) => ({ t, n }));
+    return { ...p, avgNil: p.nil / p.n, dest: dests[0].t, destN: dests[0].n, dests };
   });
   const topTeams = Object.values(teams).sort((a, b) => b.n - a.n);
   const topPlayers = [...all].sort((a, b) => b.n - a.n || b.stars - a.stars || b.avgNil - a.avgNil).slice(0, 10);
