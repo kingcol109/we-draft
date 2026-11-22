@@ -42,6 +42,8 @@ import AdminStreamManager from "../components/AdminStreamManager";
 import AdminYouTubeAnalytics from "../components/AdminYouTubeAnalytics";
 import AdminAdsManager from "../components/AdminAdsManager";
 import AdminShop from "../components/AdminShop";
+// Print layouts — the printed evaluation page / draft-class magazine (components/AdminPrint.jsx).
+import AdminPrint from "../components/AdminPrint";
 import AdminCoachHistory from "../components/AdminCoachHistory";
 import { NFL_TEAMS } from "../utils/coachHistory";
 import { accoladeSlug, indexIconRow, unindexIconRow } from "../utils/accoladeIcons";
@@ -401,6 +403,8 @@ const SECTIONS = [
   { key: "ads", label: "Ads", icon: "🎯", ready: true },
   // Store orders, contributions, product display settings (components/AdminShop.jsx, api/shop-admin.js).
   { key: "shop", label: "Shop", icon: "🛒", ready: true },
+  // Print layouts: evaluation pages, later the magazine (components/AdminPrint.jsx).
+  { key: "print", label: "Print", icon: "🖨️", ready: true },
 ];
 
 // Content section: its tabs, each the section it used to be on its own.
@@ -15480,6 +15484,7 @@ export default function AdminPanel() {
             {activeSection === "sync" &&<ComingSoonPane label="Sync / System Status" />}
             {activeSection === "ads" && <AdminAdsManager />}
             {activeSection === "shop" && <AdminShop />}
+            {activeSection === "print" && <AdminPrint />}
           </div>
         </div>
       </div>

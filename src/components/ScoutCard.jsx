@@ -165,7 +165,10 @@ function CareerFit({ rows, t, rule, label }) {
 // career (Portal News): his Career Path rows (PlayerEligibilityInfo
 // useCareerPath, moved along to his new school or the portal) in place of
 // the community's grades and the draft / high school lines.
-export function CardBack({ theme: t, number, name, pos, school, logo, profile: p, stats = [], statsTitle = "", scout, year, chip, footer, photo = "", logoCircle = false, draft = "", career = null }) {
+// bare (the printed trading card, print/TradingCard.jsx): no background of
+// its own — the card's runs out to the bleed behind it (cardBackGround).
+export const cardBackGround = (t) => `radial-gradient(circle at 80% 0%, ${t.c1}55 0%, transparent 55%), radial-gradient(circle at 0% 100%, ${t.c1}33 0%, transparent 50%), linear-gradient(180deg, ${t.mid} 0%, ${t.deep} 70%, #000 100%)`;
+export function CardBack({ theme: t, number, name, pos, school, logo, profile: p, stats = [], statsTitle = "", scout, year, chip, footer, photo = "", logoCircle = false, draft = "", career = null, bare = false }) {
   const shown = (stats || []).filter((s) => s?.value !== "" && s?.value != null);
   const bio = [["AGE", ageOf(p?.Birthday)], ["HT", p?.Height], ["WT", p?.Weight ? String(p.Weight) : ""]].filter(([, v]) => v);
   const lines = career ? [] : [
@@ -187,7 +190,7 @@ export function CardBack({ theme: t, number, name, pos, school, logo, profile: p
   return (
     <div style={{
       position: "absolute", inset: 0, padding: "3.2cqw", textAlign: "left", color: "#fff", fontFamily: BODY,
-      background: `radial-gradient(circle at 80% 0%, ${t.c1}55 0%, transparent 55%), radial-gradient(circle at 0% 100%, ${t.c1}33 0%, transparent 50%), linear-gradient(180deg, ${t.mid} 0%, ${t.deep} 70%, #000 100%)`,
+      background: bare ? "transparent" : cardBackGround(t),
     }}>
       {/* The card's frame. */}
       <div style={{ position: "absolute", inset: "2.4cqw", borderRadius: "2.4cqw", border: `0.7cqw solid ${t.c1}`, boxShadow: `inset 0 0 4cqw ${t.c1}33`, pointerEvents: "none" }} />

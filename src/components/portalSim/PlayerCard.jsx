@@ -172,6 +172,29 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
   const keeping = p?.status === "considering";
   const [nil, setNil] = useState(() => (keeping ? p.retain?.nil ?? (p.considering === "demand" ? p.demand.nil : Math.round(retainOdds(state, p, null).ask / 1000) * 1000) : mine?.nil ?? p?.ask ?? 0));
   const [shot, setShot] = useState(true);
+  // Phones: swipe the header down to close (user, 2026-11-22). The card
+  // follows the finger once it's scrolled to the top; let go past SWIPE_CLOSE
+  // and it closes, short of it and it springs back.
+  const sheetRef = useRef(null);
+  const swipe = useRef(null);
+  const [dragY, setDragY] = useState(0);
+  const SWIPE_CLOSE = 90;
+  const swipeStart = (e) => {
+    if (!isMobile || e.touches.length !== 1) return;
+    swipe.current = { y: e.touches[0].clientY, atTop: (sheetRef.current?.scrollTop || 0) <= 0 };
+  };
+  const swipeMove = (e) => {
+    const s = swipe.current;
+    if (!s || !s.atTop) return;
+    const dy = e.touches[0].clientY - s.y;
+    setDragY(dy > 0 ? dy : 0);
+  };
+  const swipeEnd = () => {
+    if (!swipe.current) return;
+    swipe.current = null;
+    if (dragY > SWIPE_CLOSE) onClose();
+    else setDragY(0);
+  };
   // Commit celebration: plays when he goes portal → committed while open.
   const [celebrate, setCelebrate] = useState(0);
   const prevStatus = useRef(p?.status);
@@ -327,14 +350,17 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
     {/* Over the page (PopLayer) and scrolling inside the card itself —
         user, 2026-11-22: the popups didn't scroll. */}
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 20000, background: "rgba(3,7,14,0.72)", display: "flex", alignItems: isMobile ? "stretch" : "center", justifyContent: "center", padding: isMobile ? 0 : 20, overscrollBehavior: "contain", fontFamily: "Arial, sans-serif" }}>
-      <div role="dialog" aria-label={p.name} onClick={(e) => e.stopPropagation()} className="wd-sim-pop wd-sim-scroll" style={{
+      <div ref={sheetRef} role="dialog" aria-label={p.name} onClick={(e) => e.stopPropagation()} className="wd-sim-pop wd-sim-scroll" style={{
         position: "relative", width: "100%", maxWidth: 860, background: "#0e1626", border: isMobile ? "none" : `1px solid ${LINE}`, borderRadius: isMobile ? 0 : 18, overflow: "hidden", color: INK,
         maxHeight: isMobile ? "100%" : popMaxHeight(40), overflowY: "auto", overflowX: "hidden", overscrollBehavior: "contain", boxShadow: "0 20px 60px rgba(0,0,0,0.6)",
+        ...(isMobile ? { transform: dragY ? `translateY(${dragY}px)` : undefined, transition: swipe.current ? "none" : "transform .2s ease", opacity: dragY ? Math.max(0.5, 1 - dragY / 500) : 1 } : {}),
       }}>
         <style>{CELEBRATE_CSS}</style>
         {/* Header, in his school's colors (his new one once he's committed):
             name on top, old school → ? (or → the new one). */}
-        <div style={{ position: "relative", overflow: "hidden", background: celebrate ? `linear-gradient(115deg, ${o1} 0%, ${o1} 50%, color-mix(in srgb, ${o2} 70%, ${o1}) 100%)` : `linear-gradient(115deg, ${c1} 0%, ${c1} 50%, color-mix(in srgb, ${c2} 70%, ${c1}) 100%)` }}>
+        <div onTouchStart={swipeStart} onTouchMove={swipeMove} onTouchEnd={swipeEnd} onTouchCancel={swipeEnd} style={{ position: "relative", overflow: "hidden", background: celebrate ? `linear-gradient(115deg, ${o1} 0%, ${o1} 50%, color-mix(in srgb, ${o2} 70%, ${o1}) 100%)` : `linear-gradient(115deg, ${c1} 0%, ${c1} 50%, color-mix(in srgb, ${c2} 70%, ${c1}) 100%)` }}>
+          {/* Phones: the grab handle — swipe down to close. */}
+          {isMobile && <div aria-hidden="true" style={{ position: "absolute", top: 5, left: "50%", marginLeft: -18, width: 36, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.55)", zIndex: 3, pointerEvents: "none" }} />}
           {/* On a commit: the new school's colors wipe in over the old. */}
           {celebrate ? <div key={celebrate} className="wdc-anim" style={{ position: "absolute", inset: 0, background: `linear-gradient(115deg, ${c1} 0%, ${c1} 50%, color-mix(in srgb, ${c2} 70%, ${c1}) 100%)`, animation: "wdcWipe .9s cubic-bezier(.6,0,.2,1) both" }} /> : null}
           <div style={{ position: "absolute", inset: 0, background: "radial-gradient(circle at 85% 120%, rgba(0,0,0,0.05), rgba(0,0,0,0.55) 70%)" }} />
@@ -402,7 +428,9 @@ export default function PlayerCard({ pid, sim, team, brand, isMobile, onClose })
               </div>
             </div>
           ) : null}
-          <div style={{ position: "absolute", top: 10, right: 10, display: "flex", gap: 6 }}>
+          {/* Above the name block (zIndex 1 — on phones it spans the header
+              and was swallowing taps on these). */}
+          <div style={{ position: "absolute", top: 10, right: 10, display: "flex", gap: 6, zIndex: 6 }}>
             <button type="button" onClick={() => sim.toggleStar(p.id)} aria-label={sim.starred.has(p.id) ? "Unstar" : "Star"} style={{ ...pill(sim.starred.has(p.id), GOLD), background: sim.starred.has(p.id) ? GOLD : "rgba(0,0,0,0.4)", borderColor: "transparent" }}>{sim.starred.has(p.id) ? "★" : "☆"}{isMobile ? "" : sim.starred.has(p.id) ? " On your board" : " Star"}</button>
             <button type="button" onClick={onClose} aria-label="Close" style={{ ...pill(false), background: "rgba(0,0,0,0.4)", borderColor: "transparent", padding: "7px 11px" }}>✕</button>
           </div>

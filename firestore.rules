@@ -1168,6 +1168,11 @@ service cloud.firestore {
       match /liveSettings/{doc} {
         allow read, write: if request.auth != null && request.auth.uid == uid;
       }
+      // Their own print layout (Profile → My Stuff → Customize,
+      // utils/printLayouts.js saveUserLayout) — private to the account.
+      match /printSettings/{doc} {
+        allow read, write: if request.auth != null && request.auth.uid == uid;
+      }
       match /evaluations/{playerId} {
         // isAdmin() bypass — same Dummy Content reasoning as
         // players/{id}/evaluations/{uid} above; this is that same write's

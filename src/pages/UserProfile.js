@@ -27,6 +27,9 @@ import WePickTab from "../components/profileHub/WePickTab";
 import MessagesTab from "../components/profileHub/MessagesTab";
 // Profile → Store: /shop + /support links (signed-in only) and order history.
 import StoreTab from "../components/profileHub/StoreTab";
+// Profile → My Binder: print their own evaluations (components/print/).
+import MyBinderTab from "../components/profileHub/MyBinderTab";
+import { canUseBinder } from "../utils/printLayouts";
 import { countUnreadMessages } from "../utils/userMessages";
 import SiteUpdatesToggle from "../components/SiteUpdatesToggle";
 
@@ -40,7 +43,7 @@ const MyDraftClass = lazy(() => import("./MyDraftClass"));
 
 // The profile hub's tabs (?tab=…, Feed by default): [key, label, phone label].
 const HUB_TABS = [
-  ["feed", "Feed"], ["following", "Following"], ["boards", "Boards"], ["draftclass", "My Draft Class"],
+  ["feed", "Feed"], ["following", "Following"], ["boards", "Boards"], ["binder", "My Binder"], ["draftclass", "My Draft Class"],
   ["sim", "Draft Sim"], ["wepick", "We-Pick"], ["friends", "Friends"], ["messages", "Messages"], ["store", "Store"], ["settings", "Settings"],
 ];
 // The Beta tab's entries — shown to Sim Beta users and admins.
@@ -133,7 +136,9 @@ export default function UserProfile() {
   const [params, setParams] = useSearchParams();
   // Beta testers (and admins) get a Beta tab, just ahead of Settings.
   const hasBeta = simBeta || role === "admin";
+  // My Binder: We-Draft Plus members only (utils/printLayouts.js canUseBinder).
   const tabs = HUB_TABS.slice(0, -1)
+    .filter(([k]) => k !== "binder" || canUseBinder(user?.uid))
     .concat(hasBeta ? [["beta", "Beta"]] : [], [HUB_TABS[HUB_TABS.length - 1]])
     .concat(role === "writer" ? [["articles", "My Articles"]] : []);
   const tab = tabs.some(([k]) => k === params.get("tab")) ? params.get("tab") : "feed";
@@ -327,6 +332,7 @@ export default function UserProfile() {
   if (tab === "feed") body = <FeedTab uid={user.uid} isMobile={isMobile} onSeen={() => setFeedNew(0)} />;
   else if (tab === "following") body = <FollowingTab uid={user.uid} isMobile={isMobile} />;
   else if (tab === "boards") body = <BoardsTab uid={user.uid} isMobile={isMobile} />;
+  else if (tab === "binder") body = <MyBinderTab uid={user.uid} isMobile={isMobile} />;
   else if (tab === "draftclass") body = lazyTab(<MyDraftClass embedded />);
   else if (tab === "wepick") body = <WePickTab uid={user.uid} />;
   else if (tab === "friends") body = <div style={{ ...card, padding: isMobile ? 14 : 22 }}><FriendsPanel isMobile={isMobile} /></div>;
