@@ -1318,5 +1318,20 @@ service cloud.firestore {
       allow delete: if request.auth != null
                     && resource.data.uid == request.auth.uid;
     }
+
+    // ── Store (server/shop/*, api/shop.js, api/shop-admin.js) ──
+    // Orders, contributions, Stripe event receipts and rate-limit counters
+    // are written and read only by the server (Admin SDK, which bypasses
+    // these rules). No client access at all — customers see their own
+    // orders through api/shop.js after an ID-token check, admins through
+    // api/shop-admin.js. shopProducts holds only display flags (hidden /
+    // featured / order), also served through the API.
+    match /shopOrders/{orderId} { allow read, write: if false; }
+    match /shopOrders/{orderId}/{rest=**} { allow read, write: if false; }
+    match /shopContributions/{id} { allow read, write: if false; }
+    match /shopContributions/{id}/{rest=**} { allow read, write: if false; }
+    match /shopProducts/{id} { allow read, write: if false; }
+    match /stripeEvents/{id} { allow read, write: if false; }
+    match /shopRateLimits/{id} { allow read, write: if false; }
   }
 }

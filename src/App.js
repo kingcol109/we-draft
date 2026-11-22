@@ -49,6 +49,11 @@ const NflPlayerPage = lazy(() => import("./pages/NflPlayerPage"));
 const Comparison = lazy(() => import("./pages/Comparison"));
 const UserBoards = lazy(() => import("./pages/UserBoards"));
 const UserProfile = lazy(() => import("./pages/UserProfile"));
+// /shop (+ /shop/cart, /shop/success, /shop/:slug) and /support (+ /support/thanks) —
+// the store and voluntary contributions. Public pages, noindex, linked only from
+// signed-in profiles (Profile → Store), never the nav/footer. API: api/shop.js.
+const Shop = lazy(() => import("./pages/Shop"));
+const Support = lazy(() => import("./pages/Support"));
 
 // CFB
 const CFBPage = lazy(() => import("./pages/CFBPage"));
@@ -312,6 +317,12 @@ function MainLayout() {
             <Route path="/boards" element={<UserBoards />} />
             <Route path="/boards/feed" element={<MyFeed />} />
             <Route path="/profile" element={<UserProfile />} />
+            <Route path="/shop" element={<Shop />} />
+            <Route path="/shop/cart" element={<Shop view="cart" />} />
+            <Route path="/shop/success" element={<Shop view="success" />} />
+            <Route path="/shop/:slug" element={<Shop view="product" />} />
+            <Route path="/support" element={<Support />} />
+            <Route path="/support/thanks" element={<Support view="thanks" />} />
             <Route path="/mocks" element={<MockDraftHub />} />
             <Route path="/mocks/my" element={<MyMocksPage />} />
             <Route path="/mocks/create" element={<CreateMock />} />

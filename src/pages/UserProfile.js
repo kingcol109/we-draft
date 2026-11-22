@@ -25,6 +25,8 @@ import FollowingTab from "../components/profileHub/FollowingTab";
 import BoardsTab from "../components/profileHub/BoardsTab";
 import WePickTab from "../components/profileHub/WePickTab";
 import MessagesTab from "../components/profileHub/MessagesTab";
+// Profile → Store: /shop + /support links (signed-in only) and order history.
+import StoreTab from "../components/profileHub/StoreTab";
 import { countUnreadMessages } from "../utils/userMessages";
 import SiteUpdatesToggle from "../components/SiteUpdatesToggle";
 
@@ -39,7 +41,7 @@ const MyDraftClass = lazy(() => import("./MyDraftClass"));
 // The profile hub's tabs (?tab=…, Feed by default): [key, label, phone label].
 const HUB_TABS = [
   ["feed", "Feed"], ["following", "Following"], ["boards", "Boards"], ["draftclass", "My Draft Class"],
-  ["sim", "Draft Sim"], ["wepick", "We-Pick"], ["friends", "Friends"], ["messages", "Messages"], ["settings", "Settings"],
+  ["sim", "Draft Sim"], ["wepick", "We-Pick"], ["friends", "Friends"], ["messages", "Messages"], ["store", "Store"], ["settings", "Settings"],
 ];
 // The Beta tab's entries — shown to Sim Beta users and admins.
 const BETA_ITEMS = [
@@ -329,6 +331,7 @@ export default function UserProfile() {
   else if (tab === "wepick") body = <WePickTab uid={user.uid} />;
   else if (tab === "friends") body = <div style={{ ...card, padding: isMobile ? 14 : 22 }}><FriendsPanel isMobile={isMobile} /></div>;
   else if (tab === "messages") body = <MessagesTab uid={user.uid} isMobile={isMobile} onSeen={() => setUnreadMessages(0)} />;
+  else if (tab === "store") body = <StoreTab isMobile={isMobile} />;
   else if (tab === "articles") body = lazyTab(<ArticlesManager />);
   else if (tab === "sim") {
     // The Draft Sim page's own Sim Profile and saved drafts, on its dark panel.
