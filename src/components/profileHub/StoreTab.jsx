@@ -135,7 +135,7 @@ export default function StoreTab({ isMobile }) {
                   <span style={{ color: "#667" }}> · since {fmtDate(c.createdAt)}{c.recurring && c.paymentsCount ? ` · ${c.paymentsCount} payment${c.paymentsCount === 1 ? "" : "s"}` : ""}</span>
                 </div>
                 <Pill
-                  text={c.cancelAtPeriodEnd ? "Ends this period" : { paid: "Thank you", active: "Active", past_due: "Payment issue", canceled: "Canceled", refunded: "Refunded", paused: "Paused" }[c.status] || c.status}
+                  text={c.cancelAtPeriodEnd ? (c.cancelAt ? `Ends ${fmtDate(c.cancelAt)}` : "Ends this period") : { paid: "Thank you", active: "Active", past_due: "Payment issue", canceled: "Canceled", refunded: "Refunded", paused: "Paused" }[c.status] || c.status}
                   color={c.status === "past_due" ? "#b3261e" : ["canceled", "refunded"].includes(c.status) ? "#777" : "#1e7d32"} />
               </div>
             ))}

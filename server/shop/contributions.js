@@ -168,9 +168,13 @@ async function onSubscriptionChanged(db, sub) {
   const ref = await contributionForSubscription(db, sub.id, sub.metadata?.contributionId);
   if (!ref) return;
   const map = { active: "active", trialing: "active", past_due: "past_due", unpaid: "past_due", canceled: "canceled", incomplete_expired: "expired", incomplete: "pending", paused: "paused" };
+  // A scheduled cancellation shows up as cancel_at_period_end, or — newer
+  // API versions / the Customer Portal — as a cancel_at date.
+  const cancelAt = Number(sub.cancel_at) || null;
   await ref.update({
     status: map[sub.status] || sub.status,
-    cancelAtPeriodEnd: !!sub.cancel_at_period_end,
+    cancelAtPeriodEnd: !!sub.cancel_at_period_end || (!!cancelAt && sub.status !== "canceled"),
+    cancelAt: cancelAt ? Timestamp.fromMillis(cancelAt * 1000) : null,
     ...(sub.status === "canceled" ? { canceledAt: Timestamp.now() } : {}),
     updatedAt: FieldValue.serverTimestamp(),
   });
@@ -205,7 +209,7 @@ function contributionView(d) {
     contributionId: d.contributionId, createdAt: ts(d.createdAt), amountCents: d.amountCents,
     recurring: !!d.recurring, interval: d.interval, status: d.status,
     paymentsCount: d.paymentsCount || 0, totalPaidCents: d.totalPaidCents || 0,
-    lastPaidAt: ts(d.lastPaidAt), cancelAtPeriodEnd: !!d.cancelAtPeriodEnd,
+    lastPaidAt: ts(d.lastPaidAt), cancelAtPeriodEnd: !!d.cancelAtPeriodEnd, cancelAt: ts(d.cancelAt),
   };
 }
 
