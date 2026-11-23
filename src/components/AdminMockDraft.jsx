@@ -17,12 +17,13 @@
 // site's official weekly mock draft (AdminWeeklyMock.jsx). Badges: the
 // Draft Sim's one-time achievements (AdminSimBadges.jsx).
 import { useEffect, useMemo, useRef, useState } from "react";
-import { collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteField, FieldPath, serverTimestamp } from "firebase/firestore";
+import { collection, doc, getDocs, setDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase";
 import {
   ANALYSTS, CHATTER, VARIABLES, VARIABLE_GROUPS, DEFAULT_CHATTER, lineText, defaultLines, applyDeskLines, defaultAvatar, applyDeskAvatars,
-  LEGEND_POSITIONS, DEFAULT_LEGENDS, davinLegends, otherSchools, applyDeskLegends, TAKE_KEY, takeLinesOf, applyPlayerTakes,
+  LEGEND_POSITIONS, DEFAULT_LEGENDS, davinLegends, otherSchools, applyDeskLegends, TAKE_KEY,
 } from "../utils/draftSim/analysts";
+import { loadTakes, saveTakes, withLine, linesOf, takeCount, unknownVars } from "../utils/playerTakes";
 import { loadSimData, loadDeskLines, loadBestGame, SIM_YEAR, SIM_YEARS, teamNamer } from "../utils/draftSim/data";
 import { fetchNflBranding } from "../utils/draftProfileData";
 import { NFL_TEAMS } from "../utils/coachHistory";
@@ -257,8 +258,7 @@ const stored = (l) => (l.minPick ? { text: l.text.trim(), minPick: l.minPick } :
 const same = (rows, lines) => JSON.stringify(rows.map(stored).filter((l) => lineText(l))) === JSON.stringify(lines);
 // Every variable a line can use: VARIABLES plus the palette's (the CFBD
 // stat-line keys), and the trade side's other coordinators.
-const KNOWN = new Set([...Object.keys(VARIABLES), ...VARIABLE_GROUPS.flatMap(([, keys]) => keys), "fromOc", "fromDc"]);
-const unknownVars = (text) => (text.match(/\{([\w ]+)\}/g) || []).map((v) => v.slice(1, -1)).filter((v) => !KNOWN.has(v));
+// (utils/playerTakes.js keeps the list, shared with Admin → Go.)
 const STAT_HINT = "CFBD stat-line value (stat lines only)";
 
 // Click a chip to drop {variable} into the line being edited, at the
@@ -502,19 +502,10 @@ function Personalities() {
 // separate from the desk lines above. A save writes only the players
 // changed here (players.{id}), so two admins — or an old tab — don't wipe
 // each other's work; then it reloads everyone's. ──
-const TAKES_REF = () => doc(db, "config", "draftSimAnalysis");
-// A take line is its text, or { text, mock?, noSim? } (analysts.js):
-// mock — the Weekly Mock's pick notes may use it too; noSim — off the sim.
-const takeLine = (text, { mock, noSim } = {}) => (mock || noSim ? { text, ...(mock ? { mock: true } : {}), ...(noSim ? { noSim: true } : {}) } : text);
-const withLine = (x, patch) => takeLine(patch.text ?? lineText(x), { mock: x.mock, noSim: x.noSim, ...patch });
-const cleanTakes = (t = {}) => {
-  const lines = takeLinesOf(t).map((l) => withLine(l, { text: lineText(l).trim() }));
-  return lines.length ? { [TAKE_KEY]: lines } : {};
-};
+// The take helpers and the save live in utils/playerTakes.js (Admin → Go uses them too).
 // Firestore caps a doc at 1 MiB; leave headroom for the rest of it.
 const TAKES_MAX_BYTES = 950 * 1024;
 const TAKES_WARN_BYTES = 700 * 1024;
-const takeCount = (t = {}) => takeLinesOf(t).length;
 
 // onFocusLine({ el, edit }, label): hands the line being typed in to the
 // desk's Insert Variable bank (null when none is).
@@ -533,8 +524,8 @@ function PlayerTakesEditor({ onFocusLine }) {
 
   useEffect(() => {
     // Straight from Firestore (not the sim's page-session cache).
-    getDoc(TAKES_REF())
-      .then((snap) => setTakes(snap.exists() ? snap.data().players || {} : {}))
+    loadTakes()
+      .then(setTakes)
       .catch((e) => { console.error("Player takes load error:", e); setStatus("loadError"); });
   }, []);
   useEffect(() => {
@@ -543,7 +534,6 @@ function PlayerTakesEditor({ onFocusLine }) {
   }, [year]);
 
   // A player's lines (blank ones being written included) → fn's.
-  const linesOf = (t = {}) => [TAKE_KEY, "reach", "steal", "depth"].flatMap((k) => t[k] || []);
   const change = (id, fn) => {
     setTakes((t) => ({ ...t, [id]: { [TAKE_KEY]: fn(linesOf(t[id])) } }));
     setChanged((c) => new Set(c).add(id));
@@ -558,25 +548,10 @@ function PlayerTakesEditor({ onFocusLine }) {
 
   const save = async () => {
     if (tooBig) { setStatus("tooBig"); return; }
-    const ids = [...changed];
-    // [FieldPath, value, …] — a player with no lines left is removed.
-    const pairs = ids.flatMap((id) => {
-      const t = cleanTakes(takes[id]);
-      return [new FieldPath("players", id), Object.keys(t).length ? t : deleteField()];
-    });
     setStatus("saving");
     try {
-      try {
-        await updateDoc(TAKES_REF(), ...pairs, "updatedAt", serverTimestamp());
-      } catch (e) {
-        if (e.code !== "not-found") throw e;
-        // First save ever: no doc to update yet.
-        const players = Object.fromEntries(ids.map((id) => [id, cleanTakes(takes[id])]).filter(([, t]) => Object.keys(t).length));
-        await setDoc(TAKES_REF(), { players, updatedAt: serverTimestamp() });
-      }
       // Everyone's takes as saved, this save's and any other admin's.
-      const fresh = (await getDoc(TAKES_REF())).data()?.players || {};
-      applyPlayerTakes(fresh);
+      const fresh = await saveTakes(Object.fromEntries([...changed].map((id) => [id, takes[id]])));
       setTakes(fresh);
       setChanged(new Set());
       setDirty(false);

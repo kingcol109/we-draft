@@ -8,18 +8,27 @@
 //   Portal     who's in the Transfer Portal now (→ committed to a school, or
 //              withdrew), and a search to move anyone else in — the same
 //              writes as the player editor (utils/portalMoves.js)
-//   Birthdays  the 2027–2030 classes without a birthday, best community
-//              grade first — month / day / year pickers (2000 on), or mark
-//              it "can't find" (Birthday "U")
+//   Sim takes  Kenneth Cold's lines on the Draft Sim desk, per player
+//              (config/draftSimAnalysis via utils/playerTakes.js — the same
+//              writes as Admin → Mock Draft → Personalities)
+//   Bios       the longer Bio on the player page (players.Bio)
+//   Birthdays  month / day / year pickers (2000 on), or mark it "can't
+//              find" (Birthday "U")
+// Every task opens on who's missing one, best community grade first (user,
+// 2026-11-23: "recommends guys without it… as default"), with a Missing /
+// Has one toggle and a search to edit what's already in the system.
 // Every save writes straight away, one player at a time.
 import { useEffect, useMemo, useState } from "react";
-import { collection, deleteField, doc, getDocs, query, updateDoc, where } from "firebase/firestore";
+import { collection, deleteField, doc, getDocs, query, serverTimestamp, updateDoc, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { getSiteSnapshot } from "../utils/siteSnapshots";
 import { gradeLabel } from "../utils/gradeScale";
 import { loadBlurbs, saveBlurb } from "../utils/prospectBlurbs";
 import { NFL_TARGETS_DOC } from "../utils/nflTargets";
 import { enterPortal, withdrawPortal, resolvePortal, applyMove } from "../utils/portalMoves";
+import { loadTakes, saveTakes, withLine, linesOf, takeCount, unknownVars } from "../utils/playerTakes";
+import { lineText, TAKE_KEY } from "../utils/draftSim/analysts";
+import { SIM_YEARS } from "../utils/draftSim/years";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -60,6 +69,7 @@ export default function AdminGo() {
   const [grades, setGrades] = useState({}); // { id: avg }
   const [blurbs, setBlurbs] = useState(null);
   const [lists, setLists] = useState(null); // { TEAM: [entries] }
+  const [takes, setTakes] = useState(null); // Kenneth's { [id]: takes }; false = load failed
   const [toast, setToast] = useState(null); // { text, undo? }
 
   useEffect(() => {
@@ -69,6 +79,7 @@ export default function AdminGo() {
       .catch(() => setPlayers([]));
     getSiteSnapshot("_grades").then((g) => setGrades(Object.fromEntries(Object.entries(g?.rows || {}).map(([id, r]) => [id, r?.[0] ?? null])))).catch(() => {});
     loadBlurbs(true).then(setBlurbs).catch(() => setBlurbs({}));
+    loadTakes().then(setTakes).catch(() => setTakes(false));
     getDocs(collection(db, NFL_TARGETS_DOC))
       .then((s) => setLists(Object.fromEntries(s.docs.map((d) => [d.id, [...(d.data().featured || []), ...(d.data().list || [])]]))))
       .catch(() => setLists({}));
@@ -95,9 +106,15 @@ export default function AdminGo() {
   const blurbsMissing = blurbs ? Object.keys(listed).filter((id) => !blurbs[id]).length : null;
   const inPortal = players ? players.filter((p) => p.InPortal).length : null;
   const bdaysMissing = players ? players.filter((p) => !p.Birthday).length : null;
+  const live = useMemo(() => (players || []).filter((p) => p.Live !== false), [players]);
+  const simPlayers = useMemo(() => live.filter((p) => SIM_YEARS.includes(String(p.Eligible))), [live]);
+  const takesMissing = players && takes ? simPlayers.filter((p) => !takeCount(takes[p.id])).length : null;
+  const biosMissing = players ? live.filter((p) => !String(p.Bio || "").trim()).length : null;
 
   const tasks = [
     { key: "blurbs", icon: "✍️", label: "Write-ups", n: blurbsMissing, sub: "missing" },
+    { key: "takes", icon: "🎙️", label: "Sim takes", n: takesMissing, sub: "missing" },
+    { key: "bios", icon: "📝", label: "Bios", n: biosMissing, sub: "missing" },
     { key: "portal", icon: "🔁", label: "Portal", n: inPortal, sub: "in portal" },
     { key: "bdays", icon: "🎂", label: "Birthdays", n: bdaysMissing, sub: "missing" },
   ];
@@ -119,6 +136,8 @@ export default function AdminGo() {
 
       {!players ? <div style={{ ...card, color: "#7a8597", fontWeight: 800 }}>Loading players…</div>
         : task === "blurbs" ? <BlurbsTask listed={listed} blurbs={blurbs} setBlurbs={setBlurbs} flash={flash} loading={!blurbs || !lists} />
+          : task === "takes" ? <TakesTask players={simPlayers} grades={grades} takes={takes} setTakes={setTakes} flash={flash} />
+          : task === "bios" ? <BiosTask players={live} grades={grades} update={update} flash={flash} />
           : task === "portal" ? <PortalTask players={players} update={update} flash={flash} />
             : <BirthdaysTask players={players} grades={grades} update={update} flash={flash} />}
 
@@ -148,7 +167,7 @@ function BlurbsTask({ listed, blurbs, setBlurbs, flash, loading }) {
       <div style={{ fontSize: 13, fontWeight: 700, color: "#5f6b7a", lineHeight: 1.45 }}>
         1–2 sentences about the player — not about any team. Shows under his row on every team list he's on. No PFF numbers.
       </div>
-      <Toggle options={[["Missing", false], ["Done", true]]} value={showDone} onChange={setShowDone} />
+      <Toggle options={[["Missing", false], ["Has one", true]]} value={showDone} onChange={setShowDone} />
       <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter by name or school" style={field} />
       {!rows.length && <div style={{ ...card, color: "#7a8597", fontWeight: 800 }}>{showDone ? "None written yet." : "Every listed player has one. 🎉"}</div>}
       {rows.slice(0, PAGE).map((r) => <BlurbCard key={r.id} r={r} value={blurbs[r.id] || ""} onSaved={onSaved} flash={flash} />)}
@@ -288,37 +307,208 @@ function SchoolPicker({ player, onPick, onClose }) {
   );
 }
 
-// ── Birthdays ──
-function BirthdaysTask({ players, grades, update, flash }) {
+// ── Sim takes (Kenneth Cold) ──
+// The Draft Sim classes (SIM_YEARS), best community grade first.
+function TakesTask({ players, grades, takes, setTakes, flash }) {
   const [year, setYear] = useState("all");
+  const [has, setHas] = useState(false);
+  const [q, setQ] = useState("");
+  if (takes === false) return <div style={{ ...card, color: RED, fontWeight: 800 }}>Couldn't load the takes — reload before saving.</div>;
+  if (!takes) return <div style={{ ...card, color: "#7a8597", fontWeight: 800 }}>Loading takes…</div>;
+  const t = norm(q);
+  const rows = players
+    .filter((p) => (takeCount(takes[p.id]) > 0) === has && (year === "all" || String(p.Eligible) === year))
+    .filter((p) => !t || norm(`${nameOf(p)} ${p.School} ${p.Position}`).includes(t))
+    .sort((a, b) => (grades[a.id] ?? 99) - (grades[b.id] ?? 99) || nameOf(a).localeCompare(nameOf(b)));
+  return (
+    <div style={{ display: "grid", gap: 10 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: "#5f6b7a", lineHeight: 1.45 }}>
+        What Kenneth Cold says when the player's drafted on the Draft Sim. Write as many lines as you like — he rotates through them. Sim off keeps a line off the desk; Mock lets the Weekly Mock's pick notes use it.
+      </div>
+      <Toggle options={[["Missing", false], ["Has one", true]]} value={has} onChange={setHas} />
+      <Toggle options={[["All", "all"], ...SIM_YEARS.map((y) => [y, y])]} value={year} onChange={setYear} />
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter by name or school" style={field} />
+      <SectionHead text={`${rows.length} ${has ? "with" : "without"} takes`} />
+      {!rows.length && <div style={{ ...card, color: "#7a8597", fontWeight: 800 }}>{has ? "Nobody matches." : "All done here. 🎉"}</div>}
+      {rows.slice(0, PAGE).map((p) => <TakeCard key={p.id} p={p} grade={gradeLabel(grades[p.id])} saved={takes[p.id]} setTakes={setTakes} flash={flash} />)}
+      {rows.length > PAGE && <div style={{ textAlign: "center", fontSize: 12, fontWeight: 800, color: "#7a8597" }}>{rows.length - PAGE} more after these</div>}
+    </div>
+  );
+}
+
+// The variables player takes use most; tap one to drop it in where you're typing.
+const QUICK_VARS = ["last", "player", "pos", "posName", "school", "nick", "city", "n", "rank", "posRankOrd"];
+const cleanLines = (ls) => JSON.stringify(ls.map((l) => withLine(l, { text: lineText(l).trim() })).filter((l) => lineText(l)));
+
+function TakeCard({ p, grade, saved, setTakes, flash }) {
+  const start = () => { const l = linesOf(saved); return l.length ? l : [""]; };
+  const [lines, setLines] = useState(start);
+  const [busy, setBusy] = useState(false);
+  const [focus, setFocus] = useState(null); // { i, el } — the line being typed in
+  useEffect(() => { setLines(start()); }, [saved]); // eslint-disable-line react-hooks/exhaustive-deps
+  const name = nameOf(p);
+  const dirty = cleanLines(lines) !== cleanLines(linesOf(saved));
+  const set = (i, patch) => setLines((ls) => ls.map((x, k) => (k === i ? withLine(x, patch) : x)));
+  const insert = (v) => {
+    if (!focus || !lines[focus.i]) return;
+    const { i, el } = focus;
+    const text = lineText(lines[i]);
+    const a = el.selectionStart ?? text.length;
+    const b = el.selectionEnd ?? a;
+    set(i, { text: `${text.slice(0, a)}{${v}}${text.slice(b)}` });
+    requestAnimationFrame(() => { el.focus(); const c = a + v.length + 2; el.setSelectionRange(c, c); });
+  };
+  const save = async () => {
+    setBusy(true);
+    try {
+      // Writes only this player's field; hands back everyone's as saved.
+      setTakes(await saveTakes({ [p.id]: { [TAKE_KEY]: lines } }));
+      flash(`Saved ${name}'s takes`);
+    } catch (e) { flash(`Couldn't save: ${e.message}`); } finally { setBusy(false); }
+  };
+  const pill = (on, color) => ({ minHeight: 34, borderRadius: 999, padding: "0 12px", fontFamily: BODY, fontSize: 13, fontWeight: 900, cursor: "pointer", border: `2px solid ${on ? color : "#dfe5ee"}`, background: on ? color : "#fff", color: on ? "#fff" : "#7a8597" });
+  return (
+    <div style={card}>
+      <div>
+        <div style={{ fontSize: 17, fontWeight: 900, color: INK }}>{name}</div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: "#5f6b7a" }}>{p.Position} · {p.School} · {p.Eligible}{grade ? ` · ${grade}` : ""}</div>
+      </div>
+      {lines.map((line, i) => {
+        const text = lineText(line);
+        const bad = unknownVars(text);
+        return (
+          <div key={i} style={{ display: "grid", gap: 6, paddingTop: i ? 8 : 0, borderTop: i ? "1px dashed #e3e8ef" : "none" }}>
+            <textarea value={text} rows={3} placeholder={`Line ${i + 1} on ${name}…`}
+              onFocus={(e) => setFocus({ i, el: e.target })}
+              onChange={(e) => set(i, { text: e.target.value })}
+              style={{ ...field, resize: "vertical", lineHeight: 1.45, borderColor: bad.length ? GOLD : "#d5dbe4", opacity: line.noSim && !line.mock ? 0.6 : 1 }} />
+            {bad.length > 0 && <div style={{ fontSize: 12, fontWeight: 800, color: "#a06200" }}>Unknown: {bad.map((v) => `{${v}}`).join(" ")} — shows blank</div>}
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <button type="button" onClick={() => set(i, { noSim: !line.noSim })} style={pill(!line.noSim, GREEN)}>Sim</button>
+              <button type="button" onClick={() => set(i, { mock: !line.mock })} style={pill(!!line.mock, BLUE)}>Mock</button>
+              <button type="button" onClick={() => { setFocus(null); setLines((ls) => ls.filter((_, k) => k !== i)); }} style={{ ...pill(false, RED), marginLeft: "auto", color: RED }}>Remove</button>
+            </div>
+          </div>
+        );
+      })}
+      {focus && (
+        <div style={{ display: "flex", gap: 6, overflowX: "auto", scrollbarWidth: "none" }}>
+          {QUICK_VARS.map((v) => (
+            <button key={v} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => insert(v)}
+              style={{ flexShrink: 0, minHeight: 32, borderRadius: 8, border: "1px solid #c9d6ea", background: "#eef4fc", color: BLUE, fontFamily: "monospace", fontSize: 13, fontWeight: 800, padding: "0 9px", cursor: "pointer" }}>{`{${v}}`}</button>
+          ))}
+        </div>
+      )}
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <button type="button" onClick={() => setLines((ls) => [...ls, ""])} style={{ ...big(BLUE, false), borderStyle: "dashed" }}>+ Line</button>
+        {p.Slug && <a href={`/player/${p.Slug}`} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, fontWeight: 800, color: BLUE }}>Profile ↗</a>}
+        <button type="button" disabled={!dirty || busy} onClick={save} style={{ ...big(GREEN), marginLeft: "auto", opacity: !dirty || busy ? 0.45 : 1 }}>{busy ? "Saving…" : "Save"}</button>
+      </div>
+    </div>
+  );
+}
+
+// ── Bios ──
+// The longer Bio behind Show Bio on the player page (a line starting "- " is a bullet there).
+function BiosTask({ players, grades, update, flash }) {
+  const [year, setYear] = useState("all");
+  const [has, setHas] = useState(false);
   const [q, setQ] = useState("");
   const t = norm(q);
   const rows = players
-    .filter((p) => !p.Birthday && (year === "all" || String(p.Eligible) === year))
+    .filter((p) => !!String(p.Bio || "").trim() === has && (year === "all" || String(p.Eligible) === year))
     .filter((p) => !t || norm(`${nameOf(p)} ${p.School} ${p.Position}`).includes(t))
     .sort((a, b) => (grades[a.id] ?? 99) - (grades[b.id] ?? 99) || nameOf(a).localeCompare(nameOf(b)));
 
-  const save = async (p, value) => {
+  // Same fields as the player editor's save (Bio + updatedAt, the page's "last updated" stamp).
+  const save = async (p, text) => {
+    const prev = p.Bio || "";
     try {
-      await updateDoc(doc(db, "players", p.id), { Birthday: value });
-      update(p.id, (x) => ({ ...x, Birthday: value }));
+      await updateDoc(doc(db, "players", p.id), { Bio: text, updatedAt: serverTimestamp() });
+      update(p.id, (x) => ({ ...x, Bio: text }));
       const undo = async () => {
-        await updateDoc(doc(db, "players", p.id), { Birthday: deleteField() }).catch(() => {});
-        update(p.id, (x) => { const n = { ...x }; delete n.Birthday; return n; });
+        await updateDoc(doc(db, "players", p.id), { Bio: prev }).catch(() => {});
+        update(p.id, (x) => ({ ...x, Bio: prev }));
       };
-      flash(value === "U" ? `${nameOf(p)}: marked can't find` : `${nameOf(p)}: ${longDate(value)}`, undo);
+      flash(text ? `Saved ${nameOf(p)}'s bio` : `${nameOf(p)}: bio removed`, undo);
     } catch (e) { flash(`Couldn't save: ${e.message}`); }
   };
 
   return (
     <div style={{ display: "grid", gap: 10 }}>
       <div style={{ fontSize: 13, fontWeight: 700, color: "#5f6b7a", lineHeight: 1.45 }}>
-        Best community grade first. Pick the month, day and year, then Save. Can't find it? Mark it and he drops off.
+        The longer bio behind Show Bio on the player page. Best community grade first. Start a line with "- " for a bullet. No PFF numbers.
       </div>
+      <Toggle options={[["Missing", false], ["Has one", true]]} value={has} onChange={setHas} />
       <Toggle options={[["All", "all"], ...CLASSES.map((y) => [y, y])]} value={year} onChange={setYear} />
       <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter by name or school" style={field} />
-      <SectionHead text={`${rows.length} without a birthday`} />
-      {!rows.length && <div style={{ ...card, color: "#7a8597", fontWeight: 800 }}>All done here. 🎉</div>}
+      <SectionHead text={`${rows.length} ${has ? "with" : "without"} a bio`} />
+      {!rows.length && <div style={{ ...card, color: "#7a8597", fontWeight: 800 }}>{has ? "Nobody matches." : "All done here. 🎉"}</div>}
+      {rows.slice(0, PAGE).map((p) => <BioCard key={p.id} p={p} grade={gradeLabel(grades[p.id])} onSave={save} />)}
+      {rows.length > PAGE && <div style={{ textAlign: "center", fontSize: 12, fontWeight: 800, color: "#7a8597" }}>{rows.length - PAGE} more after these</div>}
+    </div>
+  );
+}
+
+function BioCard({ p, grade, onSave }) {
+  const value = String(p.Bio || "");
+  const [text, setText] = useState(value);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { setText(value); }, [value]);
+  const dirty = text.trim() !== value.trim();
+  const go = async () => { setBusy(true); await onSave(p, text.trim()); setBusy(false); };
+  return (
+    <div style={card}>
+      <div>
+        <div style={{ fontSize: 17, fontWeight: 900, color: INK }}>{nameOf(p)}</div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: "#5f6b7a" }}>{p.Position} · {p.School} · {p.Eligible}{grade ? ` · ${grade}` : ""}</div>
+      </div>
+      <textarea value={text} onChange={(e) => setText(e.target.value)} rows={8} placeholder={`${nameOf(p)}'s bio…`} style={{ ...field, resize: "vertical", lineHeight: 1.45 }} />
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span style={{ fontSize: 12, fontWeight: 800, color: "#9aa4b2" }}>{text.trim().length} chars</span>
+        {p.Slug && <a href={`/player/${p.Slug}`} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, fontWeight: 800, color: BLUE }}>Profile ↗</a>}
+        <button type="button" disabled={!dirty || busy} onClick={go} style={{ ...big(GREEN), marginLeft: "auto", opacity: !dirty || busy ? 0.45 : 1 }}>{busy ? "Saving…" : "Save"}</button>
+      </div>
+    </div>
+  );
+}
+
+// ── Birthdays ──
+function BirthdaysTask({ players, grades, update, flash }) {
+  const [year, setYear] = useState("all");
+  const [has, setHas] = useState(false);
+  const [q, setQ] = useState("");
+  const t = norm(q);
+  const rows = players
+    .filter((p) => !!p.Birthday === has && (year === "all" || String(p.Eligible) === year))
+    .filter((p) => !t || norm(`${nameOf(p)} ${p.School} ${p.Position}`).includes(t))
+    .sort((a, b) => (grades[a.id] ?? 99) - (grades[b.id] ?? 99) || nameOf(a).localeCompare(nameOf(b)));
+
+  // value "" clears it; Undo puts back what was there before.
+  const save = async (p, value) => {
+    const prev = p.Birthday || "";
+    const put = (v) => update(p.id, (x) => { const n = { ...x, Birthday: v }; if (!v) delete n.Birthday; return n; });
+    try {
+      await updateDoc(doc(db, "players", p.id), { Birthday: value || deleteField() });
+      put(value);
+      const undo = async () => {
+        await updateDoc(doc(db, "players", p.id), { Birthday: prev || deleteField() }).catch(() => {});
+        put(prev);
+      };
+      flash(!value ? `${nameOf(p)}: birthday cleared` : value === "U" ? `${nameOf(p)}: marked can't find` : `${nameOf(p)}: ${longDate(value)}`, undo);
+    } catch (e) { flash(`Couldn't save: ${e.message}`); }
+  };
+
+  return (
+    <div style={{ display: "grid", gap: 10 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: "#5f6b7a", lineHeight: 1.45 }}>
+        Best community grade first. Pick the month, day and year, then Save. Can't find it? Mark it and he drops off. Has one shows what's on file, to fix or clear.
+      </div>
+      <Toggle options={[["Missing", false], ["Has one", true]]} value={has} onChange={setHas} />
+      <Toggle options={[["All", "all"], ...CLASSES.map((y) => [y, y])]} value={year} onChange={setYear} />
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter by name or school" style={field} />
+      <SectionHead text={`${rows.length} ${has ? "with" : "without"} a birthday`} />
+      {!rows.length && <div style={{ ...card, color: "#7a8597", fontWeight: 800 }}>{has ? "Nobody matches." : "All done here. 🎉"}</div>}
       {rows.slice(0, PAGE).map((p) => <BirthdayCard key={p.id} p={p} grade={gradeLabel(grades[p.id])} onSave={save} />)}
       {rows.length > PAGE && <div style={{ textAlign: "center", fontSize: 12, fontWeight: 800, color: "#7a8597" }}>{rows.length - PAGE} more after these</div>}
     </div>
@@ -334,9 +524,11 @@ const daysIn = (m, y) => (m ? new Date(Date.UTC(y || 2000, m, 0)).getUTCDate() :
 const pad = (n) => String(n).padStart(2, "0");
 
 function BirthdayCard({ p, grade, onSave }) {
-  const [m, setM] = useState("");
-  const [d, setD] = useState("");
-  const [y, setY] = useState("");
+  // A date already on file starts in the pickers, to fix it.
+  const [, y0 = "", m0 = "", d0 = ""] = String(p.Birthday || "").match(/^(\d{4})-(\d{2})-(\d{2})$/) || [];
+  const [m, setM] = useState(m0 ? String(Number(m0)) : "");
+  const [d, setD] = useState(d0 ? String(Number(d0)) : "");
+  const [y, setY] = useState(y0);
   const [busy, setBusy] = useState(false);
   const days = daysIn(Number(m), Number(y));
   // A day past the month's end (Jan 31 → Feb) drops back to blank.
@@ -350,6 +542,7 @@ function BirthdayCard({ p, grade, onSave }) {
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 17, fontWeight: 900, color: INK }}>{nameOf(p)}</div>
           <div style={{ fontSize: 13, fontWeight: 700, color: "#5f6b7a" }}>{p.Position} · {p.School} · {p.Eligible}{grade ? ` · ${grade}` : ""}</div>
+          {p.Birthday && <div style={{ fontSize: 13, fontWeight: 800, color: p.Birthday === "U" ? "#7a8597" : INK }}>On file: {p.Birthday === "U" ? "can't find" : longDate(p.Birthday)}</div>}
         </div>
         <a href={google(`${nameOf(p)} ${p.School} football birthday`)} target="_blank" rel="noopener noreferrer"
           style={{ ...big(BLUE, false), display: "grid", placeItems: "center", textDecoration: "none", minHeight: 40, fontSize: 13 }}>🔍 Search</a>
@@ -369,9 +562,10 @@ function BirthdayCard({ p, grade, onSave }) {
         </select>
       </div>
       {iso && <div style={{ fontSize: 13, fontWeight: 800, color: GREEN }}>{longDate(iso)} · age {ageOf(iso)}</div>}
-      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 8 }}>
-        <button type="button" disabled={!iso || busy} onClick={() => go(iso)} style={{ ...big(GREEN), opacity: !iso || busy ? 0.45 : 1 }}>{busy ? "Saving…" : "Save"}</button>
-        <button type="button" disabled={busy} onClick={() => go("U")} style={big("#7a8597", false)}>Can't find</button>
+      <div style={{ display: "grid", gridTemplateColumns: p.Birthday ? "2fr 1fr 1fr" : "2fr 1fr", gap: 8 }}>
+        <button type="button" disabled={!iso || iso === p.Birthday || busy} onClick={() => go(iso)} style={{ ...big(GREEN), opacity: !iso || iso === p.Birthday || busy ? 0.45 : 1 }}>{busy ? "Saving…" : "Save"}</button>
+        <button type="button" disabled={busy || p.Birthday === "U"} onClick={() => go("U")} style={{ ...big("#7a8597", false), opacity: p.Birthday === "U" ? 0.45 : 1 }}>Can't find</button>
+        {p.Birthday && <button type="button" disabled={busy} onClick={() => go("")} style={big(RED, false)}>Clear</button>}
       </div>
     </div>
   );
