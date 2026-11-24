@@ -554,19 +554,13 @@ export default function Navbar() {
             {/* Kept deliberately short — just the primary destinations. The
                 draft-year/position filtering lives on the Community Board
                 page itself now (its own mobile dropdowns), not here. */}
+            {/* Five items only (user call, 2026-11-22): these four sections
+                plus Profile below; each section page links to its sub-pages. */}
             {[
               { path: "/community", label: "Community Board" },
-              { path: "/cfb", label: "CFB Teams" },
-              { path: "/cfb/stats", label: "CFB Stats" },
-              { path: "/hs", label: "High Schools" },
-              { path: "/portal", label: "Transfer Portal" },
-              { path: "/portal/news", label: "Top Portal Players" },
-              { path: "/nfl", label: "NFL Teams" },
-              { path: "/events", label: "Draft Calendar" },
-              { path: "/events/combine", label: "NFL Combine" },
-              { path: "/events/pro-days", label: "Pro Days" },
-              { path: "/risers", label: "Draft Risers" },
-              { path: "/mocks", label: "Mock Drafts" },
+              { path: "/cfb", label: "CFB" },
+              { path: "/nfl", label: "NFL" },
+              { path: "/events", label: "Draft" },
             ].map((l) => (
               <Link key={l.path} to={l.path} className="mobile-nav-link" onClick={() => setMenuOpen(false)}>
                 {l.label}
