@@ -421,9 +421,9 @@ export default function WeeklyTeamMock({ team, year = MAIN_WEEKLY_YEAR }) {
                       const card = cardSlots.get(it.pick.slot);
                       return card ? (
                         <CardPickRow isMobile={isMobile} brand={brand} year={year} nick={nick(team)} teamPage collegeLogo={collegeLogo} sub={subOf(it.pick)} actions={actions}
-                          notFirst={card.notFirst} eager={it.pick.slot === firstPick?.slot} back={backs[it.pick.player?.id]} headshot={headshots[it.pick.player?.id] || ""} week={weeks?.[0]?.id || ""} pick={asPick} />
+                          notFirst={card.notFirst} eager={it.pick.slot === firstPick?.slot} back={backs[it.pick.player?.id]} headshot={headshots[it.pick.player?.id] || ""} week={weeks?.[0]?.id || ""} espnId={espnIds[it.pick.player?.id] || ""} pick={asPick} />
                       ) : (
-                        <PickRow isMobile={isMobile} vertical={isMobile} brand={brand} sub={subOf(it.pick)} teamPage collegeLogo={collegeLogo} headshot={headshots[it.pick.player?.id] || ""} actions={actions} pick={asPick} />
+                        <PickRow isMobile={isMobile} vertical={isMobile} brand={brand} sub={subOf(it.pick)} teamPage collegeLogo={collegeLogo} headshot={headshots[it.pick.player?.id] || ""} espnId={espnIds[it.pick.player?.id] || ""} actions={actions} pick={asPick} />
                       );
                     })()}
                     </Fragment>

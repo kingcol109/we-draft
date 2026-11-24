@@ -371,11 +371,21 @@ export const tradeChip = (p, from = "") => ({
 // [tradeChip], note (in place of chips when it got none listed), label
 // (after its name — "get" by default), heading (a big header in place of
 // the name — the recap's RECEIVED / GAVE UP) }]. footer: a line under the band.
+// A hex color's lightness — is it a light ink (white text) or a dark one?
+const isLight = (hex) => {
+  const m = String(hex || "").trim().match(/^#?([0-9a-f]{3}|[0-9a-f]{6})$/i);
+  if (!m) return true;
+  const h = m[1].length === 3 ? m[1].split("").map((c) => c + c).join("") : m[1];
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+  return 0.299 * r + 0.587 * g + 0.114 * b > 150;
+};
+
 export function TradeCard({ title, sides, isMobile, tag = "TRADE", footer = "" }) {
   const side = ({ team, brand = {}, picks = [], note = "", label = "get", heading = "" }, flip) => {
     const c1 = brand.Color1 || BLUE;
     const c2 = brand.Color2 || GOLD;
     const ink = textOn(c1, c2);
+    const lightInk = isLight(ink);
     const name = brand.Team || NFL_TEAMS[team] || team;
     const logo = isMobile ? 30 : 40;
     return (
@@ -397,10 +407,14 @@ export function TradeCard({ title, sides, isMobile, tag = "TRADE", footer = "" }
           )}
           <div style={{ display: "flex", flexWrap: "wrap", justifyContent: flip ? "flex-end" : "flex-start", gap: 4 }}>
             {picks.map((p, i) => (
-              <span key={i} style={{ display: "inline-flex", alignItems: "baseline", gap: 5, background: "#fff", color: INK, borderRadius: 6,
-                padding: isMobile ? "2px 6px" : "3px 8px", boxShadow: "0 1px 3px rgba(0,0,0,0.2)", whiteSpace: "nowrap" }}>
-                <span style={{ fontFamily: FONT, fontSize: isMobile ? 12 : 14 }}>{p.main}</span>
-                {p.sub && <span style={{ fontFamily: BODY_FONT, fontSize: 10, fontWeight: 700, color: MUTED }}>{p.sub}</span>}
+              // A chip in the team's own colors: a see-through tint of its
+              // ink over the panel, outlined, the pick in the ink color.
+              <span key={i} style={{ display: "inline-flex", alignItems: "baseline", gap: 5, color: ink, borderRadius: 999,
+                background: lightInk ? "rgba(255,255,255,0.16)" : "rgba(0,0,0,0.10)",
+                border: `1px solid ${lightInk ? "rgba(255,255,255,0.45)" : "rgba(0,0,0,0.28)"}`,
+                padding: isMobile ? "2px 8px" : "3px 10px", whiteSpace: "nowrap", backdropFilter: "blur(2px)" }}>
+                <span style={{ fontFamily: FONT, fontSize: isMobile ? 12 : 14, textShadow: lightInk ? "0 1px 2px rgba(0,0,0,0.25)" : "none" }}>{p.main}</span>
+                {p.sub && <span style={{ fontFamily: BODY_FONT, fontSize: 10, fontWeight: 800, opacity: 0.78 }}>{p.sub}</span>}
               </span>
             ))}
             {!picks.length && note && <span style={{ fontFamily: BODY_FONT, fontSize: 11, fontWeight: 700, opacity: 0.85 }}>{note}</span>}

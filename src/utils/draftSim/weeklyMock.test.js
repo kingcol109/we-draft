@@ -55,7 +55,7 @@ test("mock editor round trip: slots ride along, and edited picks get theirs back
   expect(back.map((p) => p.slot)).toEqual(w.picks.map((p) => p.slot));
 });
 
-test("notes: every pick gets one, no holes, PFF only near the top with snaps (credited), team history when it's there", () => {
+test("notes: every pick gets one — the pick announced, then one thing about him; never stats, PFF, staff fit or team history", () => {
   const sim = runWeeklyMock(data, { seed: 3, rounds: 3 });
   let seed = 9;
   const rand = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
@@ -64,24 +64,36 @@ test("notes: every pick gets one, no holes, PFF only near the top with snaps (cr
     years: [2000], teams: [sim.pickEvents[0].team], schools: ["S"],
     picks: [[2010, 2, 40, 0, p0.Position, 0, "Old Guy"], [2015, 3, 80, 0, p0.Position, 0, "Older Guy"]],
   };
-  const ctx = {
-    teamName: (t) => t, nickname: (t) => t, staff: {}, season: 2026, year: "2027", history, rand,
-    pff: { [p0.id]: { rk: 2, sn: 400, pos: "ED" }, [sim.pickEvents[1].prospect.id]: { rk: 2, sn: 90, pos: "ED" }, [sim.pickEvents[2].prospect.id]: { rk: 40, sn: 500, pos: "ED" } },
-  };
+  const ctx = { teamName: (t) => t, nickname: (t) => t, staff: {}, season: 2026, year: "2027", history, rand, pff: { [p0.id]: { rk: 2, sn: 400, pos: "ED" } } };
   const notes = weeklyNotes(sim, ctx);
   expect(Object.keys(notes)).toHaveLength(12);
-  Object.values(notes).forEach((n) => { expect(n.length).toBeGreaterThan(20); expect(n).not.toMatch(/[{}]|undefined/); });
-  // Low snaps or outside the top: never PFF.
-  expect(notes[2]).not.toMatch(/Pro Football Focus|PFF/);
-  expect(notes[3]).not.toMatch(/Pro Football Focus|PFF/);
-  // The first pick's facts, every one: PFF (credited) and the team's history with his school at his position are among them.
-  const all = new Set();
-  for (let k = 0; k < 40; k++) all.add(pickNote(sim.pickEvents[0], { ...ctx, used: {} }));
-  const text = [...all].join(" ");
-  expect(text).toMatch(/Pro Football Focus/);
-  // The team's history: in every one of his notes, and last.
-  [...all].forEach((n) => expect(n).toMatch(/since 2000[^.]*\.$|\d{4}\)?\.$/));
-  expect(text).toMatch(/3rd .* since 2000|since 2000.*3rd/);
+  Object.values(notes).forEach((n) => {
+    expect(n.length).toBeGreaterThan(20);
+    expect(n).not.toMatch(/[{}]|undefined/);
+    expect(n).not.toMatch(/Pro Football Focus|PFF|since 2000|this season|evaluations average|tackles|yards/);
+  });
+});
+
+test("notes: the second sentence is the team's write-up, else his generic one, else a mock take, else the community's read", () => {
+  const sim = runWeeklyMock(data, { seed: 3, rounds: 1 });
+  const e = { ...sim.pickEvents[0], value: 0, need: null };
+  const id = e.prospect.id;
+  const ctx = { teamName: (t) => t, nickname: (t) => t, staff: {}, season: 2026, year: "2027", rand: Math.random };
+  const writeUps = { team: { [e.team]: { [id]: "Team note on him." } }, generic: { [id]: "Generic note on him." } };
+  applyPlayerTakes({ [id]: { normal: [{ text: "Mock take on {last}.", mock: true }] } });
+  expect(pickNote(e, { ...ctx, used: {}, writeUps })).toMatch(/Team note on him\.$/);
+  // Another team: his generic write-up.
+  expect(pickNote({ ...e, team: "ZZZ" }, { ...ctx, used: {}, writeUps })).toMatch(/Generic note on him\.$/);
+  // No write-ups: the mock take.
+  expect(pickNote(e, { ...ctx, used: {} })).toMatch(new RegExp(`Mock take on ${e.prospect.Last}\\.$`));
+  applyPlayerTakes({});
+  // Nothing written: the community's read, in one sentence, no counts.
+  const read = { ...e, prospect: { ...e.prospect, strengths: ["Arm Strength"], weaknesses: ["Footwork"], avg: 4, count: 6 } };
+  const all = Array.from({ length: 30 }, () => pickNote(read, { ...ctx, used: {} })).join(" ");
+  expect(all).toMatch(/arm strength/);
+  expect(all).toMatch(/footwork/);
+  expect(all).toMatch(/second-round/);
+  expect(all).not.toMatch(/evaluations average|from 6|across 6/);
 });
 
 test("notes: a pick the sim traded opens with the trade — the trade up into it, or the trade down that brought it", () => {
@@ -91,9 +103,10 @@ test("notes: a pick the sim traded opens with the trade — the trade up into it
   const ctx = { teamName: (t) => t, nickname: (t) => `${t}s`, staff: {}, season: 2026, year: "2027", rand };
   const give = [{ overall: 3, round: 1 }, { overall: 7, round: 2 }, { overall: 10002, round: 2, year: "2028", future: true }];
   const up = pickNote({ ...e, pick: { ...e.pick, tradeUp: { from: "ZZZ", give } } }, { ...ctx, used: {} });
-  // The opener comes first ("No." aside, its first sentence).
+  // The trade is the announcement ("No." aside, its first sentence), naming him.
   expect(up).toMatch(/^(?:[^.]|No\.)*ZZZs/);
   expect(up).toMatch(/No\. 3, No\. 7 and a 2028 second-rounder/);
+  expect(up).toMatch(new RegExp(`^(?:[^.]|No\.)*${e.prospect.Last}`));
   const down = pickNote(e, { ...ctx, used: {}, tradeDowns: { [e.pick.overall]: { down: e.team, up: "YYY", at: 9 } } });
   expect(down).toMatch(/^(?:[^.]|No\.)*YYYs/);
   // Another team's trade down doesn't count; no trade, no opener.
@@ -165,24 +178,6 @@ test("2028 order: shuffled within 1–10, 11–20 and 21–32, and every round f
   expect([...r1.slice(10, 20)].sort()).toEqual(teams.slice(10, 20));
   expect([...r1.slice(20)].sort()).toEqual(teams.slice(20));
   [2, 3].forEach((r) => expect(out.filter((p) => p.Round === r).map((p) => p.Team)).toEqual(r1));
-});
-
-test("notes: a GM or head coach in a staff-fit line links to his staff page; an OC doesn't", () => {
-  const sim = runWeeklyMock(data, { seed: 3, rounds: 1 });
-  const e = sim.pickEvents[0];
-  let seed = 5;
-  const rand = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
-  const ctx = (slot) => ({
-    teamName: (t) => t, nickname: (t) => t, season: 2026, year: "2027", rand,
-    staff: { [e.team]: { [slot]: { n: "Darren Mougey", id: "darren-mougey" } } },
-  });
-  const notes = (slot) => {
-    const ev = { ...e, fit: { s: 92, [slot]: 92 }, prospect: { ...e.prospect, strengths: [], weaknesses: [], count: 0, stats: null } };
-    return Array.from({ length: 30 }, () => pickNote(ev, { ...ctx(slot), used: {} })).join(" ");
-  };
-  expect(notes("GM")).toMatch(/\[Darren Mougey\]\(\/staff\/darren-mougey\)/);
-  expect(notes("OC")).not.toMatch(/\]\(\/staff/);
-  expect(notes("OC")).toMatch(/Darren Mougey/);
 });
 
 test("team page: each pick with the same slot last week, its number and who had it; its trades", () => {
@@ -288,7 +283,7 @@ test("next year's needs: a 6th-round QB doesn't answer an upgrade; a 1st-rounder
   expect(changes.find((c) => c.team === "NYJ" && c.key === "QB")).toEqual({ team: "NYJ", key: "QB", from: ["Upgrade Wanted"], to: ["Upgrade Needed"], cover: "depth" });
 });
 
-test("light notes (the next class's): board rank, grade, traits, stats, staff fit, PFF — no need, value, pick spot or team history", () => {
+test("light notes (the next class's): board rank and one thing about him — no need, value, pick spot, team history or PFF", () => {
   const sim = runWeeklyMock(data, { seed: 3, rounds: 3 });
   let seed = 9;
   const rand = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
@@ -303,8 +298,7 @@ test("light notes (the next class's): board rank, grade, traits, stats, staff fi
     // No pick number ("at 12", "at No. 12"), value or reach, need, or the team's draft history.
     expect(n).not.toMatch(/\bat (No\. )?\d+\b|spots|value|steal|reach|need|since \d{4}|first-round|pipeline|\{/i);
   });
-  // PFF (credited, top of the list) can still come up.
-  expect(notes[sim.pickEvents[0].pick.overall]).toMatch(/Pro Football Focus|PFF/);
+  expect(notes[sim.pickEvents[0].pick.overall]).not.toMatch(/Pro Football Focus|PFF/);
 });
 
 test("the next class's mock runs with no trades", () => {

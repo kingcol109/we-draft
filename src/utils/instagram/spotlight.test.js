@@ -1,4 +1,4 @@
-import { scoutingReport, spotlightInput, spotlightSlides, spotlightFrame, FRAME_WINDOW, heightText, measurementsOf, espnStats, spotlightCaption, editedStats, statsSeed } from "./spotlight";
+import { scoutingReport, spotlightInput, spotlightSlides, spotlightFrame, FRAME_WINDOW, heightText, measurementsOf, espnStats, spotlightCaption, editedStats, statsSeed, spotlightCareer, spotlightImageUrls } from "./spotlight";
 
 const env = { measure: (t, size) => String(t).length * size * 0.45, images: {} };
 const player = { id: "p1", First: "Mark", Last: "Bowman", Position: "TE", School: "USC", Eligible: "2029", Height: "6'5\"", Weight: "245", Slug: "mark-bowman-2029-te" };
@@ -175,4 +175,29 @@ test("the admin picks how many strengths and weaknesses the report shows", () =>
   expect(spotlightInput({ player, report, strengthCount: -2 }).strengthCount).toBe(1);
   // The caption names no more than the slide shows.
   expect(spotlightCaption(spotlightInput({ player, report, strengthCount: 1 }))).toContain("Top strengths: Hands.");
+});
+
+test("stats slide career path: the path down the right, the numbers on the left, the lead's rank on a pill (no badge)", () => {
+  const report = scoutingReport({ player, evaluations: [] });
+  const stats = { hero: { year: "2026", team: "USC", tiles: [
+    { label: "RECEIVING YARDS", value: "1,045", rank: "12" }, { label: "RECEPTIONS", value: "71", rank: "" },
+    { label: "TOUCHDOWNS", value: "9", rank: "" }, { label: "YARDS / CATCH", value: "14.7", rank: "" },
+  ] }, table: { title: "RECEIVING", cols: ["REC", "YDS"], rows: [{ year: "2026", team: "USC", vals: ["71", "1045"] }], career: null } };
+  const career = spotlightCareer([
+    { key: "usc", name: "USC", span: "2025–Present", current: true, brand: { Color1: "#990000", Logo1: "usc.png", LogoDark: "usc-dark.png" }, accolades: [{ text: "2026 · All-Big Ten" }] },
+    { key: "hs", name: "Mater Dei", label: "High School", span: "Graduated 2025", state: "CA", fallback: "CA", accolades: [] },
+  ]);
+  expect(career[0]).toMatchObject({ logo: "usc-dark.png", color: "#990000", note: "2026 · All-Big Ten" });
+  expect(career[1]).toMatchObject({ logo: "", color: "", fallback: "CA" });
+  const on = spotlightSlides(spotlightInput({ player, report, stats, career, showCareer: true }), env)[2].svg;
+  expect(on).toContain("CAREER PATH");
+  expect(on).toContain(">MATER DEI<");
+  expect(on).toContain("#12 IN FBS");
+  expect(on).not.toContain("NATIONAL RANK");
+  expect(on).not.toMatch(/undefined|NaN/);
+  // Off (the default): the old layout — the big badge.
+  const off = spotlightSlides(spotlightInput({ player, report, stats, career }), env)[2].svg;
+  expect(off).not.toContain("CAREER PATH");
+  expect(off).toContain("NATIONAL RANK");
+  expect(spotlightImageUrls(spotlightInput({ player, report, stats, career, showCareer: true }))).toContain("usc-dark.png");
 });

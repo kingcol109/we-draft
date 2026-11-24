@@ -21,6 +21,8 @@
 //   3. The stats (when ESPN has them for him): the newest season as the big
 //      part, with national ranks when they're high; under it a running back's
 //      career rushing totals, anyone else's season-by-season table (espnStats).
+//      Option (input.showCareer): his career path down the right beside the
+//      season's numbers, which stack on the left (careerPanel).
 //   4. Your turn: an ad to grade him yourself on We-Draft.com, and the rest
 //      of the site (big boards, mock drafts, the Draft Sim).
 // spotlightFrame: not a slide — a transparent frame to edit his highlight
@@ -137,7 +139,7 @@ export function scoutingReport({ player, evaluations = [], classSnap = null, nfl
 // of his top traits the report lists (1–MAX_TRAITS, all by default).
 export const MAX_TRAITS = 5;
 const traitCount = (n) => Math.max(1, Math.min(MAX_TRAITS, Math.round(Number(n)) || MAX_TRAITS));
-export function spotlightInput({ player, school = {}, photo = null, headshot = "", report = {}, advance = false, brandLogo = "", badgeLogo = "", address = "", look = "wash", accent = "", badge = "crest", showRanks = true, showFits = false, highlights = false, stats = null, showStats = true, classLogo = "", jersey = "", strengthCount = MAX_TRAITS, weaknessCount = MAX_TRAITS }) {
+export function spotlightInput({ player, school = {}, photo = null, headshot = "", report = {}, advance = false, brandLogo = "", badgeLogo = "", address = "", look = "wash", accent = "", badge = "crest", showRanks = true, showFits = false, highlights = false, stats = null, showStats = true, classLogo = "", jersey = "", strengthCount = MAX_TRAITS, weaknessCount = MAX_TRAITS, career = null, showCareer = false }) {
   return {
     strengthCount: traitCount(strengthCount), weaknessCount: traitCount(weaknessCount),
     first: player?.First || "", last: player?.Last || "", pos: player?.Position || "", school: player?.School || "", year: String(player?.Eligible || ""),
@@ -163,6 +165,10 @@ export function spotlightInput({ player, school = {}, photo = null, headshot = "
     // His college stats (espnStats) — their own slide after the report when
     // he has them and showStats isn't off.
     stats: showStats !== false && (stats?.hero || stats?.table || stats?.career) ? stats : null,
+    // His career path on the stats slide (input.showCareer — user,
+    // 2026-11-24): spotlightCareer's rows, newest first, at most
+    // MAX_CAREER_ROWS. Only drawn beside the season's numbers (stats.hero).
+    path: showCareer && Array.isArray(career) && career.length ? career.slice(0, MAX_CAREER_ROWS) : null,
     // Highlight videos follow the cover (the cover's swipe line says so).
     highlights: !!highlights,
     address: address || (player?.Slug ? `WE-DRAFT.COM/PLAYER/${player.Slug}` : "WE-DRAFT.COM"),
@@ -554,6 +560,57 @@ function reportSvg(env, input, i, total) {
   return svgDoc(env, defs, body, "#05070b");
 }
 
+// ── The career path (the stats slide's option) ──
+// useCareerPath's rows (PlayerEligibilityInfo.jsx — the player page's
+// Career Path, newest first) → plain rows the slide draws: { name, span,
+// label, logo, color, fallback, current, note (his newest accolade) }.
+export const MAX_CAREER_ROWS = 6;
+export function spotlightCareer(rows) {
+  return (rows || []).map((r) => {
+    const color = /^#[0-9a-f]{6}$/i.test(r.brand?.Color1 || "") && r.label !== "High School" ? r.brand.Color1 : "";
+    return {
+      name: String(r.name || ""), span: String(r.span || ""), label: String(r.label || ""),
+      logo: (color ? r.brand?.LogoDark || r.brand?.Logo1 : r.brand?.Logo1) || "", color,
+      fallback: String(r.fallback || r.state || "").slice(0, 3), current: !!r.current,
+      note: String(r.accolades?.[0]?.text || ""),
+    };
+  }).filter((r) => r.name);
+}
+
+// The career path as a timeline in a glass panel: CAREER PATH across its
+// top, then a stop a row — his school's logo on its color in a ring (the
+// newest stop ringed in the accent), a line down to the next; the name,
+// then the years (and his newest accolade there, when it fits).
+function careerPanel(env, x, y, w, h, rows, c2) {
+  let out = panel(x, y, w, h, c2) + kicker(x + 28, y + 52, "CAREER PATH");
+  const top = y + 82;
+  const room = h - (top - y) - 22;
+  const rowH = Math.min(132, room / rows.length);
+  const r = Math.max(22, Math.min(38, rowH * 0.34));
+  const cx = x + 28 + r;
+  const tx = cx + r + 20;
+  const tw = x + w - 22 - tx;
+  const showNote = rowH >= 104;
+  rows.forEach((st, j) => {
+    const cy = top + j * rowH + rowH / 2;
+    if (j < rows.length - 1) out += `<rect x="${r1(cx - 2)}" y="${r1(cy + r)}" width="4" height="${r1(rowH - 2 * r)}" fill="#ffffff" fill-opacity="0.18"/>`;
+    out += `<circle cx="${r1(cx)}" cy="${r1(cy)}" r="${r1(r)}" fill="${st.color || "#e9edf3"}"/>`;
+    if (hasImage(env, st.logo)) out += image(env, st.logo, cx - r * 0.68, cy - r * 0.68, r * 1.36, r * 1.36);
+    else if (st.fallback) out += text(cx, cy + r * 0.28, st.fallback, Math.round(r * 0.72), "#5f6b7a", { anchor: "middle", spacing: 1 });
+    if (j === 0) out += `<circle cx="${r1(cx)}" cy="${r1(cy)}" r="${r1(r + 6)}" fill="none" stroke="${c2}" stroke-width="5"/>`;
+    const nameS = Math.max(22, Math.min(34, rowH * 0.3));
+    const subS = Math.max(17, Math.min(24, rowH * 0.2));
+    const sub = [st.label, st.span].filter(Boolean).join(DOT);
+    const lines = 1 + (sub ? 1 : 0) + (showNote && st.note ? 1 : 0);
+    const block = nameS * 0.78 + (lines - 1) * (subS + 10);
+    let ty = cy - block / 2 + nameS * 0.78;
+    out += fitLine(env, tx, ty, up(st.name), nameS, tw, j === 0 ? "#ffffff" : "rgba(255,255,255,0.86)", { spacing: 1, min: 16 }).svg;
+    if (sub) { ty += subS + 10; out += fitLine(env, tx, ty, up(sub), subS, tw, j === 0 ? c2 : SOFT, { spacing: 1.5, min: 13 }).svg; }
+    if (showNote && st.note) { ty += subS + 10; out += fitLine(env, tx, ty, up(st.note), subS - 2, tw, GOLD, { spacing: 1, min: 12 }).svg; }
+  });
+  return out;
+}
+
 // ── Slide 3: the stats ──
 // His college numbers from ESPN's career endpoint (the player page's Stats
 // tab, PlayerEspnStats.js), cut down for a slide. The newest season is the
@@ -759,7 +816,7 @@ function statsSvg(env, input, i, total) {
   const tableH = t ? 102 + tRows * rh : 0;
   const careerH = st.career ? 186 : 0;
   const lowH = tableH || careerH;
-  const heroH = st.hero ? Math.min(640, roomBottom - roomTop - (lowH ? lowH + gap : 0)) : 0;
+  const heroH = st.hero ? Math.min(input.path ? 720 : 640, roomBottom - roomTop - (lowH ? lowH + gap : 0)) : 0;
   let y = roomTop + Math.max(0, (roomBottom - roomTop - heroH - (lowH ? lowH + (heroH ? gap : 0) : 0)) / 2);
 
   // The newest season: the slide's main event. A slanted SEASON tag, then his
@@ -777,6 +834,65 @@ function statsSvg(env, input, i, total) {
       + text(x0 + 28, y + tagH / 2 + 14, tag, 38, readableOn("#ffffff", c2), { spacing: 3 })
       + (st.hero.team ? text(x0 + tagW + 22, y + tagH / 2 + 13, st.hero.team, 34, SOFT, { spacing: 3 }) : "");
 
+    if (input.path) {
+      // With the career path: the numbers on the left — the lead over the
+      // rest in a 2×2, its rank on a pill beside it — and the path down the
+      // right, the full height.
+      const leadTop = y + tagH + 14;
+      const colW = Math.round(cw * 0.56);
+      const pathX = x0 + colW + gap;
+      body += careerPanel(env, pathX, leadTop, x0 + cw - pathX, y + h - leadTop, input.path, c2);
+      const rows = Math.ceil(rest.length / 2);
+      // The rest: compact cards (a rank on a small pill in the corner), so
+      // the lead keeps its size.
+      const cardH = rows ? Math.round(Math.min(rows > 1 ? 140 : 160, (h - tagH - 14) * 0.32)) : 0;
+      const restTop = y + h - (rows ? rows * cardH + (rows - 1) * gap : 0);
+      const leadH = restTop - leadTop - (rows ? gap : 0);
+      // His rank beside the label when the two fit on the line, else under it.
+      const rt = lead.rank ? `#${lead.rank} IN FBS` : "";
+      const rw = rt ? widthOf(env, rt, 30, 2) + 40 : 0;
+      const labelW = widthOf(env, lead.label, 40, 3);
+      const pillBeside = rt && 44 + labelW + 24 + rw <= colW - 16;
+      const pill = rt && !pillBeside ? 68 : 0;
+      const numSize = Math.max(90, Math.min(220, (leadH - 44 - 24 - pill) / 0.92));
+      const gapL = Math.max(16, numSize * 0.14);
+      const blockH = numSize * 0.78 + gapL + 44 + pill;
+      const base = leadTop + (leadH - blockH) / 2 + numSize * 0.78;
+      const labelY = base + gapL + 38;
+      body += `<ellipse cx="${r1(x0 + colW / 2)}" cy="${r1(leadTop + leadH / 2)}" rx="${r1(colW * 0.6)}" ry="${r1(leadH * 0.6)}" fill="url(#shalo)"/>`
+        + `<rect x="${x0 + 2}" y="${r1(leadTop + 18)}" width="10" height="${r1(leadH - 36)}" rx="5" fill="${c2}"/>`
+        + fitLine(env, x0 + 40, base, lead.value, numSize, colW - 60, "#ffffff", { spacing: 2, min: 60 }).svg
+        + fitLine(env, x0 + 44, labelY, lead.label, 40, pillBeside ? labelW + 4 : colW - 60, "#ffffff", { spacing: 3, opacity: 0.92, min: 20 }).svg;
+      if (rt) {
+        const px = pillBeside ? x0 + 44 + labelW + 24 : x0 + 44;
+        const py = pillBeside ? labelY - 36 : labelY + 22;
+        body += `<rect x="${r1(px)}" y="${r1(py)}" width="${r1(rw)}" height="46" rx="23" fill="${GOLD}"/>`
+          + text(px + rw / 2, py + 33, rt, 30, NAVY, { anchor: "middle", spacing: 2 });
+      }
+      const tw = (colW - gap) / 2;
+      rest.forEach((tl, j) => {
+        // An odd one out at the foot takes the row's full width.
+        const wide = j === rest.length - 1 && rest.length % 2 === 1;
+        const cwid = wide ? colW : tw;
+        const tx = x0 + (wide ? 0 : (j % 2) * (tw + gap));
+        const ty = restTop + Math.floor(j / 2) * (cardH + gap);
+        const cx = tx + cwid / 2;
+        // Every card sized and placed alike, room for a pill or not.
+        const padTop = rest.some((x) => x.rank) ? 40 : 16;
+        const vs = Math.max(40, Math.min(80, (cardH - padTop - 12 - 22 - 16) / 0.78));
+        const vb = ty + padTop + (cardH - padTop - (vs * 0.78 + 12 + 24)) / 2 + vs * 0.78;
+        body += panel(tx, ty, cwid, cardH, c2)
+          + fitLine(env, cx, vb, tl.value, vs, cwid - 30, "#ffffff", { anchor: "middle", spacing: 1, min: 34 }).svg
+          + fitLine(env, cx, vb + 12 + 22, tl.label, 22, cwid - 24, SOFT, { anchor: "middle", spacing: 2, min: 13 }).svg;
+        if (tl.rank) {
+          const t2 = `#${tl.rank} IN FBS`;
+          const w2 = Math.min(cwid - 24, widthOf(env, t2, 18, 1.5) + 20);
+          body += `<rect x="${r1(tx + cwid - 12 - w2)}" y="${r1(ty + 14)}" width="${r1(w2)}" height="28" rx="14" fill="${GOLD}"/>`
+            + fitLine(env, tx + cwid - 12 - w2 / 2, ty + 34, t2, 18, w2 - 12, NAVY, { anchor: "middle", spacing: 1.5, min: 11 }).svg;
+        }
+      });
+      y += h + gap;
+    } else {
     const restH = rest.length ? Math.round(Math.min(220, h * 0.36)) : 0;
     const leadTop = y + tagH + 14;
     const leadH = h - tagH - 14 - (restH ? restH + gap : 0);
@@ -821,6 +937,7 @@ function statsSvg(env, input, i, total) {
       });
     }
     y += h + gap;
+    }
   }
 
   // Under it, smaller. A running back: his career rushing totals in a row.
@@ -1082,5 +1199,5 @@ export function spotlightCaption(input) {
 
 // Every image the post draws.
 export function spotlightImageUrls(input) {
-  return [...new Set([input.brandLogo, input.badgeLogo, input.classLogo, input.photo, input.logo, input.logoDark, input.headshot, ...(input.showFits ? input.report?.fits || [] : []).map((f) => f.logo)].filter(Boolean))];
+  return [...new Set([input.brandLogo, input.badgeLogo, input.classLogo, input.photo, input.logo, input.logoDark, input.headshot, ...(input.showFits ? input.report?.fits || [] : []).map((f) => f.logo), ...(input.path || []).map((r) => r.logo)].filter(Boolean))];
 }

@@ -19,7 +19,7 @@
 // his graphic on the left (FirstPickGraphic.jsx — a team's second first-
 // rounder gets its own, by pick number), the pick on the right. Every other
 // pick keeps the plain row.
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, Link, Navigate } from "react-router-dom";
 import { doc, getDoc, getDocs, collection, query, where, documentId } from "firebase/firestore";
 import { db } from "../firebase";
@@ -43,6 +43,8 @@ import WdOutline from "../assets/Logo2.png";
 import { useFirstPickGraphic } from "../components/FirstPickGraphic";
 import { FlipCard, CardBack, FLIP_CSS, teamTheme, loadScoutBacks } from "../components/ScoutCard";
 import { STATS_SEASON } from "../utils/risers";
+import { fetchEspnSeason } from "../components/PlayerStatsCard";
+import { seasonHeadline } from "../utils/profileHub";
 
 // Phones: the Homage card goes after this pick of the round.
 const PHONE_AD_AFTER = 5;
@@ -391,8 +393,8 @@ export default function ViewMock({ mockId: shownId = "", yearPage = "" }) {
             <Fragment key={pick.pickNumber}>
               {tradeCards(pick)}
               {cardPicks.has(pick.pickNumber)
-                ? <CardPickRow pick={pick} brand={teams[pick.currentTeam] || {}} isMobile={isMobile} year={year} teamMock={teamPages ? year : ""} nick={nick(pick.currentTeam)} eager={i < 2} notFirst={notFirstPicks.has(pick.pickNumber)} back={backs[pick.selection?.id]} headshot={headshots[pick.selection?.id] || ""} week={currentWeekId} />
-                : <PickRow pick={pick} brand={teams[pick.currentTeam] || {}} isMobile={isMobile} teamMock={teamPages ? year : ""} vertical={weekly && isMobile} headshot={weekly ? headshots[pick.selection?.id] || "" : ""} />}
+                ? <CardPickRow pick={pick} brand={teams[pick.currentTeam] || {}} isMobile={isMobile} year={year} teamMock={teamPages ? year : ""} nick={nick(pick.currentTeam)} eager={i < 2} notFirst={notFirstPicks.has(pick.pickNumber)} back={backs[pick.selection?.id]} headshot={headshots[pick.selection?.id] || ""} week={currentWeekId} espnId={espnIds[pick.selection?.id] || ""} />
+                : <PickRow pick={pick} brand={teams[pick.currentTeam] || {}} isMobile={isMobile} teamMock={teamPages ? year : ""} vertical={weekly && isMobile} headshot={weekly ? headshots[pick.selection?.id] || "" : ""} espnId={weekly ? espnIds[pick.selection?.id] || "" : ""} />}
               {weekly && i === Math.min(BANNER_AFTER, roundPicks.length) - 1 && <MakeYourOwnBanner c1={BLUE} c2={GOLD} ink="#fff" isMobile={isMobile} margin="4px 0" />}
               {i === Math.min(PHONE_AD_AFTER, roundPicks.length) - 1 && <PhoneAd isMobile={isMobile} preferTeam={roundPicks[0]?.currentTeam || ""} />}
             </Fragment>
@@ -402,6 +404,51 @@ export default function ViewMock({ mockId: shownId = "", yearPage = "" }) {
         {weekly && isMobile && <div style={{ marginTop: 22 }}><TeamMocksRail year={teamPages ? year : MAIN_WEEKLY_YEAR} teams={teams} columns={8} /></div>}
       </MockPageShell>
     </>
+  );
+}
+
+// His season line under a pick (user, 2026-11-24 — the notes no longer quote
+// stats): seasonHeadline's three numbers for his position from ESPN (by his
+// headshot's ESPN id), fetched once he scrolls near — nothing for an
+// offensive lineman (or a specialist — seasonHeadline has no line for one),
+// a player with no ESPN id, or no season.
+const seasonCache = new Map();
+const seasonOf = (espnId) => {
+  if (!seasonCache.has(espnId)) seasonCache.set(espnId, fetchEspnSeason(espnId).catch(() => null));
+  return seasonCache.get(espnId);
+};
+const NO_LINE = ["OL", "OT", "OG", "G", "C", "IOL", "T", "K", "P", "LS"];
+const isOffensiveLine = (pos) => NO_LINE.includes(String(pos || "").toUpperCase());
+export function PickStats({ pos, espnId, color = BLUE, isMobile = false }) {
+  const ref = useRef(null);
+  const [stats, setStats] = useState(null);
+  const skip = !espnId || isOffensiveLine(pos);
+  useEffect(() => {
+    if (skip || !ref.current) return undefined;
+    let live = true;
+    const load = () => seasonOf(espnId).then((s) => { if (live) setStats(seasonHeadline(pos, s)); });
+    if (typeof IntersectionObserver === "undefined") { load(); return () => { live = false; }; }
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((en) => en.isIntersecting)) { io.disconnect(); load(); }
+    }, { rootMargin: "400px 0px" });
+    io.observe(ref.current);
+    return () => { live = false; io.disconnect(); };
+  }, [skip, espnId, pos]);
+  if (skip) return null;
+  return (
+    <div ref={ref} style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: isMobile ? "4px 12px" : "4px 16px", marginTop: stats?.length ? 8 : 0, minHeight: 1 }}>
+      {stats?.length > 0 && (
+        <>
+          <span style={{ fontSize: 9, fontWeight: 900, letterSpacing: "0.14em", color: "#7a8597", textTransform: "uppercase" }}>{STATS_SEASON}</span>
+          {stats.map(([label, value]) => (
+            <span key={label} style={{ display: "inline-flex", alignItems: "baseline", gap: 4 }}>
+              <span style={{ fontSize: isMobile ? 15 : 17, fontWeight: 900, color, fontVariantNumeric: "tabular-nums", lineHeight: 1 }}>{value}</span>
+              <span style={{ fontSize: 10, fontWeight: 800, color: "#7a8597", letterSpacing: "0.06em", textTransform: "uppercase" }}>{label}</span>
+            </span>
+          ))}
+        </>
+      )}
+    </div>
   );
 }
 
@@ -457,7 +504,7 @@ function TeamMockSelect({ year }) {
   );
 }
 
-export function PickRow({ pick, brand, isMobile, sub = null, teamPage = false, collegeLogo = "", headshot = "", teamMock = "", vertical = false, actions = null }) {
+export function PickRow({ pick, brand, isMobile, sub = null, teamPage = false, collegeLogo = "", headshot = "", teamMock = "", vertical = false, actions = null, espnId = "" }) {
   const player = pick.selection;
   const c1 = brand.Color1 || BLUE;
   const c2 = brand.Color2 || GOLD;
@@ -556,6 +603,7 @@ export function PickRow({ pick, brand, isMobile, sub = null, teamPage = false, c
                 <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, fontFamily: BODY_FONT, marginTop: 3 }}>
                   {[player.Position, player.School].filter(Boolean).join(" · ")}
                 </div>
+                <PickStats pos={player.Position} espnId={espnId} color={c1} isMobile={isMobile} />
               </>
             ) : (
               <div style={{ fontSize: isMobile ? 14 : 16, fontWeight: 800, color: "#b0b8c4", fontStyle: "italic" }}>No selection</div>
@@ -598,7 +646,7 @@ export function PickRow({ pick, brand, isMobile, sub = null, teamPage = false, c
 // back: the card's scouting report data (loadScoutBacks). A team's page
 // (WeeklyTeamMock.jsx) passes teamPage: his college's logo in place of the
 // team's, sub (last week), actions (its votes), and a View more to him.
-export function CardPickRow({ pick, brand, isMobile, year, teamMock = "", nick = "", eager = false, notFirst = false, back = null, teamPage = false, collegeLogo = "", sub = null, actions = null, headshot = "", week = "" }) {
+export function CardPickRow({ pick, brand, isMobile, year, teamMock = "", nick = "", eager = false, notFirst = false, back = null, teamPage = false, collegeLogo = "", sub = null, actions = null, headshot = "", week = "", espnId = "" }) {
   const player = pick.selection;
   const c1 = brand.Color1 || BLUE;
   const c2 = brand.Color2 || GOLD;
@@ -682,6 +730,7 @@ export function CardPickRow({ pick, brand, isMobile, year, teamMock = "", nick =
           <div style={{ fontSize: isMobile ? 14 : 16, fontWeight: 800, color: MUTED, fontFamily: BODY_FONT, marginTop: 6 }}>
             {[player.Position, player.School].filter(Boolean).join(" · ")}
           </div>
+          <PickStats pos={player.Position} espnId={espnId} color={c1} isMobile={isMobile} />
           {sub && <div style={{ fontSize: 12, fontWeight: 700, color: "#7a8597", fontFamily: BODY_FONT, marginTop: 6 }}>{sub}</div>}
         </div>
       )}

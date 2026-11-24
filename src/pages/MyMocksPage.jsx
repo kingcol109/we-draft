@@ -1,7 +1,8 @@
 // src/pages/MyMocksPage.jsx
 //
 // /mocks/my — the signed-in user's own mock drafts (public and private),
-// up to MAX_MOCKS_PER_CLASS per draft class, each with View / Edit / Delete.
+// up to MAX_MOCKS_PER_CLASS per draft class (King Cold Sports: no limit —
+// user, 2026-11-24), each with View / Edit / Delete.
 import { useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { collection, getDocs, query, where, deleteDoc, doc } from "firebase/firestore";
@@ -14,7 +15,9 @@ import {
   useIsMobile, MockPageShell, MockHero, heroText, chip, button, SectionTitle, PhoneAd,
 } from "../components/MockDraftKit";
 
-const MAX_MOCKS_PER_CLASS = 5;
+const MAX_MOCKS_PER_CLASS = 10;
+// The site's own account (King Cold Sports) writes as many as it likes.
+const UNLIMITED_UIDS = ["pYSpX6IRyHdAlYpFP5NNbQ19ARI3"];
 const ACTIVE_YEARS = ["2027", "2028"];
 const ARCHIVE_YEARS = ["2026"];
 
@@ -49,10 +52,12 @@ export default function MyMocksPage() {
   const countFor = (y) => list.filter((m) => (m.draftClass || "2026") === y).length;
   const filteredMocks = list.filter((m) => (m.draftClass || "2026") === classFilter);
   const isArchive = ARCHIVE_YEARS.includes(classFilter);
-  const atLimit = filteredMocks.length >= MAX_MOCKS_PER_CLASS;
+  const limit = user && UNLIMITED_UIDS.includes(user.uid) ? Infinity : MAX_MOCKS_PER_CLASS;
+  const unlimited = limit === Infinity;
+  const atLimit = filteredMocks.length >= limit;
 
   const create = () => {
-    if (atLimit) { setError(`You've reached the ${MAX_MOCKS_PER_CLASS} mock limit for the ${classFilter} class — delete one to write a new one.`); return; }
+    if (atLimit) { setError(`You've reached the ${limit} mock limit for the ${classFilter} class — delete one to write a new one.`); return; }
     setError("");
     navigate("/mocks/create");
   };
@@ -78,7 +83,7 @@ export default function MyMocksPage() {
         >
           <p style={heroText(isMobile)}>
             {user
-              ? `Your drafts, public and private — up to ${MAX_MOCKS_PER_CLASS} per class. Add an intro and a note on each pick before you publish.`
+              ? `Your drafts, public and private${unlimited ? "" : ` — up to ${limit} per class`}. Add an intro and a note on each pick before you publish.`
               : "Sign in to write mock drafts, trade picks, and publish your board with notes on every selection."}
           </p>
           {!user && (
@@ -95,8 +100,8 @@ export default function MyMocksPage() {
                 return (
                   <button key={y} onClick={() => { setClassFilter(y); setError(""); }} aria-pressed={on} style={chip(on, isMobile)}>
                     {y} Draft{" "}
-                    <span style={{ marginLeft: 4, fontSize: 11, opacity: 0.8, color: n >= MAX_MOCKS_PER_CLASS && !on ? "#b42318" : "inherit" }}>
-                      {n}/{MAX_MOCKS_PER_CLASS}
+                    <span style={{ marginLeft: 4, fontSize: 11, opacity: 0.8, color: n >= limit && !on ? "#b42318" : "inherit" }}>
+                      {unlimited ? n : `${n}/${limit}`}
                     </span>
                   </button>
                 );

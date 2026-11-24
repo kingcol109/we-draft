@@ -3,56 +3,51 @@
 // The Weekly Mock's pick notes (utils/draftSim/weeklyMock.js): a short
 // write-up generated for every pick when the mock is run, saved as the
 // pick's note — the admin edits them in the mock editor before publishing.
-// Each note is a lead sentence on the pick itself (value, reach, need, or
-// where the board has him), then one or two facts, weighted and never two
-// of a kind — the team's draft history always last, when it has some:
-//   - the We-Draft.com community: his grade, strengths and concerns
-//   - CFBD: a national stat rank, or his season line
-//   - staff fit: the GM's / coach's draft history, when it's Strong or better
-//     (a GM or head coach named as a link to his staff page)
-//   - the team's draft history since 2000 (draftHistory.json): its Nth
-//     pick at the position from his school, its first first-rounder at the
-//     position in years, its first pick from the school
-//   - Kenneth Cold's own take on him (analysts.js takeLinesOf), any line
-//     the admin marked mock eligible
-//   - PFF: his positional rank, credited — only near the top of the list
-//     (PFF_TOP) with PFF_MIN_SNAPS snaps; the one place PFF reaches the
-//     public site (the caller loads it, admin-only)
-// A pick the sim traded opens with the trade: the trade up into it, or the
-// trade down that brought it (tradeOpener).
-// Lines are data, like the desk's; a template is used again only once the
-// rest of its kind have been, so a mock reads varied. A mock is speculation,
-// not a team's decision: the lines explain why a pick could make sense —
-// never what a team thinks, wants or values.
+//
+// A note is two parts (user, 2026-11-24):
+//   1. The pick, announced: the lead sentence (value, reach, need, or where
+//      the board has him). A pick the sim traded is announced with the trade
+//      — the trade up into it, or the trade down that brought it.
+//   2. What to know about him — the first of these that exists:
+//      a. the team's own write-up on him from its NFL Targets list
+//         (nflTargets/{TEAM} featured / list entry note — ctx.writeUps.team)
+//      b. his generic write-up (config/prospectBlurbs — ctx.writeUps.generic)
+//      c. Kenneth Cold's take on him (analysts.js takeLinesOf), any line the
+//         admin marked mock eligible
+//      d. the We-Draft.com community's read: strengths, concerns and grade
+//         in one sentence
+// No stats (the mock pages show his season line on the card instead), no
+// draft-history (Thad) facts, staff fit or PFF.
+// Lines are data; a template is used again only once the rest of its kind
+// have been, so a mock reads varied. A mock is speculation, not a team's
+// decision: the lines explain why a pick could make sense — never what a
+// team thinks, wants or values.
 // Light notes (ctx.light — the next class's mock, drafted a year out) leave
 // out needs, value and where he was picked: the lead names him and where the
 // community board has him (lightRank, lightTopPos — intro when he has no
-// rank), with no pick number; the facts are the same minus the team's
-// draft history.
-import { pickVars, statFacts, ordinal, lineText, playerTakesFor, takeLinesOf, singular } from "./analysts";
+// rank), with no pick number. The second part is the same.
+import { pickVars, lineText, playerTakesFor, takeLinesOf, singular } from "./analysts";
 import { needWord, subsOf, rolePhrase } from "./engine";
 
-export const PFF_TOP = 10;
-export const PFF_MIN_SNAPS = 150;
-
 // {variables}: pickVars' (player, last, nick, n, rank, posRankOrd, grade,
-// strength, weakness, staffer, title, fitWord, needPos …), alias / aAlias
-// (another way to say his position — "signal caller", "a pass catcher";
-// POS_ALIASES) plus each fact's own.
+// strength, weakness …), alias / aAlias (another way to say his position —
+// "signal caller", "a pass catcher"; POS_ALIASES), gradeAdj / aGrade (his
+// community grade as words — "second-round", "a second-round") plus each
+// kind's own.
 export const NOTE_LINES = {
-  // ── Trade openers (before the lead) ──
+  // ── Trade leads (in place of the lead) ──
   // Traded up into the pick: {fromNick} (who moved back), {got} (what they sent).
   tradeUp: [
-    "The {nick} trade up to No. {n} with the {fromNick}, sending {got}.",
-    "Trade: the {nick} move up to {n}, giving the {fromNick} {got}.",
-    "The {nick} jump up to No. {n} in a deal with the {fromNick}, who get {got}.",
-    "{Got} to the {fromNick} moves the {nick} up to No. {n}.",
+    "The {nick} trade up to No. {n} with the {fromNick}, sending {got}, and take {player}.",
+    "The {nick} move up to {n} in a deal with the {fromNick} — {got} goes the other way — to land {player}.",
+    "{Got} to the {fromNick} gets the {nick} up to No. {n}, and they use it on {player}.",
+    "The {nick} get aggressive, jumping to No. {n} with the {fromNick} for {got} to grab {player}.",
   ],
   // A pick acquired by trading down: {upNick} (who moved up), {at} (the pick they moved down from).
   tradeDown: [
-    "The {nick} pick here with a selection from the {upNick}, acquired when they moved down from No. {at}.",
-    "This pick came from the {upNick} in the {nick}' trade down from No. {at}.",
-    "The {nick} picked up No. {n} from the {upNick} for moving back from No. {at}.",
+    "With the pick from the {upNick} — acquired by moving down from No. {at} — the {nick} take {player}.",
+    "The {nick} turn the pick they got from the {upNick} for sliding back from No. {at} into {player}.",
+    "No. {n} came from the {upNick} in the {nick}' trade down from {at}, and they spend it on {player}.",
   ],
   // ── Lead sentences ──
   steal: [
@@ -108,7 +103,7 @@ export const NOTE_LINES = {
     "{school} {posName} {player}, No. {rank} in the community rankings, heads to the {nick}.",
     "The {nick} go with {player}, the {posName} from {school} and the community's No. {rank} prospect.",
     "The {nick} opt for {aAlias}: {player}, No. {rank} on the We-Draft.com community board.",
-    "The {nick} turn to {player}, {aAlias} the We-Draft.com board has at No. {rank}.",
+    "The {nick} turn to {player}, {aAlias} the We-Draft.com board ranks No. {rank}.",
     "It's {aAlias} for the {nick} — {player} of {school}, the {posRankOrd} {posName} in the community rankings.",
     "The {nick} come away with {player}, the community's No. {rank} prospect and its {posRankOrd} {posName}.",
     "Next up for the {nick}: {player}, {aAlias} out of {school} the community ranks No. {rank}.",
@@ -137,107 +132,53 @@ export const NOTE_LINES = {
     "{last} was the community's highest-rated {posName}, and the {nick} grab him at No. {n}.",
     "The {nick} grab the best {alias} on the board in {player}.",
   ],
-  // ── Facts ──
-  traitsBoth: [
-    "The community's evaluations point to his {strength} as the strength; {weakness} is the main concern.",
-    "Community scouts like his {strength} and {strength2}, while {weakness} is the knock.",
-    "His evaluations lean on {strength}, with {weakness} the area to clean up.",
-    "What stands out to the community: {strength}. What gives it pause: {weakness}.",
-    "{Strength} is the calling card in his community evaluations; {weakness} is the question.",
+  // ── The community's read (when there's no write-up or take) ──
+  // A strength and a concern, with his grade.
+  readFull: [
+    "The community has {aGrade} grade on him, built on his {strength} and held back a bit by {weakness}.",
+    "It's {aGrade} grade from the community — the {strength} sells it, while {weakness} keeps him from climbing higher.",
+    "His {strength} is why community evaluators see {aGrade} talent; {weakness} is the hurdle between him and more.",
+    "Community evaluators land on {aGrade} grade, with his {strength} the draw and {weakness} the worry.",
+    "Bet on the {strength} and be patient with {weakness} — that's the {gradeAdj} profile the community sees.",
   ],
-  traitsStrength: [
-    "The community's evaluations highlight his {strength} and {strength2}.",
-    "Community scouts point to {strength} and {strength2} as his best traits.",
-    "{Strength} and {strength2} top the list in his community evaluations.",
+  // A strength and a concern, no grade.
+  readBoth: [
+    "His {strength} jumps off the tape, though {weakness} is still a work in progress.",
+    "There's a lot to like in his {strength}, and if {weakness} comes along, the ceiling climbs.",
+    "The {strength} is real; {weakness} is what stands between him and a long career.",
+    "Community evaluators rave about his {strength} but want to see {weakness} tightened up.",
+    "{Strength} is his calling card — {weakness} is the part of his game still catching up.",
+    "He wins with {strength}, and the next step is sorting out {weakness}.",
   ],
-  grade: [
-    "We-Draft.com's community grade for him is {grade}, across {count} evaluations.",
-    "{count} community evaluations average out to a grade of {grade}.",
-    "The community grade: {grade}, from {count} evaluations.",
+  // Two strengths, with his grade.
+  readStrengthsGrade: [
+    "Evaluators like his {strength} and {strength2} enough to give him {aGrade} grade.",
+    "The community's {gradeAdj} grade leans on his {strength} and {strength2}.",
+    "{Strength} and {strength2} are the backbone of his {gradeAdj} grade from the community.",
   ],
-  leaderFirst: [
-    "His {value} {stat} lead all of college football this season.",
-    "Nobody in college football has more {stat} than {last} this season ({value}).",
-    "He leads the nation with {value} {stat} in {season}.",
+  // Two strengths, no grade.
+  readStrengths: [
+    "His {strength} and {strength2} are what pop on tape.",
+    "Two things stand out when you turn on his tape: {strength} and {strength2}.",
+    "He brings {strength} and {strength2}, the traits community evaluators keep circling.",
+    "It starts with his {strength}, and his {strength2} isn't far behind.",
   ],
-  leaderRanked: [
-    "His {value} {stat} rank {rankOrd} in college football this season.",
-    "He's {rankOrd} nationally in {statTitle} ({value}) in {season}.",
-    "{value} {stat} so far in {season} puts him {rankOrd} in the country.",
+  // One strength (with or without a grade).
+  readStrength: [
+    "His {strength} is what stands out on tape.",
+    "Everything about his game starts with {strength}.",
+    "The community keeps coming back to one thing: his {strength}.",
   ],
-  passing: [
-    "He's thrown for {YDS} yards, {TD} touchdowns and {INT} interceptions on {PCT}% passing this season.",
-    "This season: {YDS} passing yards, {TD} TDs, {INT} INTs.",
-    "{YPA} yards an attempt with {TD} touchdowns to {INT} interceptions in {season}.",
+  readStrengthGrade: [
+    "His {strength} is the reason the community gives him {aGrade} grade.",
+    "The community sees {aGrade} talent, and his {strength} is a big part of why.",
   ],
-  rushing: [
-    "He has {YDS} rushing yards and {TD} touchdowns at {YPC} yards a carry this season.",
-    "This season: {CAR} carries, {YDS} yards, {TD} scores.",
+  // Just his grade.
+  readGrade: [
+    "The community sees him as {aGrade} talent.",
+    "Community evaluators have him graded as {aGrade} prospect.",
+    "He carries {aGrade} grade from the We-Draft.com community.",
   ],
-  receiving: [
-    "He has {REC} catches for {YDS} yards and {TD} touchdowns this season.",
-    "This season: {REC} receptions, {YDS} yards, {TD} TDs.",
-    "{YPR} yards a catch on {REC} receptions in {season}.",
-  ],
-  defensive: [
-    "He has {TOT} tackles, {TFL} for loss and {SACKS} sacks this season.",
-    "This season: {TOT} tackles, {TFL} TFL, {SACKS} sacks.",
-  ],
-  coverage: [
-    "He has {TOT} tackles, {PD} passes defended and {INT} interceptions this season.",
-    "This season: {PD} pass breakups and {INT} interceptions.",
-  ],
-  staffFit: [
-    "He fits the profile {staffer} has drafted before; We-Draft.com rates the fit with the {nick}' {title} {fitWord}.",
-    "{stafferPoss} draft history says this is his kind of player — a fit We-Draft.com rates {fitWord}.",
-    "The pick lines up with {stafferPoss} track record; We-Draft.com rates the fit {fitWord}.",
-    "Based on the players he's drafted, the {nick}' {title}, {staffer}, is a {fitWord} fit for him on We-Draft.com's staff-fit scale.",
-  ],
-  pff: [
-    "Pro Football Focus ranks him {pffRankOrd} among college {pffPos} this season.",
-    "He's PFF's {pffRankOrd}-ranked {pffOne} this season (via Pro Football Focus).",
-    "According to Pro Football Focus, he ranks {pffRankOrd} among college {pffPos}.",
-  ],
-  teamSchoolPos: [
-    "He's the {nth} {posName} the {nick} have drafted from {school} since {firstYear}, after {prev} in {prevYear}.",
-    "The {nick} go back to {school} for a {posName}: {last} is the {nth} since {firstYear} (most recently {prev}, {prevYear}).",
-    "{school} {posPlural} keep finding their way to the {nick} — {last} is the {nth} since {firstYear}.",
-  ],
-  teamSchool: [
-    "He's the {nth} {school} player the {nick} have drafted since {firstYear}; the last was {prev} in {prevYear}.",
-    "The {school} pipeline continues: {last} is the {nick}' {nth} pick from the school since {firstYear}.",
-  ],
-  teamSchoolFirst: [
-    "He's the first {school} player the {nick} have drafted since at least {firstYear}.",
-    "The {nick} haven't drafted a {school} player since at least {firstYear} — until {last}.",
-  ],
-  teamSchoolGap: [
-    "It's the {nick}' first pick from {school} since {prev} in {prevYear}.",
-    "The {nick} hadn't drafted out of {school} since {prevYear} ({prev}).",
-  ],
-  teamRound1Drought: [
-    "He's the {nick}' first first-round {posName} since {prev} in {prevYear}.",
-    "The {nick} hadn't spent a first on a {posName} since {prevYear}, when they took {prev}.",
-  ],
-  teamRound1First: [
-    "He's the first {posName} the {nick} have taken in the first round since at least {firstYear}.",
-    "The {nick} hadn't used a first-round pick on a {posName} since at least {firstYear}.",
-  ],
-};
-
-// Which group each kind is in — a note never has two of a group.
-const GROUP = {
-  traitsBoth: "traits", traitsStrength: "traits", grade: "grade",
-  leaderFirst: "stat", leaderRanked: "stat", passing: "stat", rushing: "stat", receiving: "stat", defensive: "stat", coverage: "stat",
-  staffFit: "fit", pff: "pff", take: "take",
-  teamSchoolPos: "history", teamSchool: "history", teamSchoolFirst: "history", teamSchoolGap: "history", teamRound1Drought: "history", teamRound1First: "history",
-};
-
-// PFF's position codes → words (plural, one).
-const PFF_POS = {
-  QB: ["quarterbacks", "quarterback"], HB: ["running backs", "running back"], WR: ["wide receivers", "wide receiver"], TE: ["tight ends", "tight end"],
-  T: ["offensive tackles", "offensive tackle"], G: ["guards", "guard"], C: ["centers", "center"], ED: ["edge defenders", "edge defender"],
-  DI: ["interior defensive linemen", "interior defensive lineman"], LB: ["linebackers", "linebacker"], CB: ["cornerbacks", "cornerback"], S: ["safeties", "safety"],
 };
 
 // Other ways to say a position, by need key (an OL / DB by his
@@ -268,6 +209,15 @@ function aliasVars(p, rand) {
   return { alias, aAlias: `${/^[aeiou]/i.test(alias) ? "an" : "a"} ${alias}` };
 }
 
+// His community grade as words ("Second Round" → "second-round", "a
+// second-round"; "Early First Round" → "early first-round", "an early
+// first-round") — none for UDFA or fewer than 3 evaluations.
+function gradeVars(grade, count) {
+  if (!grade || grade === "UDFA" || !(count >= 3)) return { gradeAdj: "", aGrade: "" };
+  const adj = grade.toLowerCase().replace(/ round$/, "-round");
+  return { gradeAdj: adj, aGrade: `${/^[aeiou]/.test(adj) ? "an" : "a"} ${adj}` };
+}
+
 const fill = (text, vars) => text.replace(/\{([\w ]+)\}/g, (_, k) => (vars[k] ?? ""));
 const blank = (text, vars) => (text.match(/\{([\w ]+)\}/g) || []).some((v) => {
   const x = vars[v.slice(1, -1)];
@@ -275,68 +225,19 @@ const blank = (text, vars) => (text.match(/\{([\w ]+)\}/g) || []).some((v) => {
 });
 const capitalize = (t) => t.charAt(0).toUpperCase() + t.slice(1);
 
-// The draft history, indexed once: picks by team.
-const indexes = new WeakMap();
-function historyOf(h) {
-  if (!h?.picks) return null;
-  if (!indexes.has(h)) {
-    const byTeam = {};
-    h.picks.forEach(([year, round, overall, t, pos, s, name]) => {
-      const row = { year, round, overall, team: h.teams[t], pos, school: h.schools[s], name };
-      (byTeam[row.team] || (byTeam[row.team] = [])).push(row);
-    });
-    const schoolPicks = {};
-    h.picks.forEach((r) => { const s = h.schools[r[5]]; schoolPicks[s] = (schoolPicks[s] || 0) + 1; });
-    indexes.set(h, { byTeam, schoolPicks, firstYear: h.years?.[0] || 2000 });
-  }
-  return indexes.get(h);
-}
-const latestOf = (rows) => rows.reduce((a, r) => (!a || r.year > a.year || (r.year === a.year && r.overall > a.overall) ? r : a), null);
-
-// The team's draft history facts for a pick (most interesting first).
-function historyFacts(e, ctx, base) {
-  const ix = historyOf(ctx.history);
-  const p = e.prospect;
-  if (!ix || !p.School) return [];
-  const rows = ix.byTeam[e.team] || [];
-  const out = [];
-  const add = (cat, weight, extra) => out.push({ cat, weight, vars: { ...base, firstYear: ix.firstYear, ...extra } });
-  const fromSchool = rows.filter((r) => r.school === p.School);
-  const samePos = fromSchool.filter((r) => r.pos === p.Position);
-  if (samePos.length >= 1) {
-    const prev = latestOf(samePos);
-    add("teamSchoolPos", samePos.length >= 2 ? 3 : 2, { nth: ordinal(samePos.length + 1), prev: prev.name, prevYear: prev.year });
-  } else if (fromSchool.length >= 3) {
-    const prev = latestOf(fromSchool);
-    add("teamSchool", 1.6, { nth: ordinal(fromSchool.length + 1), prev: prev.name, prevYear: prev.year });
-  } else if (!fromSchool.length && (ix.schoolPicks[p.School] || 0) >= 25) {
-    // A big program the team has never taken from.
-    add("teamSchoolFirst", 2.4, {});
-  } else if (fromSchool.length) {
-    const prev = latestOf(fromSchool);
-    if (Number(ctx.year) - prev.year >= 10) add("teamSchoolGap", 2, { prev: prev.name, prevYear: prev.year });
-  }
-  if (e.pick.round === 1) {
-    const r1 = rows.filter((r) => r.round === 1 && r.pos === p.Position);
-    const prev = latestOf(r1);
-    if (!prev) add("teamRound1First", 2.6, {});
-    else if (Number(ctx.year) - prev.year >= 6) add("teamRound1Drought", 2.4, { prev: prev.name, prevYear: prev.year });
-  }
-  return out;
-}
-
 // Picks in prose: "No. 20", "No. 20 and No. 52", "No. 20, No. 52 and a 2028
 // second-rounder".
 const ROUND_WORDS = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh"];
+const ordinal = (n) => { const s = ["th", "st", "nd", "rd"], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); };
 const pickWord = (p) => (p.future ? `a ${p.year} ${ROUND_WORDS[p.round - 1] || ordinal(p.round)}-rounder` : `No. ${p.overall}`);
 function pickList(picks) {
   const words = picks.filter(Boolean).map(pickWord);
   return words.length > 1 ? `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}` : words[0] || "";
 }
 
-// The sim trade behind a pick, told first: the trade up into it, or the
-// trade down that brought it (ctx.tradeDowns: { [overall]: { down, up, at } }).
-function tradeOpener(e, base, ctx) {
+// The sim trade behind a pick, announced with him: the trade up into it, or
+// the trade down that brought it (ctx.tradeDowns: { [overall]: { down, up, at } }).
+function tradeLead(e, base, ctx) {
   const t = e.pick.tradeUp;
   if (t) {
     const got = pickList(t.give || []);
@@ -360,26 +261,33 @@ function leadOf(e) {
 // Kenneth's mock-eligible take lines for a pick.
 const mockTakes = (e) => takeLinesOf(playerTakesFor(e.prospect.id)).filter((l) => l.mock).map(lineText);
 
-// Every fact for a pick: [{ cat, vars, weight }] — a take carries its own
-// lines (texts) in place of NOTE_LINES'.
-function factsFor(e, ctx, base) {
-  const p = e.prospect;
-  const out = [];
-  const add = (cat, weight, vars = base) => out.push({ cat, weight, vars });
-  if (base.strength && base.weakness) add("traitsBoth", 2.6);
-  else if (base.strength && base.strength2) add("traitsStrength", 1.8);
-  if (base.grade && p.count >= 3) add("grade", 0.6);
-  statFacts(e, ctx).forEach((f) => add(f.cat, f.weight + 0.4, f.vars));
-  if (base.fitWord && base.staffer) add("staffFit", (e.fit?.s || 0) >= 80 ? 2.6 : 1.6);
-  const pff = ctx.pff?.[p.id];
-  if (pff && pff.rk <= PFF_TOP && (pff.sn || 0) >= PFF_MIN_SNAPS) {
-    const words = PFF_POS[pff.pos] || [base.posPlural, base.posName];
-    add("pff", pff.rk <= 3 ? 3 : 2.2, { ...base, pffRankOrd: ordinal(pff.rk), pffPos: words[0], pffOne: words[1] });
+// The community's read, as one sentence: the richest kind his evaluations fill.
+function readOf(base, ctx) {
+  const kinds = base.strength && base.weakness ? ["readFull", "readBoth"]
+    : base.strength && base.strength2 ? ["readStrengthsGrade", "readStrengths"]
+      : base.strength ? ["readStrengthGrade", "readStrength"]
+        : ["readGrade"];
+  // With a grade, the graded kind about two times in three — the rest read as plain traits.
+  const order = base.aGrade && kinds.length > 1 && ctx.rand() < 0.35 ? [kinds[1], kinds[0]] : kinds;
+  for (const k of order) {
+    const line = lineOf(k, base, ctx);
+    if (line) return line;
   }
-  const texts = mockTakes(e).filter((t) => !blank(t, base));
-  if (texts.length) out.push({ cat: "take", weight: 5, vars: base, texts });
-  historyFacts(e, ctx, base).forEach((f) => out.push(f));
-  return out;
+  return null;
+}
+
+// What to know about him: the team's write-up, his generic one, Kenneth's
+// mock take, then the community's read — the first that exists.
+// ctx.writeUps: { team: { [TEAM]: { [playerId]: text } }, generic: { [playerId]: text } }.
+function aboutHim(e, base, ctx) {
+  const id = e.prospect.id;
+  const own = String(ctx.writeUps?.team?.[e.team]?.[id] || "").trim();
+  if (own) return own;
+  const generic = String(ctx.writeUps?.generic?.[id] || "").trim();
+  if (generic) return generic;
+  const takes = mockTakes(e).filter((t) => !blank(t, base));
+  if (takes.length) return capitalize(fill(takes[Math.floor(ctx.rand() * takes.length)], base));
+  return readOf(base, ctx);
 }
 
 // One template of a kind: the next one the mock hasn't used (ctx.used:
@@ -396,48 +304,18 @@ function lineOf(cat, vars, ctx) {
   return capitalize(singular(fill(text, vars)));
 }
 
-// The GM or head coach a staff-fit line names, as a link to his staff page
-// — "[Darren Mougey](/staff/abc)", which the mock pages render (ViewMock.js
-// NoteText) and the editor shows as written. OCs and DCs stay plain.
-function staffLink(e, ctx) {
-  const fit = e.fit || {};
-  const slot = ["GM", "HC", "OC", "DC"].filter((k) => fit[k] != null).sort((a, b) => fit[b] - fit[a])[0];
-  const person = slot && ctx.staff?.[e.team]?.[slot];
-  if (!person?.n || !person.id || !["GM", "HC"].includes(slot)) return null;
-  const link = `[${person.n}](/staff/${person.id})`;
-  return { staffer: link, stafferPoss: `${link}${/s$/i.test(person.n) ? "'" : "'s"}` };
-}
-
 // A note for one pick event (engine makePick's). ctx: teamNamer's names,
-// staff, season, year, history, rand, pff ({ [playerId]: { rk, sn, pos } },
-// optional), used (shared across the mock). Rounds 1–2 get two facts, later
-// rounds one — then the team's draft history last, whenever there's some.
-// ctx.light: a light note (see the top).
-const NOT_LIGHT_GROUPS = ["history"];
+// staff, season, year, rand, writeUps (above, optional), used (shared across
+// the mock), tradeDowns. ctx.light: a light note (see the top).
 export function pickNote(e, ctx) {
-  const base = { ...pickVars(e, ctx), needPos: e.need ? needWord(e.need.key) : "", rolePhrase: e.need ? rolePhrase(e.need.key) : "", ...aliasVars(e.prospect, ctx.rand) };
-  const lead = ctx.light
-    ? (e.prospect.positionRank === 1 && lineOf("lightTopPos", base, ctx)) || lineOf("lightRank", base, ctx) || lineOf("intro", base, ctx)
-    : lineOf(leadOf(e), base, ctx) || lineOf("board", base, ctx);
-  const opener = tradeOpener(e, base, ctx);
-  const sentences = [lead];
-  const all = factsFor(e, ctx, { ...base, ...staffLink(e, ctx) }).filter((f) => !ctx.light || !NOT_LIGHT_GROUPS.includes(GROUP[f.cat]));
-  const history = all.filter((f) => GROUP[f.cat] === "history").sort((a, b) => b.weight - a.weight)[0] || null;
-  const facts = all.filter((f) => GROUP[f.cat] !== "history");
-  const groups = new Set();
-  const want = e.pick.round <= 2 ? 2 : 1;
-  while (sentences.length < want + 1 && facts.length) {
-    const total = facts.reduce((a, f) => a + f.weight, 0);
-    let r = ctx.rand() * total;
-    const i = Math.max(0, facts.findIndex((f) => { r -= f.weight; return r <= 0; }));
-    const [f] = facts.splice(i, 1);
-    const group = GROUP[f.cat] || f.cat;
-    if (groups.has(group)) continue;
-    groups.add(group);
-    const line = f.texts ? capitalize(fill(f.texts[Math.floor(ctx.rand() * f.texts.length)], f.vars)) : lineOf(f.cat, f.vars, ctx);
-    if (line) sentences.push(line);
-  }
-  if (history) sentences.push(lineOf(history.cat, history.vars, ctx));
-  return [opener, ...sentences].filter(Boolean).join(" ");
+  const vars = pickVars(e, ctx);
+  const base = {
+    ...vars, needPos: e.need ? needWord(e.need.key) : "", rolePhrase: e.need ? rolePhrase(e.need.key) : "",
+    ...aliasVars(e.prospect, ctx.rand), ...gradeVars(vars.grade, e.prospect.count),
+  };
+  const lead = tradeLead(e, base, ctx)
+    || (ctx.light
+      ? (e.prospect.positionRank === 1 && lineOf("lightTopPos", base, ctx)) || lineOf("lightRank", base, ctx) || lineOf("intro", base, ctx)
+      : lineOf(leadOf(e), base, ctx) || lineOf("board", base, ctx));
+  return [lead, aboutHim(e, base, ctx)].filter(Boolean).join(" ");
 }
-

@@ -46,7 +46,8 @@ import { NFL_TEAMS } from "../utils/coachHistory";
 import {
   IG_W, IG_H, IG_MAX_SLIDES, mockSlides, mockInput, mockCaption, mockSlidePlan, mockTagSlides, playerPost, playerInput, playerCaption,
 } from "../utils/instagram/posts";
-import { spotlightSlides, spotlightInput, spotlightCaption, spotlightImageUrls, scoutingReport, spotlightFrame, espnStats, editedStats, statsSeed, MAX_STAT_TILES, MAX_TRAITS } from "../utils/instagram/spotlight";
+import { spotlightSlides, spotlightInput, spotlightCaption, spotlightImageUrls, scoutingReport, spotlightFrame, espnStats, editedStats, statsSeed, spotlightCareer, MAX_STAT_TILES, MAX_TRAITS } from "../utils/instagram/spotlight";
+import { useCareerPath } from "./PlayerEligibilityInfo";
 import { fetchEspnCareer } from "./PlayerEspnStats";
 import { customInput, customSlides, customCaption, customImageUrls, customCutoutUrls, customPlayerIds, customTagSpots, layerBox, newLayer, blankSlide, LAYER_LABELS } from "../utils/instagram/custom";
 import { transferSlides, transferInput, transferCaption, transferImageUrls, transferFrame, TRANSFER_DESIGNS, TRANSFER_STATS } from "../utils/instagram/transfer";
@@ -1236,6 +1237,9 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
   const [weaknessCount, setWeaknessCount] = useState(MAX_TRAITS);
   // The stats slide (his ESPN college stats), in when he has them.
   const [showStats, setShowStats] = useState(true);
+  // His career path beside the season's numbers on the stats slide (off by
+  // default — the numbers move left to make room).
+  const [showCareer, setShowCareer] = useState(false);
   // The admin's own stats (utils/instagram/spotlight.js editedStats): null =
   // ESPN's as they are; else { year, team, tiles, lead, table }.
   const [statEdit, setStatEdit] = useState(null);
@@ -1298,7 +1302,7 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
       const stats = career ? espnStats(career, p.Position, cfbd?.docs[0]?.data().seasonRanks || null) : null;
       const action = ph.action || [];
       setPlayer(p);
-      setData({ school: schoolSnap.docs[0]?.data() || {}, action, headshot: ph.headshot?.url || "", jersey: ph.jersey || "", report, stats });
+      setData({ school: schoolSnap.docs[0]?.data() || {}, action, headshot: ph.headshot?.url || "", espnId: espnId || "", jersey: ph.jersey || "", report, stats });
       choosePhoto(action[0]?.url || "");
       setFocus(focusFor(action[0]));
       setAdvance(!!CLASS_LOGOS[p.Eligible] || isAdvance(p.Eligible));
@@ -1307,6 +1311,7 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
       // His own clips (a saved post's come back below).
       setVideos([]);
       setStatEdit(null);
+      setShowCareer(false);
       if (restore) {
         setPhotoUrl(restore.photoUrl ?? "");
         setFocus(restore.focus || "center");
@@ -1319,6 +1324,7 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
         setStrengthCount(restore.strengthCount || MAX_TRAITS);
         setWeaknessCount(restore.weaknessCount || MAX_TRAITS);
         setShowStats(restore.showStats !== false);
+        setShowCareer(!!restore.showCareer);
         setStatEdit(restore.statEdit && Array.isArray(restore.statEdit.tiles) ? restore.statEdit : null);
         setVideos(Array.isArray(restore.videos) ? restore.videos.filter((v) => v?.path) : []);
         setAdjust({ ...NO_ADJUST, ...restore.adjust });
@@ -1331,10 +1337,15 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
     }
   };
 
+  // His Career Path, as his player page has it (PlayerEligibilityInfo.jsx).
+  const careerPath = useCareerPath(player, data?.espnId || "", null);
+  const careerKey = careerPath.rows.map((r) => `${r.key}|${r.span || ""}|${r.brand?.Logo1 || ""}|${r.accolades?.[0]?.text || ""}`).join(",");
+  const careerRows = useMemo(() => spotlightCareer(careerPath.rows), [careerKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const input = useMemo(() => (player && data ? {
-    ...spotlightInput({ player, school: data.school, photo: photoUrl ? { url: photoUrl } : null, headshot: data.headshot, report: data.report, advance, brandLogo: WdLogo, badgeLogo: WdBadge, look, accent, badge, showRanks, showFits, highlights: videos.length > 0, stats: editedStats(data.stats, statEdit), showStats, classLogo: advance ? CLASS_LOGOS[player.Eligible] || "" : "", jersey: data.jersey, strengthCount, weaknessCount }),
+    ...spotlightInput({ player, school: data.school, photo: photoUrl ? { url: photoUrl } : null, headshot: data.headshot, report: data.report, advance, brandLogo: WdLogo, badgeLogo: WdBadge, look, accent, badge, showRanks, showFits, highlights: videos.length > 0, stats: editedStats(data.stats, statEdit), showStats, classLogo: advance ? CLASS_LOGOS[player.Eligible] || "" : "", jersey: data.jersey, strengthCount, weaknessCount, career: careerRows, showCareer }),
     focus, adjust,
-  } : null), [player, data, photoUrl, advance, focus, adjust, look, accent, badge, showRanks, showFits, showStats, statEdit, videos.length, strengthCount, weaknessCount]);
+  } : null), [player, data, photoUrl, advance, focus, adjust, look, accent, badge, showRanks, showFits, showStats, statEdit, videos.length, strengthCount, weaknessCount, careerRows, showCareer]);
   const cap = useCaption(saved, useMemo(() => (input ? spotlightCaption(input) : ""), [input]));
 
   useEffect(() => {
@@ -1469,7 +1480,8 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
             <div>
               <div style={label}>Slides show</div>
               <div style={{ display: "flex", gap: "14px", flexWrap: "wrap" }}>
-                {[["Class rank", showRanks, setShowRanks], ["NFL fits", showFits, setShowFits], ...(data.stats || statEdit ? [["Stats slide", showStats, setShowStats]] : [])].map(([t, on, set]) => (
+                {[["Class rank", showRanks, setShowRanks], ["NFL fits", showFits, setShowFits], ...(data.stats || statEdit ? [["Stats slide", showStats, setShowStats]] : []),
+                  ...((data.stats || statEdit) && showStats && careerRows.length ? [["Career path (stats slide)", showCareer, setShowCareer]] : [])].map(([t, on, set]) => (
                   <label key={t} style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "12px", fontWeight: 800, color: "#33415a" }}>
                     <input type="checkbox" checked={on} onChange={(e) => set(e.target.checked)} /> {t}
                   </label>
@@ -1535,7 +1547,7 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
             <SaveBar type="spotlight" defaultName={`Spotlight · ${player.First} ${player.Last}`} caption={cap.caption} svgs={svgs} post={post} setPost={setPost} onSaved={onSaved} setMsg={setMsg}
               playerIds={[player.id]} subject={{ kind: "player", playerId: player.id }}
               videos={videos.map((v, k) => ({ at: 1 + k, path: v.path }))} hold={uploading ? "Wait for the video to finish uploading." : ""}
-              stateNow={() => ({ playerId: player.id, photoUrl, focus, advance, adjust, look, accent, badge, showRanks, showFits, strengthCount, weaknessCount, showStats, statEdit, videos })} />
+              stateNow={() => ({ playerId: player.id, photoUrl, focus, advance, adjust, look, accent, badge, showRanks, showFits, strengthCount, weaknessCount, showStats, showCareer, statEdit, videos })} />
             <CaptionBox c={cap} />
           </>
         )}

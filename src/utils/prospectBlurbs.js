@@ -9,7 +9,7 @@
 //   config/prospectBlurbs { blurbs: { [playerId]: { text, name, updatedAt (ms) } } }
 // One doc (public read, admin write — the config rules), so the page reads
 // every write-up in one go. A save touches only its own player's field.
-import { deleteField, doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
+import { collection, deleteField, doc, getDoc, getDocs, setDoc, updateDoc } from "firebase/firestore";
 import { db } from "../firebase";
 
 const REF = () => doc(db, "config", "prospectBlurbs");
@@ -40,3 +40,26 @@ export async function saveBlurb(id, text, name = "") {
 
 // The write-up a player's shown with: the team's own (featured note) first, else the generic one.
 export const writeUpFor = (entry, blurbs) => (String(entry?.note || "").trim() || blurbs?.[entry?.id] || "");
+
+// Every write-up the Weekly Mock's pick notes can use (pickNotes.js
+// aboutHim): each team's own, from its NFL Targets list (nflTargets/{TEAM},
+// featured and list entries with a note — admin reads, so the mock tools
+// see unpublished lists too), and the generic ones.
+//   → { team: { [TEAM]: { [playerId]: text } }, generic: { [playerId]: text } }
+export async function loadMockWriteUps() {
+  const [snap, generic] = await Promise.all([
+    getDocs(collection(db, "nflTargets")).catch(() => null),
+    loadBlurbs(true),
+  ]);
+  const team = {};
+  (snap?.docs || []).forEach((d) => {
+    const data = d.data() || {};
+    const notes = {};
+    [...(data.featured || []), ...(data.list || [])].forEach((en) => {
+      const t = String(en?.note || "").trim();
+      if (en?.id && t && !notes[en.id]) notes[en.id] = t;
+    });
+    if (Object.keys(notes).length) team[d.id.toUpperCase()] = notes;
+  });
+  return { team, generic };
+}

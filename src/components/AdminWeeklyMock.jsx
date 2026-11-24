@@ -42,7 +42,7 @@ import {
   RANDOM_ORDER_YEARS, randomOrder,
 } from "../utils/draftSim/weeklyMock";
 import { rngNext } from "../utils/draftSim/engine";
-import { loadPffRanks } from "../utils/draftSim/pffRanks";
+import { loadMockWriteUps } from "../utils/prospectBlurbs";
 import { NoteText } from "../pages/ViewMock";
 import { weeklyMockSummary, summaryDocId, weeklyMockHref, hasTeamPages, WEEKLY_YEARS, MAIN_WEEKLY_YEAR } from "../utils/weeklyMockNews";
 import { NFL_TEAMS, NFL_TEAM_ABBRS } from "../utils/coachHistory";
@@ -126,16 +126,16 @@ export default function AdminWeeklyMock() {
     // The next class: no trades, and each team held to its positions.
     const sim = runWeeklyMock(data, { seed, rounds, trades: WEEKLY_TRADES_BY_YEAR[year] || "normal", qbTeams: carried?.qbTeams || null, posRules: carried?.posRules || null });
     // Each pick's note (pickNotes.js), seeded like the draft — none for a
-    // random-order class. PFF ranks are loaded here, admin-side, for the
-    // drafted players only. The next class's notes are light (pickNotes.js):
-    // no needs, value or pick spot.
+    // random-order class. The NFL Targets write-ups (team, then generic) are
+    // the notes' second sentence when there's one. The next class's notes
+    // are light (pickNotes.js): no needs, value or pick spot.
     let notes = {};
     if (!random) {
       const light = year !== MAIN_WEEKLY_YEAR;
-      const pff = await loadPffRanks(sim.picks.map((p) => p.selection).filter(Boolean)).catch(() => ({}));
+      const writeUps = await loadMockWriteUps().catch(() => ({}));
       const work = { seed: seed ^ 0x5bd1e995 };
       const rand = () => { const r = rngNext(work.seed); work.seed = r.seed; return r.value; };
-      notes = weeklyNotes(sim, { ...teamNamer(data.branding), staff: data.staff, season: data.season, year, history: data.history, pff, rand, light });
+      notes = weeklyNotes(sim, { ...teamNamer(data.branding), staff: data.staff, season: data.season, year, writeUps, rand, light });
     }
     setDraft({ ...weeklyFromSim(sim, year, notes), seed, carried, intro: carried?.intro || "", unlisted: random });
     setRound(1);
