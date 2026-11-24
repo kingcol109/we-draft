@@ -519,6 +519,19 @@ export function applyMyGrades(board, myGrades = {}) {
   });
 }
 
+// The board in a set order (ids, best first — a re-draft's Hindsight
+// board): anyone not in it after, in board order; kickers and punters last.
+export function applyBoardOrder(board, ids = []) {
+  if (!ids?.length) return board;
+  const at = Object.fromEntries(ids.map((id, i) => [id, i]));
+  const rows = [...board].sort((a, b) => (isSpecialist(a) - isSpecialist(b)) || ((at[a.id] ?? Infinity) - (at[b.id] ?? Infinity)) || a.rank - b.rank);
+  const seen = {};
+  return rows.map((p, i) => {
+    seen[p.Position] = (seen[p.Position] || 0) + 1;
+    return { ...p, rank: i + 1, positionRank: seen[p.Position] };
+  });
+}
+
 // ── Team boards ──
 // Every team's own read of the community board, drawn once per sim: each
 // prospect's community rank plus a seeded random spread (standard
@@ -614,7 +627,15 @@ export function swapTeams(to, a, b) {
 // twice — the Weekly Mock's next class too (weeklyMock.js nextYearRules;
 // byPosRules). null: no such rules.
 // variance: how far their boards and picks stray (VARIANCE key).
-export function initSim({ order, board, chart = {}, userTeams = [], rounds = 1, seed = Date.now(), chaos = 1, staff = {}, needs = {}, futureOrder = [], futureYear = null, cpuTrades = "normal", variance = DEFAULT_VARIANCE, qbTeams = null, posRules = null }) {
+// noTrades: no trades at all — none between CPU teams, no offers to the
+// user, no proposals (a re-draft). locks: { [team]: [prospect id] } — a CPU
+// team on the clock with one of them there takes him (a re-draft's picks
+// that always stand: 2026's Raiders and Fernando Mendoza). chooser:
+// (state, pick) → prospect — a sim's own CPU pick rule in place of the
+// NFL one (the Dynasty Draft Sim's — utils/dynastySim/engine.js); locks
+// and MUST_PICKS still come first.
+export function initSim({ order, board, chart = {}, userTeams = [], rounds = 1, seed = Date.now(), chaos = 1, staff = {}, needs = {}, futureOrder = [], futureYear = null, cpuTrades = "normal", variance = DEFAULT_VARIANCE, qbTeams = null, posRules = null, noTrades = false, locks = null, chooser = null, gradeByValue = false }) {
+  if (noTrades) cpuTrades = "off";
   // Picks in rounds the sim doesn't draft still change hands in trades —
   // a one-round sim's teams can trade up with their 2nd-rounders — and so
   // do next year's.
@@ -643,7 +664,7 @@ export function initSim({ order, board, chart = {}, userTeams = [], rounds = 1, 
     }));
   const teams = [...new Set([...picks, ...capital].flatMap((p) => [p.owner, p.original]))];
   return {
-    picks, capital, board, chart, staff, chaos, needs, cpuTrades, variance, qbTeams: qbTeams ? [...qbTeams] : null, posRules,
+    picks, capital, board, chart, staff, chaos, needs, cpuTrades, variance, qbTeams: qbTeams ? [...qbTeams] : null, posRules, noTrades: !!noTrades, locks: locks || null, chooser, gradeByValue: !!gradeByValue,
     // Only CPU teams get a board of their own: the user's teams (their
     // staff's Sim Pick, suggestions, value) go off the community's.
     teamBoards: buildTeamBoards(board, teams.filter((t) => !userTeams.includes(t)), seed | 0, chaos * varianceScale(variance)),
@@ -771,8 +792,15 @@ export const MUST_PICKS = [
 export function chooseCpuPick(state) {
   const pick = currentPick(state);
   if (!pick) return null;
+  // A locked pick (initSim locks) stands.
+  const locked = (state.locks?.[pick.owner] || []).find((id) => state.byId[id] && !state.taken[id]);
+  if (locked) return { prospect: state.byId[locked], seed: state.seed, locked: true };
   const must = MUST_PICKS.find((m) => state.byId[m.id] && !state.taken[m.id] && !m.skip(state, pick.owner));
   if (must) return { prospect: state.byId[must.id], seed: state.seed };
+  if (state.chooser) {
+    const p = state.chooser(state, pick);
+    return p ? { prospect: p, seed: state.seed } : null;
+  }
   const work = { seed: state.seed };
   let best = null;
   let bestScore = Infinity;
@@ -1029,7 +1057,8 @@ export function stepCpu(state) {
   const choice = chooseCpuPick(s);
   if (!choice?.prospect) return { state: { ...s, done: true }, events };
   const { state: after, event } = makePick(s, choice.prospect.id, choice.seed);
-  if (event) events.push(event);
+  // A locked pick (initSim locks) is history, not a reach — the desk knows.
+  if (event) events.push(choice.locked ? { ...event, locked: true } : event);
   return { state: after, events };
 }
 
@@ -1257,7 +1286,7 @@ function maybeCpuTrade(state) {
 
 // User's pick on the clock: the trade offers waiting for them.
 export function withOffers(state) {
-  if (!isUserOnClock(state)) return state;
+  if (!isUserOnClock(state) || state.noTrades) return state;
   return { ...state, offers: findTradeUpOffers(state) };
 }
 
@@ -1436,15 +1465,17 @@ export function teamHaul(state, team) {
     .filter((p) => p.owner === team && p.selection)
     .map((p) => {
       const prospect = state.byId[p.selection];
-      const secondQb = prospect.Position === "QB" && qbs++ > 0;
-      const score = pickScore(p.overall, prospect, team, p.need, { round: p.round, secondQb });
+      // gradeByValue (the Dynasty Draft Sim): value for the slot alone — no
+      // needs, no second-quarterback cost.
+      const secondQb = !state.gradeByValue && prospect.Position === "QB" && qbs++ > 0;
+      const score = pickScore(p.overall, prospect, team, state.gradeByValue ? null : p.need, { round: p.round, secondQb });
       return { pick: p, prospect, score, letter: letterFor(score), need: p.need || null, offBoard: offBoard(p.overall, prospect), secondQb };
     });
   const needs = needReport(state, team, rows);
   const weight = (r) => ROUND_WEIGHT[Math.min(r.pick.round, ROUND_WEIGHT.length) - 1];
   const totalWeight = rows.reduce((t, r) => t + weight(r), 0);
   const value = totalWeight ? rows.reduce((t, r) => t + r.score * weight(r), 0) / totalWeight : 0;
-  const score = rows.length ? value * VALUE_SHARE + needs.score : 0;
+  const score = !rows.length ? 0 : state.gradeByValue ? value : value * VALUE_SHARE + needs.score;
   const trades = (state.trades || []).filter((t) => t.a === team || t.b === team)
     .map((t) => (t.a === team ? { partner: t.b, got: t.aGot, gave: t.bGot } : { partner: t.a, got: t.bGot, gave: t.aGot }));
   return { team, rows, value, score, letter: rows.length ? letterFor(score) : "—", needs, trades };

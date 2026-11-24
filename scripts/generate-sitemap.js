@@ -342,6 +342,8 @@ for (const doc of allTeams) {
     // Draft Sim, both classes (the team pages are with each team below).
     { path: "/draftsim", priority: 0.8, lastmod: today },
     { path: "/draftsim/2028", priority: 0.65, lastmod: today },
+    // Dynasty Draft Sim (fantasy rookie drafts), each class.
+    ...["2027", "2028", "2029"].map((y) => ({ path: `/draftsim/dynasty/${y}`, priority: y === "2027" ? 0.7 : 0.55, lastmod: today })),
     // Transfer Portal Sim (each school's page is with portalSimPages below).
     { path: "/portalsim", priority: 0.8, lastmod: today },
     { path: "/portalsim/community", priority: 0.55, lastmod: today },

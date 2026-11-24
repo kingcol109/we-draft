@@ -10,6 +10,7 @@ import AuthModal from "./components/AuthModal";
 import AdminRoute from "./components/AdminRoute";
 import SimRoute from "./components/SimRoute";
 import DraftSimMeta from "./components/draftSim/DraftSimMeta";
+import DynastySimMeta from "./components/draftSim/DynastySimMeta";
 import PortalSimMeta from "./components/portalSim/PortalSimMeta";
 import { useStuckSpinnerWatchdog } from "./hooks/useStuckSpinnerWatchdog";
 import Navbar from "./components/Navbar";
@@ -107,6 +108,7 @@ const WeeklyTeamMock = lazy(() => import("./pages/WeeklyTeamMock"));
 const DraftSim = lazy(() => import("./pages/DraftSim"));
 // /draftsim/live — On the Clock on the site: the broadcast frame, interactive and full-screen-able.
 const DraftSimLive = lazy(() => import("./pages/DraftSimLive"));
+const DynastySim = lazy(() => import("./pages/DynastySim"));
 
 // Whiteboard
 const Whiteboard = lazy(() => import("./pages/Whiteboard"));
@@ -338,6 +340,9 @@ function MainLayout() {
             <Route path="/draftsim" element={<><DraftSimMeta /><DraftSim /></>} />
             {/* Recent Drafts (public one-team saved sims) and the Sim Profile — ahead of :team. */}
             <Route path="/draftsim/live" element={<DraftSimLive />} />
+            {/* Dynasty Draft Sim — fantasy rookie drafts, 2027–2029 (pages/DynastySim.jsx). */}
+            <Route path="/draftsim/dynasty" element={<Navigate to="/draftsim/dynasty/2027" replace />} />
+            <Route path="/draftsim/dynasty/:year" element={<><DynastySimMeta /><DynastySim /></>} />
             <Route path="/draftsim/community" element={<DraftSim page="community" />} />
             <Route path="/draftsim/recent" element={<DraftSim page="recent" />} />
             <Route path="/draftsim/profile" element={<DraftSim page="profile" />} />

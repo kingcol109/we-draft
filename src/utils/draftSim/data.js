@@ -25,8 +25,17 @@ import { bestGame } from "./bestGame.js";
 // SIM_YEAR / SIM_YEARS (years.js): the class drafted by default, and every
 // class it can draft. A thin class's board only fills a few rounds —
 // maxRounds says how many.
-import { SIM_YEAR, SIM_YEARS, ROUND_CAPS } from "./years";
-export { SIM_YEAR, SIM_YEARS };
+import { SIM_YEAR, SIM_YEARS, ROUND_CAPS, REDRAFT_YEARS, WEDRAFT_BOARD_YEARS } from "./years";
+export { SIM_YEAR, SIM_YEARS, REDRAFT_YEARS, WEDRAFT_BOARD_YEARS };
+
+// A re-draft year's file (scripts/buildRedraft.mjs): { order, actual, needs,
+// qbTeams, headshots, mix, locks, players? }, its own chunk.
+export const isRedraft = (year) => REDRAFT_YEARS.includes(String(year));
+// One before the classes we graded (2026 on): no We-Draft.com board, its
+// players from `historical` (the file's players), and today's staffs and
+// stars are someone else's — none.
+const pastRedraft = (year) => isRedraft(year) && !WEDRAFT_BOARD_YEARS.includes(String(year));
+const loadRedraft = (year) => once(`redraft:${year}`, () => import(`./redraft/${year}.json`).then((m) => m.default || m));
 // Scored in bestGame.js (shared with the weekly snapshot build).
 export { bestGame };
 export const maxRounds = (board) => Math.max(1, Math.min(7, Math.floor(board.filter((p) => !SPECIALISTS.includes(p.Position)).length / 32)));
@@ -42,6 +51,16 @@ const once = (key, load) => {
 // Just what the setup screen shows: order + branding + staff names.
 export function loadSimSetup(year = SIM_YEAR) {
   return once(`setup:${year}`, async () => {
+    // A re-draft: the real order (no comp picks), and no next year's picks to trade.
+    if (isRedraft(year)) {
+      const [redraft, branding, staff] = await Promise.all([
+        loadRedraft(year),
+        fetchNflBranding().catch(() => ({})),
+        pastRedraft(year) ? {} : getSiteSnapshot("nflFit_QB").then((s) => s?.staff || {}).catch(() => ({})),
+        loadDeskLines(),
+      ]);
+      return { year, order: redraft.order, futureOrder: [], futureYear: null, branding, staff, redraft: true };
+    }
     const next = UPCOMING_DRAFTS.find((d) => Number(d.year) === Number(year) + 1);
     // (The fourth result, the desk lines, applies itself — nothing to keep.)
     const [draft, branding, staff, , future] = await Promise.all([
@@ -207,12 +226,18 @@ export function loadSimData(year = SIM_YEAR) {
       loadSimSetup(year),
       getDoc(doc(db, "config", "draftTradeChart")).then((s) => (s.exists() ? s.data().values || {} : {})).catch(() => ({})),
       getSiteSnapshot("_grades").catch(() => null),
-      classProspects(year).then(async (list) => Object.assign(await withDarkLogos(list), { hidden: list.hidden || [] })),
+      // An older re-draft's board is its file's players (every drafted player).
+      (pastRedraft(year) ? loadRedraft(year).then((r) => Object.assign(r.players.map((p) => ({ ...p, logo: "", logoDark: null, roles: [] })), { hidden: [] })) : classProspects(year))
+        .then(async (list) => Object.assign((await withDarkLogos(list)).map((p) => (p.logo ? p : { ...p, logo: p.logoDark })), { hidden: list.hidden || [] })),
       Promise.all(SIM_POSITIONS.map((pos) => getSiteSnapshot(`nflFit_${pos}`).catch(() => null))),
       loadCfbStats().catch(() => ({ season: null, bySlug: {} })),
-      loadNeeds().catch(() => ({})),
-      // Every real draft pick since 2000, for Thad Murphy (its own chunk).
-      import("./draftHistory.json").then((m) => m.default || m).catch(() => null),
+      // A re-draft's needs are the ones it had going in (its file's).
+      // (2000–2016 files carry none: today's needs — those players are long gone.)
+      isRedraft(year) ? loadRedraft(year).then((r) => (r.needs ? Object.fromEntries(Object.entries(r.needs).map(([team, n]) => [team, resolveNeeds(n)])) : loadNeeds().catch(() => ({})))) : loadNeeds().catch(() => ({})),
+      // Every real draft pick since 2000, for Thad Murphy (its own chunk) —
+      // only the drafts before a re-draft's, so the real one isn't history yet.
+      import("./draftHistory.json").then((m) => m.default || m).then((h) => (isRedraft(year) && h
+        ? { ...h, years: [h.years[0], Number(year) - 1], picks: h.picks.filter((p) => p[0] < Number(year)) } : h)).catch(() => null),
       loadStars().catch(() => ({})),
       loadDeskLines(),
       loadPlayerTakes(),
@@ -227,14 +252,29 @@ export function loadSimData(year = SIM_YEAR) {
     }
     const fits = {};
     const staff = { ...setup.staff };
-    fitDocs.forEach((d) => {
+    if (!pastRedraft(year)) fitDocs.forEach((d) => {
       Object.assign(fits, d?.rows || {});
       Object.entries(d?.staff || {}).forEach(([team, slots]) => { staff[team] = { ...(staff[team] || {}), ...slots }; });
     });
     // Warm the best-games snapshot before the first pick needs it.
     simGames(cfb.season).catch(() => null);
+    const redraft = isRedraft(year) ? await loadRedraft(year) : null;
     return {
-      ...setup, staff, chart, needs, history, stars, season: cfb.season, board: buildBoard(prospects, grades, fits, cfb.bySlug, { gradeSpread }),
+      ...setup, staff, chart, needs, history, stars: pastRedraft(year) ? {} : stars,
+      // The real draft, for the desk: { [slug]: { pick, round, team } }.
+      actual: redraft?.actual || null,
+      // Their current ESPN NFL headshots: { [player id]: ESPN id } (simHeadshots.js).
+      headshots: redraft?.headshots || null,
+      // The Fun board's order ([player id], best first — the real draft and
+      // hindsight mixed), the Hindsight board's (older classes only), and no trades.
+      mix: redraft?.mix || null,
+      // A re-draft drafting for today's needs (2000–2016), for the desk.
+      todaysNeeds: !!redraft && !redraft.needs,
+      hindsight: redraft?.hindsight || null,
+      noTrades: !!redraft,
+      // Picks that always stand ({ [team]: [player id] }).
+      locks: redraft?.locks || null,
+      season: cfb.season, board: buildBoard(prospects, grades, fits, cfb.bySlug, { gradeSpread }),
       // What loadExpandedBoard rebuilds the board from.
       inputs: { prospects, hidden: prospectList.hidden || [], grades, fits, stats: cfb.bySlug, gradeSpread },
     };

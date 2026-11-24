@@ -63,6 +63,7 @@ export function runWeeklyMock(data, { seed = Date.now(), rounds = WEEKLY_ROUNDS,
   let s = initSim({
     order: data.order, futureOrder: data.futureOrder, futureYear: data.futureYear, board: data.board, chart: data.chart,
     staff: data.staff, needs: data.needs, userTeams: [], rounds, seed, cpuTrades: trades, variance: WEEKLY_VARIANCE, qbTeams, posRules,
+    noTrades: !!data.noTrades, locks: data.locks || null,
   });
   const pickEvents = [];
   // A pick a step, and a step never takes more than one pick — the cap is just a guard.

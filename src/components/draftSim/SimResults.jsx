@@ -20,7 +20,7 @@ import { loadHeadshot } from "./simHeadshots";
 import { useAuth } from "../../context/AuthContext";
 import { teamHaul, needName, groupedNeeds, pickName } from "../../utils/draftSim/engine";
 import { gradeTake } from "../../utils/draftSim/analysts";
-import { teamNamer } from "../../utils/draftSim/data";
+import { teamNamer, isRedraft } from "../../utils/draftSim/data";
 import { PROFILE_PATH } from "../../utils/draftSim/simProfile";
 import { NFL_TEAM_ABBRS } from "../../utils/coachHistory";
 import { textOn } from "../../utils/teamColors";
@@ -71,6 +71,11 @@ function ResultsBody({ sim, data, ctx, speed, isMobile, onRerun, onNew, mock = f
   const takes = useMemo(() => Object.fromEntries(userHauls.map((h) => [h.team, gradeTake(h, ctx)])), [userHauls, ctx]);
   const league = useMemo(() => NFL_TEAM_ABBRS.map((t) => teamHaul(sim, t)).filter((h) => h.rows.length).sort((a, b) => b.score - a.score), [sim]);
   const hasMine = userHauls.some((h) => h.rows.length);
+  // A re-draft (admin-only for now) or a dynasty draft isn't saved, shared or posted as a mock.
+  const redraft = isRedraft(data.year) && !data.dynasty;
+  const dynasty = !!data.dynasty;
+  const quiet = redraft || dynasty;
+  const title = dynasty ? `${data.year} DYNASTY DRAFT` : redraft ? `${data.year} RE-DRAFT` : `${data.year} NFL ${mock ? "MOCK DRAFT" : "DRAFT SIM"}`;
 
   const carry = onCarry && carryYear ? <CarryPanel year={carryYear} onCarry={onCarry} busy={carrying} isMobile={isMobile} /> : null;
 
@@ -80,7 +85,7 @@ function ResultsBody({ sim, data, ctx, speed, isMobile, onRerun, onNew, mock = f
       <div className="wd-sim-in">
         {head && <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
           <div style={{ marginRight: "auto" }}>
-            <div style={{ color: GOLD, fontSize: 11, fontWeight: 900, letterSpacing: "0.16em" }}>FINAL · {data.year} NFL MOCK DRAFT</div>
+            <div style={{ color: GOLD, fontSize: 11, fontWeight: 900, letterSpacing: "0.16em" }}>FINAL · {title}</div>
             <div style={{ color: "#fff", fontSize: isMobile ? 24 : 34, fontWeight: 900, lineHeight: 1 }}>THE MOCK IS COMPLETE</div>
           </div>
           <button onClick={onRerun} style={{ ...btn, background: "#1a2438", color: "#fff" }}>START OVER</button>
@@ -89,7 +94,7 @@ function ResultsBody({ sim, data, ctx, speed, isMobile, onRerun, onNew, mock = f
         {carry}
         <FullDraft sim={sim} data={data} isMobile={isMobile} cols={isMobile ? 1 : 4} action={<MockShare sim={sim} data={data} isMobile={isMobile} />} />
         {/* Post it as a mock draft, under the picks. */}
-        <div style={{ marginTop: 12 }}><MockExport sim={sim} year={data.year} isMobile={isMobile} onUndo={onUndo} /></div>
+        {!redraft && <div style={{ marginTop: 12 }}><MockExport sim={sim} year={data.year} isMobile={isMobile} onUndo={onUndo} /></div>}
       </div>
     );
   }
@@ -98,7 +103,7 @@ function ResultsBody({ sim, data, ctx, speed, isMobile, onRerun, onNew, mock = f
     <div className="wd-sim-in">
       {head && <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
         <div style={{ marginRight: "auto", flexBasis: isMobile ? "100%" : "auto" }}>
-          <div style={{ color: GOLD, fontSize: 11, fontWeight: 900, letterSpacing: "0.16em" }}>FINAL · {data.year} NFL DRAFT SIM</div>
+          <div style={{ color: GOLD, fontSize: 11, fontWeight: 900, letterSpacing: "0.16em" }}>FINAL · {title}</div>
           <div style={{ color: "#fff", fontSize: isMobile ? 24 : 34, fontWeight: 900, lineHeight: 1 }}>THE DRAFT IS COMPLETE</div>
         </div>
         {/* Mobile: Save under the title, then New Sim across the bottom.
@@ -106,15 +111,15 @@ function ResultsBody({ sim, data, ctx, speed, isMobile, onRerun, onNew, mock = f
             draft when the user only watched). */}
         {isMobile ? (
           <div style={{ flexBasis: "100%", display: "grid", gridTemplateColumns: "1fr", gap: 8 }}>
-            {hasMine && <div style={{ display: "grid" }}><SaveButton sim={sim} data={data} hauls={userHauls} speed={speed} full /></div>}
+            {hasMine && !quiet && <div style={{ display: "grid" }}><SaveButton sim={sim} data={data} hauls={userHauls} speed={speed} full /></div>}
             <button onClick={onNew} style={{ ...btn, padding: "12px 16px", fontSize: 13, background: GOLD, color: "#fff" }}>NEW SIM</button>
-            <Link to={RECENT_PATH} style={{ ...btn, textAlign: "center", textDecoration: "none", background: "#1a2438", color: "#fff" }}>SEE RECENT USER DRAFTS →</Link>
+            {!dynasty && <Link to={RECENT_PATH} style={{ ...btn, textAlign: "center", textDecoration: "none", background: "#1a2438", color: "#fff" }}>SEE RECENT USER DRAFTS →</Link>}
           </div>
         ) : (
           <>
-            {hasMine && <SaveButton sim={sim} data={data} hauls={userHauls} speed={speed} />}
+            {hasMine && !quiet && <SaveButton sim={sim} data={data} hauls={userHauls} speed={speed} />}
             <button onClick={onNew} style={{ ...btn, background: "#1a2438", color: "#fff" }}>NEW SIM</button>
-            <Link to={RECENT_PATH} style={{ ...btn, textDecoration: "none", background: "#1a2438", color: "#fff" }}>RECENT DRAFTS</Link>
+            {!dynasty && <Link to={RECENT_PATH} style={{ ...btn, textDecoration: "none", background: "#1a2438", color: "#fff" }}>RECENT DRAFTS</Link>}
           </>
         )}
       </div>}
@@ -123,12 +128,14 @@ function ResultsBody({ sim, data, ctx, speed, isMobile, onRerun, onNew, mock = f
       <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1fr) 400px", gap: 12, alignItems: "start", marginBottom: 12 }}>
         <div style={{ display: "grid", gap: 12, minWidth: 0 }}>
           {userHauls.map((h, i) => <ReportCard key={h.team} h={h} b={brand(h.team)} take={takes[h.team]} isMobile={isMobile}
-            action={i === 0 && <SimShare sim={sim} data={data} hauls={userHauls} isMobile={isMobile} />} />)}
+            action={i === 0 && !dynasty && <SimShare sim={sim} data={data} hauls={userHauls} isMobile={isMobile} />} />)}
           {userHauls.length === 0 && <FullDraft sim={sim} data={data} isMobile={isMobile} cols={isMobile ? 1 : 3}
-            action={<SimShare sim={sim} data={data} hauls={userHauls} isMobile={isMobile} size="big" />} />}
+            action={dynasty ? null : <SimShare sim={sim} data={data} hauls={userHauls} isMobile={isMobile} size="big" />} />}
         </div>
         {/* The user's Sim Profile beside their report card; every team's grade at the bottom. */}
-        {user ? (
+        {dynasty ? (
+          <FullDraft sim={sim} data={data} isMobile={isMobile} cols={1} />
+        ) : user ? (
           <div style={{ display: "grid", gap: 12, minWidth: 0 }}>
             <SimSnapshot branding={data.branding} names={teamNamer(data.branding).teamName} year={data.year} counted={counted} />
             <EndBadges badges={badges} max={isMobile ? 3 : 4} />

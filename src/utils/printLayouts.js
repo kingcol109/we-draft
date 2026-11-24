@@ -225,7 +225,8 @@ const zeroish = (arr) => (arr || []).every((v) => !v || /^-?0(\.0+)?%?$/.test(St
 
 // → [{ title, labels, rows: [{ year, team, stats }], totals }] — at most two
 // tables, the position's own categories first.
-async function loadStats(espnId, position) {
+// Also Admin → Go's Players desk (components/AdminGo.jsx).
+export async function loadStats(espnId, position) {
   if (!espnId) return [];
   const j = await fetchEspnCareer(espnId).catch(() => null);
   const cats = (j?.categories || []).filter((c) => !SKIP_STAT_CATS.has(c.name) && c.statistics?.length && !zeroish(c.totals));
@@ -437,4 +438,4 @@ export function mineFrom(e, by) {
 
 // Short round labels for the grade spread (1 … 10).
 export const SPREAD_SHORT = { 1: "E1", 2: "M1", 3: "L1", 4: "2", 5: "3", 6: "4", 7: "5", 8: "6", 9: "7", 10: "UDFA" };
-export { GRADE_LABELS };
+export { GRADE_LABELS, fmtHeight, fmtWeight };

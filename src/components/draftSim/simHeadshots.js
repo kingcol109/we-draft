@@ -11,6 +11,16 @@ import { loadPhotosDoc } from "../../utils/photoDocs";
 
 const headshots = new Map();
 const resolvedHeadshots = new Map();
+// A re-draft's players are in the NFL now: their current ESPN NFL headshots
+// (data.js — the re-draft file's { [player id]: ESPN id }) over the college ones.
+const ESPN_NFL = (espn) => `https://a.espncdn.com/i/headshots/nfl/players/full/${espn}.png`;
+export function setHeadshotOverrides(map = {}) {
+  Object.entries(map).forEach(([id, espn]) => {
+    const url = ESPN_NFL(espn);
+    headshots.set(id, Promise.resolve(url));
+    resolvedHeadshots.set(id, url);
+  });
+}
 export function loadHeadshot(id) {
   if (!id) return Promise.resolve("");
   if (!headshots.has(id)) {

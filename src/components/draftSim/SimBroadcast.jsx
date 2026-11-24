@@ -248,7 +248,7 @@ function BroadcastBar({ s, data, isMobile, onSettings }) {
       <span style={{ display: "inline-flex", alignItems: "center", gap: 7, background: "#c8102e", color: "#fff", borderRadius: 6, padding: "3px 9px", fontWeight: 900, fontSize: 11, letterSpacing: "0.14em" }}>
         <span className="wd-sim-live-dot" style={{ background: "#fff" }} /> LIVE
       </span>
-      <span style={{ color: "#fff", fontWeight: 900, fontSize: isMobile ? 13 : 15, letterSpacing: "0.08em" }}>{data.year} NFL DRAFT SIM</span>
+      <span style={{ color: "#fff", fontWeight: 900, fontSize: isMobile ? 13 : 15, letterSpacing: "0.08em" }}>{data.year} {data.dynasty ? "DYNASTY DRAFT" : "NFL DRAFT SIM"}</span>
       {pick && live && s.phase !== "intro" && (
         <span style={{ color: GOLD, fontWeight: 900, fontSize: 12, letterSpacing: "0.1em" }}>
           RD {pick.round} · PICK {pick.inRound} · NO. {pick.overall}
@@ -791,7 +791,9 @@ function IntroContent({ s, data, isMobile, onPickTeam }) {
   const teams = s.sim.userTeams;
   const one = teams.length === 1 ? teams[0] : null;
   const all = teams.length >= 32;
-  const head = introHeadline(teams, (t) => brandOf(data, t).Team || t, data.year);
+  // The Dynasty Draft Sim's teams are "Team 4", not a nickname to say "the" before.
+  const head = data.dynasty && one ? { tag: `${data.year} DYNASTY DRAFT · YOU'RE`, title: brandOf(data, one).Team || one }
+    : introHeadline(teams, (t) => brandOf(data, t).Team || t, data.year);
   // Several teams: all their logos, in pick order of their first pick.
   const firstOf = (t) => s.sim.picks.find((p) => p.owner === t)?.overall ?? Infinity;
   const ordered = [...teams].sort((a, b) => firstOf(a) - firstOf(b));
@@ -1357,7 +1359,7 @@ function WarRoomTab({ s, data, isMobile, onTrade }) {
     return (
       <SuggestionCard key={c.slot} tag={`${SLOT_TAG[c.slot]}${who ? ` ${who.toUpperCase()}` : ""}`} accent={SLOT_ACCENT[c.slot]} p={c.p} onClock={onClock} s={s}
         quote={{ text: c.agrees.length ? agreeLine(c, staffNames, ctx) : frontOfficeLine(c, ctx), by: { name: who || "", title: SLOT_TITLE[c.slot] } }}
-        extra={c.tradeDown || c.tradeUp ? <button onClick={onTrade} style={{ ...DRAFT_BTN, background: "#1a2438", color: "#fff", border: `1px solid ${BLUE}` }}>{c.tradeUp ? "TRADE UP" : "TRADE DOWN"}</button> : null} />
+        extra={onTrade && (c.tradeDown || c.tradeUp) ? <button onClick={onTrade} style={{ ...DRAFT_BTN, background: "#1a2438", color: "#fff", border: `1px solid ${BLUE}` }}>{c.tradeUp ? "TRADE UP" : "TRADE DOWN"}</button> : null} />
     );
   };
   // GM and head coach always; then the coordinator, or Davin in his place.
@@ -2057,9 +2059,11 @@ function Console({ s, data, isMobile, fill = false }) {
     ["draft", "Draft"],
     ["board", "Draft Board"],
     // The War Room is only for the user's own teams — none when watching.
-    ...(s.sim.userTeams.length ? [["warroom", "War Room"], ["mypicks", "My Picks"]] : []),
-    ["roster", "Roster"],
-    ["trades", "Trades", s.sim.offers.length],
+    // The Dynasty Draft Sim has no staffs or NFL rosters: My Picks only.
+    ...(s.sim.userTeams.length ? [...(data.dynasty ? [] : [["warroom", "War Room"]]), ["mypicks", "My Picks"]] : []),
+    ...(data.dynasty ? [] : [["roster", "Roster"]]),
+    // A re-draft has no trades (engine noTrades).
+    ...(s.sim.noTrades ? [] : [["trades", "Trades", s.sim.offers.length]]),
   ];
   // The war room's reaction to the user's pick, wherever it was made: for
   // REACTION_MS after it (the sim goes on underneath), the War Room tab
@@ -2102,9 +2106,9 @@ function Console({ s, data, isMobile, fill = false }) {
     : null;
   const body = {
     desk: <SimFeed feed={s.feed} branding={data.branding} height={isMobile ? "auto" : consoleHeight(isMobile)} isMobile={isMobile} cardPick={{ teams: s.sim.userTeams, year: data.year }} />,
-    draft: <DraftTab s={s} data={data} isMobile={isMobile} onTradePick={s.quick ? null : tradePick} fit={fill && !isMobile} />,
+    draft: <DraftTab s={s} data={data} isMobile={isMobile} onTradePick={s.quick || s.sim.noTrades ? null : tradePick} fit={fill && !isMobile} />,
     board: <DraftBoardTab s={s} data={data} isMobile={isMobile} />,
-    warroom: <WarRoomTab s={s} data={data} isMobile={isMobile} onTrade={() => { setTradeSeed(null); setTab("trades"); }} />,
+    warroom: <WarRoomTab s={s} data={data} isMobile={isMobile} onTrade={s.sim.noTrades ? null : () => { setTradeSeed(null); setTab("trades"); }} />,
     mypicks: <MyPicksTab s={s} data={data} isMobile={isMobile} />,
     roster: <RosterTab s={s} data={data} isMobile={isMobile} />,
     trades: <TradesTab key={tradeSeed?.key || "trades"} s={s} data={data} isMobile={isMobile} seed={tradeSeed} />,

@@ -6,6 +6,18 @@
 // and the server does the rest.
 import { auth } from "../../firebase";
 
+// A typed Instagram username — "@name", "name" or a profile link
+// (instagram.com/name/) → "name", or null when it isn't a valid username
+// (letters, numbers, periods, underscores; up to 30; no leading, trailing
+// or double period). Admin → Social and Admin → Go both use it.
+export const cleanUsername = (raw) => {
+  let s = String(raw || "").trim();
+  const url = /instagram\.com\/([^/?#\s]+)/i.exec(s);
+  if (url) s = url[1];
+  s = s.replace(/^@+/, "").replace(/\/+$/, "").trim();
+  return /^[A-Za-z0-9._]{1,30}$/.test(s) && !/^\.|\.$|\.\./.test(s) ? s : null;
+};
+
 export async function igApi(action, payload = {}) {
   const token = await auth.currentUser?.getIdToken();
   const r = await fetch("/api/instagram", {

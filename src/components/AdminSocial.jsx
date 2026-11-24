@@ -22,7 +22,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { collection, doc, getDoc, getDocs, onSnapshot, query, updateDoc, where } from "firebase/firestore";
 import { db } from "../firebase";
-import { igApi } from "../utils/instagram/api";
+import { igApi, cleanUsername } from "../utils/instagram/api";
 import { renderShareImage } from "../utils/exportImages";
 import { useSchools } from "./DraftArchiveList";
 import PitchGraphic from "./PitchGraphic";
@@ -73,14 +73,6 @@ const fmtWhen = (t) => {
 const nameOf = (p) => [p?.First, p?.Last].filter(Boolean).join(" ");
 const norm = (s) => String(s || "").toLowerCase();
 // The same check the server makes (server/instagram/contacts.js).
-const cleanUsername = (raw) => {
-  let s = String(raw || "").trim();
-  const url = /instagram\.com\/([^/?#\s]+)/i.exec(s);
-  if (url) s = url[1];
-  s = s.replace(/^@+/, "").replace(/\/+$/, "").trim();
-  return /^[A-Za-z0-9._]{1,30}$/.test(s) && !/^\.|\.$|\.\./.test(s) ? s : null;
-};
-
 function Pill({ color, children, title }) {
   return (
     <span title={title} style={{ display: "inline-block", fontSize: "10px", fontWeight: 900, letterSpacing: "0.05em", textTransform: "uppercase", color: "#fff", background: color, borderRadius: "4px", padding: "2px 6px", whiteSpace: "nowrap" }}>

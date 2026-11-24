@@ -18,6 +18,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { dirname } from "path";
 import { simMeta, simPath } from "../src/utils/draftSim/meta.js";
+import { dynastyMeta, dynastyPath, DYNASTY_META_YEARS } from "../src/utils/dynastySim/meta.js";
 import { SIM_YEARS } from "../src/utils/draftSim/years.js";
 import { NFL_TEAM_ABBRS } from "../src/utils/coachHistory.js";
 
@@ -27,8 +28,8 @@ if (!/<title>[^<]*<\/title>/.test(html)) throw new Error("build/index.html has n
 
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-function pageFor(page) {
-  const m = simMeta(page);
+function pageFor(page, meta = simMeta) {
+  const m = meta(page);
   const tag = (attr, key, content) => `<meta data-rh="true" ${attr}="${key}" content="${esc(content)}"/>`;
   const tags = [
     tag("name", "description", m.description),
@@ -60,5 +61,12 @@ SIM_YEARS.forEach((year) => {
     writeFileSync(file, pageFor({ team, year }));
     n += 1;
   });
+});
+// The Dynasty Draft Sim's classes (/draftsim/dynasty/2027 …).
+DYNASTY_META_YEARS.forEach((year) => {
+  const file = `${BUILD}${dynastyPath(year)}.html`;
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, pageFor(year, dynastyMeta));
+  n += 1;
 });
 console.log(`Draft Sim preview pages: wrote ${n} (${SIM_YEARS.join(", ")} × setup + ${NFL_TEAM_ABBRS.length} teams)`);

@@ -37,12 +37,14 @@ import { Link, Navigate, useLocation, useNavigate, useParams } from "react-route
 import LoadingSpinner from "../components/LoadingSpinner";
 import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
 import { NFL_TEAMS, NFL_TEAM_ABBRS } from "../utils/coachHistory";
-import { loadSimSetup, loadSimData, loadExpandedBoard, loadMyGrades, SIM_YEAR, SIM_YEARS, classRounds, teamNamer } from "../utils/draftSim/data";
-import { applyMyGrades, teamHaul, shuffleOrder, relabelOrder, orderTeams, randomTeamMap, swapTeams, CPU_TRADES, VARIANCE, DEFAULT_VARIANCE } from "../utils/draftSim/engine";
+import { loadSimSetup, loadSimData, loadExpandedBoard, loadMyGrades, SIM_YEAR, SIM_YEARS, REDRAFT_YEARS, WEDRAFT_BOARD_YEARS, isRedraft, classRounds, teamNamer } from "../utils/draftSim/data";
+import { applyBoardOrder, applyMyGrades, teamHaul, shuffleOrder, relabelOrder, orderTeams, randomTeamMap, swapTeams, CPU_TRADES, VARIANCE, DEFAULT_VARIANCE } from "../utils/draftSim/engine";
 import { useAuth } from "../context/AuthContext";
 import { countSim, countTeams, countUserPick } from "../utils/draftSim/stats";
 import { recordSimProfile, recordStreak, onDefaults, PROFILE_PATH } from "../utils/draftSim/simProfile";
 import { CHATTER, DEFAULT_CHATTER } from "../utils/draftSim/analysts";
+import { setHeadshotOverrides } from "../components/draftSim/simHeadshots";
+import { DYNASTY_YEARS } from "../utils/dynastySim/engine";
 import { useIsMobile, BLUE, GOLD } from "../components/MockDraftKit";
 import useDraftSim, { SPEEDS, DEFAULT_SPEED } from "../components/draftSim/useDraftSim";
 import SimBroadcast, { SIM_CSS, introHeadline } from "../components/draftSim/SimBroadcast";
@@ -102,21 +104,26 @@ function Column({ wide, isMobile, contentRef, children }) {
 // page: "profile" (/draftsim/profile), "community" (/draftsim/community)
 // or "recent" (/draftsim/recent, Community's Recent Drafts) — a page of its
 // own, with the setup screen's tabs over it.
+// Every class the sim can open: the draft classes, then past drafts to re-draft (admins only).
+const ALL_YEARS = [...SIM_YEARS, ...REDRAFT_YEARS];
 const PAGE_PATHS = { profile: PROFILE_PATH, community: COMMUNITY_PATH };
 const PROFILE_VIEWS = [["profile", "Profile"], ["drafts", "My Drafts"]];
 export default function DraftSim({ page = null }) {
   // /draftsim/:team, /draftsim/:year (a SIM_YEARS year in the team slot) or
   // /draftsim/:year/:team.
   const params = useParams();
-  const pathYear = params.year || (SIM_YEARS.includes(params.team) ? params.team : null);
+  const pathYear = params.year || (ALL_YEARS.includes(params.team) ? params.team : null);
   const teamParam = pathYear && !params.year ? null : params.team;
   const team = teamParam ? teamParam.toUpperCase() : null;
   const location = useLocation();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
-  const year = SIM_YEARS.includes(pathYear) ? pathYear : SIM_YEAR;
+  const year = ALL_YEARS.includes(pathYear) ? pathYear : SIM_YEAR;
   const yearPath = year === SIM_YEAR ? "" : `/${year}`;
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
+  const admin = profile?.role === "admin";
+  // A re-draft is admins' only, for now: anyone else (once we know) goes to the sim.
+  const redraftBlocked = isRedraft(year) && (!user || (profile && !admin));
   const [setup, setSetup] = useState(null);
   const [data, setData] = useState(null);
   const [error, setError] = useState(false);
@@ -179,7 +186,7 @@ export default function DraftSim({ page = null }) {
     let live = true;
     loadSimSetup(year).then((s) => live && setSetup(s)).catch((e) => { console.error("Draft sim setup error:", e); if (live) setError(true); });
     // Warm the full board while the user's choosing.
-    loadSimData(year).then((d) => live && setData(d)).catch((e) => { console.error("Draft sim data error:", e); if (live) setError(true); });
+    loadSimData(year).then((d) => { if (d.headshots) setHeadshotOverrides(d.headshots); if (live) setData(d); }).catch((e) => { console.error("Draft sim data error:", e); if (live) setError(true); });
     return () => { live = false; };
   }, [year]);
 
@@ -218,11 +225,13 @@ export default function DraftSim({ page = null }) {
     setPending(null);
     setConfig(validTeam && setup ? {
       teams: [validTeam], baseRounds: DEFAULT_ROUNDS, rounds: roundsFor(setup.order, [validTeam], DEFAULT_ROUNDS),
-      speed: DEFAULT_SPEED, chatter: DEFAULT_CHATTER, board: "community", seed: newSeed(), expanded: EXPANDED_YEARS.includes(year),
+      speed: DEFAULT_SPEED, chatter: DEFAULT_CHATTER, board: defaultBoard(year), seed: newSeed(), expanded: EXPANDED_YEARS.includes(year),
+      ...(isRedraft(year) ? { cpuTrades: "off" } : {}),
     } : null);
   }, [validTeam, setup, year]);
 
-  if ((team && !validTeam) || (params.year && !SIM_YEARS.includes(params.year))) return <Navigate to={`/draftsim${yearPath}`} replace />;
+  if (redraftBlocked) return <Navigate to="/draftsim" replace />;
+  if ((team && !validTeam) || (params.year && !ALL_YEARS.includes(params.year))) return <Navigate to={`/draftsim${yearPath}`} replace />;
 
   // The setup screen's tabs: "new" (set up a draft), "profile" (Sim
   // Profile, /draftsim/profile — its sub-tabs the profile itself and My
@@ -283,7 +292,7 @@ export default function DraftSim({ page = null }) {
   // its leg — sim, data, … and the config it ran on). The next class's
   // board (the Expanded Board, as a next-class run starts) and the carried
   // order, needs and rules are ready before the run starts.
-  const carryYear = SIM_YEARS[SIM_YEARS.indexOf(year) + 1] || null;
+  const carryYear = SIM_YEARS.includes(year) ? SIM_YEARS[SIM_YEARS.indexOf(year) + 1] || null : null;
   // The next year's run, ready to start (prev: the finished leg, with its config).
   const prepareCarry = async (prev) => {
     const [{ carryOverData }, next, board] = await Promise.all([
@@ -362,7 +371,7 @@ export default function DraftSim({ page = null }) {
           <Column isMobile={isMobile} contentRef={contentRef}>
             <SetupTabs tab={tab} onTab={setTab} isMobile={isMobile} />
             {tab !== "new" ? tabBody(tab, view, setView)
-              : <Setup key={year} setup={setup} year={year} rounds={data ? classRounds(year, data.board) : null} initialTeams={location.state?.teams || []} initialBoard={location.state?.board} initialOpts={location.state?.opts} signedIn={!!user} myCount={myCount} isMobile={isMobile} names={names} onStart={start} starting={!!pending} onTeams={setSetupTeams}
+              : <Setup key={year} admin={admin} setup={setup} year={year} rounds={data ? classRounds(year, data.board) : null} initialTeams={location.state?.teams || []} initialBoard={location.state?.board} initialOpts={location.state?.opts} signedIn={!!user} myCount={myCount} isMobile={isMobile} names={names} onStart={start} starting={!!pending} onTeams={setSetupTeams}
               onYear={(y, extra) => navigate(`/draftsim${y === SIM_YEAR ? "" : `/${y}`}`, { replace: true, state: extra ? { ...location.state, opts: { ...(location.state?.opts || {}), ...extra, year: y } } : location.state })} />}
           </Column>
         )}
@@ -379,6 +388,27 @@ export default function DraftSim({ page = null }) {
     </>
   );
 }
+
+// A class's board to start on: a re-draft with no We-Draft.com board of its
+// own drafts off Hindsight.
+const defaultBoard = (year) => (isRedraft(year) && !WEDRAFT_BOARD_YEARS.includes(String(year)) ? "fun" : "community");
+
+// The sim's page frame — the dark stage background under the navbar, and
+// the sim's CSS — for other pages that run the broadcast (the Dynasty Draft
+// Sim, pages/DynastySim.jsx). Column and LiveSim go inside it.
+export function SimFrame({ isMobile, children }) {
+  return (
+    <>
+      <style>{SIM_CSS}</style>
+      <div style={{
+        background: STAGE_BG,
+        marginTop: isMobile ? -(APP_TOP_PADDING + BODY_TOP_PADDING - MOBILE_NAV_HEIGHT) : -APP_TOP_PADDING,
+        minHeight: isMobile ? `calc(100svh - ${MOBILE_NAV_HEIGHT}px)` : "calc(100vh / var(--pz, 1) - 35px)",
+      }}>{children}</div>
+    </>
+  );
+}
+export { Column };
 
 // A run's setup choices, to run it again or take back to Settings.
 const optsOf = (c) => ({ mode: c.mode, orderMode: c.orderMode, orderMap: c.orderMap, cpuTrades: c.cpuTrades, variance: c.variance, expanded: !!c.expanded, double: !!c.double });
@@ -447,17 +477,23 @@ class SimErrorBoundary extends Component {
 // config.double (the setup screen's 2027 + 2028), first year done: the
 // screen in between instead of results — prepareCarry(leg) readies the
 // next year, onBegin(cfg) starts it.
-function LiveSim({ data: communityData, config, myGrades, isMobile, contentRef, onRerun, onSettings, onPickTeam, onDone, tabs, onCarry, carryYear, carrying, prepareCarry, onBegin }) {
+export function LiveSim({ data: communityData, config, myGrades, isMobile, contentRef, onRerun, onSettings, onPickTeam, onDone, tabs, onCarry, carryYear, carrying, prepareCarry, onBegin }) {
   // My Board: their grades over the community's (fixed for this run — the
   // sim remounts on every start).
   // A random order (config.order) over the real one.
   const [data] = useState(() => ({
     ...communityData,
     ...(config.board === "mine" && myGrades ? { board: applyMyGrades(communityData.board, myGrades) } : {}),
+    // A re-draft's Fun board (the real draft and hindsight mixed) or
+    // Hindsight board (older classes) — each CPU team's own board still
+    // varies it, as in any sim.
+    ...(config.board === "fun" && communityData.mix ? { board: applyBoardOrder(communityData.board, communityData.mix) } : {}),
+    ...(config.board === "hindsight" && communityData.hindsight ? { board: applyBoardOrder(communityData.board, communityData.hindsight) } : {}),
     ...(config.order ? { order: config.order } : {}),
   }));
   // No more rounds than the class's board can fill (2028 is thin).
-  const rounds = Math.min(config.rounds, classRounds(data.year, data.board));
+  // (A dynasty draft's rounds are already capped to its own board — pages/DynastySim.jsx.)
+  const rounds = data.dynasty ? config.rounds : Math.min(config.rounds, classRounds(data.year, data.board));
   // Mock Draft mode: the same sim, no pause between picks (useDraftSim quick).
   const mock = config.mode === "mock";
   // Usage counts (Admin → Mock Draft → Statistics): this run once START THE
@@ -468,22 +504,25 @@ function LiveSim({ data: communityData, config, myGrades, isMobile, contentRef, 
   // 2027 run's results) also counts as a combo when its second year starts
   // and finishes; each year still counts as a sim of its own.
   const { user, profile } = useAuth();
-  const uid = user?.uid || null;
+  // A re-draft counts for nothing: no usage stats, streak, Sim Profile or badges.
+  // (A dynasty draft too — utils/dynastySim: nothing counted, saved or badged.)
+  const redraft = isRedraft(data.year) || !!data.dynasty;
+  const uid = redraft ? null : user?.uid || null;
   const onUserPick = useCallback((event) => countUserPick(uid, data.year, event), [uid, data.year]);
   const s = useDraftSim(data, { userTeams: config.teams, rounds, speed: config.speed, chatter: config.chatter, seed: config.seed, cpuTrades: config.cpuTrades, variance: config.variance, quick: mock, onUserPick });
   const started = s.phase !== "intro";
-  useEffect(() => { if (started) { countSim(uid, "sims"); if (config.carry) countSim(uid, "combos"); countTeams(uid, data.year, config.teams); } }, [started]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (started && !redraft) { countSim(uid, "sims"); if (config.carry) countSim(uid, "combos"); countTeams(uid, data.year, config.teams); } }, [started]); // eslint-disable-line react-hooks/exhaustive-deps
   const finished = s.phase === "done";
   // A 2027-only run the user chose to carry over from its results: the
   // screen in between, as a "2027 + 2028" run gets on its own.
   const [rolling, setRolling] = useState(false);
-  useEffect(() => { if (finished) { countSim(uid, "completed"); if (config.carry) countSim(uid, "combosDone"); onDone?.(); } }, [finished]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (finished && !redraft) { countSim(uid, "completed"); if (config.carry) countSim(uid, "combosDone"); onDone?.(); } }, [finished]); // eslint-disable-line react-hooks/exhaustive-deps
   // The signed-in user's Sim Profile (utils/draftSim/simProfile.js), once
   // the draft's finished: any sim keeps their streak going; only a
   // single-team sim on the default settings (speed and chatter aside)
   // goes on the profile. Once a run — and a run finished signed out counts
   // when they sign in from the end screen (its sign-in prompt).
-  const counted = onDefaults(config, { maxRounds: classRounds(data.year, data.board), defaultRounds: DEFAULT_ROUNDS, defaultExpanded: EXPANDED_YEARS.includes(data.year) });
+  const counted = !redraft && onDefaults(config, { maxRounds: classRounds(data.year, data.board), defaultRounds: DEFAULT_ROUNDS, defaultExpanded: EXPANDED_YEARS.includes(data.year) });
   const profiled = useRef(false);
   useEffect(() => {
     if (!finished || !uid || profiled.current) return;
@@ -493,7 +532,7 @@ function LiveSim({ data: communityData, config, myGrades, isMobile, contentRef, 
   }, [finished, uid]); // eslint-disable-line react-hooks/exhaustive-deps
   // Badges (components/draftSim/useSimBadges.js): popped up as they're
   // earned, saved at the end. My Board's ranks don't count for the value ones.
-  const badges = useSimBadges({ sim: s.sim, year: data.year, valueBoard: config.board !== "mine", uid, admin: profile?.role === "admin", off: mock, double: !!config.carry });
+  const badges = useSimBadges({ sim: s.sim, year: data.year, valueBoard: config.board !== "mine", uid, admin: profile?.role === "admin", off: mock || redraft, double: !!config.carry });
   const toasts = <BadgeToasts queue={badges.queue} onDone={badges.dismiss} isMobile={isMobile} />;
   // Mobile, mid-draft: one anchored screen pinned to the viewport — the
   // stage never moves, and only the console's tab scrolls (SimBroadcast).
@@ -672,7 +711,8 @@ const chipStyle = (on) => ({
 // initialBoard / signedIn / myCount: the board choice coming back from a
 // sim, whether there's a user to have grades, and how many of this class
 // they've graded (null while it loads).
-function Setup({ setup, year, rounds: maxRoundsForYear, onYear, initialTeams, initialBoard, initialOpts, signedIn, myCount, isMobile, names, onStart, starting, onTeams }) {
+function Setup({ admin = false, setup, year, rounds: maxRoundsForYear, onYear, initialTeams, initialBoard, initialOpts, signedIn, myCount, isMobile, names, onStart, starting, onTeams }) {
+  const navigate = useNavigate();
   const [teams, setTeams] = useState(() => initialTeams.filter((t) => NFL_TEAMS[t]));
   // "sim" or "mock" (Mock Draft: the same sim with no pause between picks,
   // all 32 by default, exports as a mock draft post). Switching to Mock
@@ -698,7 +738,16 @@ function Setup({ setup, year, rounds: maxRoundsForYear, onYear, initialTeams, in
   const rounds = maxRoundsForYear ? Math.min(chosenRounds, maxRoundsForYear) : chosenRounds;
   const [speed, setSpeed] = useState(DEFAULT_SPEED);
   const [chatter, setChatter] = useState(DEFAULT_CHATTER);
-  const [board, setBoard] = useState(() => (initialBoard === "mine" && signedIn ? "mine" : "community"));
+  const redraft = isRedraft(year);
+  // A re-draft: the We-Draft.com Board (2026 only) or Hindsight; no My Board.
+  // A class we graded (2026): We-Draft Board and Fun. Older ones: Fun and
+  // Hindsight (not 2026 — one season's too soon).
+  const graded = WEDRAFT_BOARD_YEARS.includes(String(year));
+  const boards = redraft
+    ? [...(graded ? [["community", "We-Draft Board"]] : []), ["fun", "Fun"], ...(graded ? [] : [["hindsight", "Hindsight"]])]
+    : [["community", "Community"]];
+  const [board, setBoard] = useState(() => (initialBoard === "mine" && signedIn && !redraft ? "mine"
+    : boards.some(([k]) => k === initialBoard) ? initialBoard : defaultBoard(year)));
   const [orderMode, setOrderMode] = useState(() => (ORDER_MODES.some((m) => m.key === initialOpts?.orderMode) ? initialOpts.orderMode : "real"));
   // Custom: who holds each team's picks, every team listed so a swap stays
   // a one-for-one trade of places (Settings' map only if it's this year's teams).
@@ -711,7 +760,7 @@ function Setup({ setup, year, rounds: maxRoundsForYear, onYear, initialTeams, in
   const [variance, setVariance] = useState(() => (VARIANCE[initialOpts?.variance] ? initialOpts.variance : DEFAULT_VARIANCE));
   // 2027 + 2028: this class, then the next one carried over from it
   // (only from a class that has a next one — the first).
-  const doubleYear = SIM_YEARS[SIM_YEARS.indexOf(year) + 1] || null;
+  const doubleYear = SIM_YEARS.includes(year) ? SIM_YEARS[SIM_YEARS.indexOf(year) + 1] || null : null;
   const [double, setDouble] = useState(() => !!initialOpts?.double && !!doubleYear);
   const pickDouble = () => {
     if (doubleYear) setDouble(true);
@@ -730,7 +779,13 @@ function Setup({ setup, year, rounds: maxRoundsForYear, onYear, initialTeams, in
     chatter !== DEFAULT_CHATTER && `Chatter: ${CHATTER.find((c) => c.key === chatter)?.label}`,
   ].filter(Boolean);
   const [moreOpen, setMoreOpen] = useState(() => changed.length > 0);
-  const boardNote = !signedIn
+  const boardNote = redraft
+    ? board === "fun"
+      ? `Where each player really went in ${year}, mixed with how he's played since${graded ? " (this season so far)" : " (his NFL career)"}. Every team still reads the board its own way and drafts for its needs.`
+      : board === "hindsight"
+        ? `The ${year} class ranked by NFL career value alone: approximate value, Pro Bowls and All-Pros. Every team still reads the board its own way and drafts for its needs.`
+        : `Every team drafts off the We-Draft.com community grades from before the ${year} draft.`
+    : !signedIn
     ? "Sign in to draft off your own grades."
     : board === "community"
       ? "Every team drafts off the We-Draft community grades."
@@ -746,22 +801,34 @@ function Setup({ setup, year, rounds: maxRoundsForYear, onYear, initialTeams, in
       <SimHero isMobile={isMobile} year={year} />
 
       <div style={{ background: "#0e1626", border: "1px solid #1f2b42", borderRadius: 16, padding: isMobile ? 14 : 22, marginTop: 14 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 18 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8, marginBottom: 18 }}>
           {MODES.map((m) => (
-            <button key={m.key} onClick={() => switchMode(m.key)} aria-pressed={mode === m.key} style={{
+            <button key={m.key} onClick={() => (m.key === "dynasty" ? navigate(`/draftsim/dynasty/${DYNASTY_YEARS.includes(String(year)) ? year : DYNASTY_YEARS[0]}`) : switchMode(m.key))} aria-pressed={mode === m.key} style={{
               textAlign: "left", borderRadius: 12, padding: isMobile ? "10px 12px" : "12px 16px", cursor: "pointer", fontFamily: FONT,
               border: `2px solid ${mode === m.key ? GOLD : "#1f2b42"}`, background: mode === m.key ? "rgba(246,162,29,0.12)" : "#0b1322",
             }}>
-              <span style={{ display: "block", color: mode === m.key ? GOLD : "#fff", fontWeight: 900, fontSize: isMobile ? 14 : 16, letterSpacing: "0.08em", textTransform: "uppercase" }}>{m.label}</span>
-              <span style={{ display: "block", color: "#8b9bb4", fontSize: 12, fontFamily: BODY, marginTop: 2 }}>{m.note}</span>
+              <span style={{ display: "block", color: mode === m.key ? GOLD : "#fff", fontWeight: 900, fontSize: isMobile ? 12 : 16, letterSpacing: "0.08em", textTransform: "uppercase" }}>{m.label}</span>
+              <span style={{ display: "block", color: "#8b9bb4", fontSize: isMobile ? 10.5 : 12, fontFamily: BODY, marginTop: 2 }}>{m.note}</span>
             </button>
           ))}
         </div>
         <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 16 }}>
           <Field label="Draft" note={maxRoundsForYear && maxRoundsForYear < 7 ? `The ${year} sim drafts ${maxRoundsForYear} round${maxRoundsForYear === 1 ? "" : "s"}.` : null}>
-            {SIM_YEARS.map((y) => <button key={y} onClick={() => (y === year ? setDouble(false) : onYear(y))} aria-pressed={year === y && !double} style={chipStyle(year === y && !double)}>{y}</button>)}
+            {SIM_YEARS.map((y) => <button key={y} onClick={() => (y === year ? setDouble(false) : onYear(y))} aria-pressed={year === y && !double && !redraft} style={chipStyle(year === y && !double)}>{y}</button>)}
             {SIM_YEARS.length > 1 && (
               <button onClick={pickDouble} aria-pressed={double} title="Draft 2027, then roll straight into 2028" style={chipStyle(double)}>{SIM_YEARS[0]} + {SIM_YEARS[1]}</button>
+            )}
+            {/* Past drafts to re-draft (REDRAFT_YEARS, newest first) — admins only for now. */}
+            {admin && <button onClick={() => !redraft && onYear(REDRAFT_YEARS[0])} aria-pressed={redraft} title="Draft a past draft again" style={chipStyle(redraft)}>Re-Draft</button>}
+            {redraft && (
+              <div style={{ flexBasis: "100%", display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+                {REDRAFT_YEARS.map((y) => <button key={y} onClick={() => y !== year && onYear(y)} aria-pressed={year === y} style={{ ...chipStyle(year === y), padding: "5px 11px", fontSize: 11 }}>{y}</button>)}
+              </div>
+            )}
+            {redraft && (
+              <div style={{ flexBasis: "100%", color: "#9fb0c8", fontSize: 12, fontFamily: BODY, lineHeight: 1.5, marginTop: 6 }}>
+                Re-draft {year}: the real order with comp picks dropped (32 a round), no trades, each team&apos;s needs as they stood before the draft, and the desk checks every pick against what really happened. Admin preview: nothing is saved or counted.
+              </div>
             )}
             {double && (
               <div style={{ flexBasis: "100%", color: "#9fb0c8", fontSize: 12, fontFamily: BODY, lineHeight: 1.5, marginTop: 6 }}>
@@ -775,6 +842,12 @@ function Setup({ setup, year, rounds: maxRoundsForYear, onYear, initialTeams, in
               return <button key={r} onClick={() => !off && setRounds(r)} disabled={off} aria-pressed={rounds === r} style={{ ...chipStyle(rounds === r), opacity: off ? 0.35 : 1, cursor: off ? "not-allowed" : "pointer" }}>{r}</button>;
             })}
           </Field>
+          {/* A re-draft's board choice sits up top (everything else stays in More Options). */}
+          {redraft && (
+            <Field label="Board" note={boardNote}>
+              {boards.map(([k, label]) => <button key={k} onClick={() => setBoard(k)} aria-pressed={board === k} style={chipStyle(board === k)}>{label}</button>)}
+            </Field>
+          )}
           {mode === "sim" && (
             <Field label="Speed" note={SPEEDS[speed]?.note}>
               {Object.entries(SPEEDS).map(([k, v]) => <button key={k} onClick={() => setSpeed(k)} aria-pressed={speed === k} style={chipStyle(speed === k)}>{v.label}</button>)}
@@ -828,7 +901,7 @@ function Setup({ setup, year, rounds: maxRoundsForYear, onYear, initialTeams, in
             </div>
 
             {/* Mock Draft mode: no CPU trades — the user makes every deal. */}
-            {mode === "sim" && (
+            {mode === "sim" && !redraft && (
               <div style={{ marginTop: 18 }}>
                 <Field label="CPU Trades" note={CPU_TRADES[cpuTrades].note}>
                   {Object.entries(CPU_TRADES).filter(([, v]) => !v.hidden).map(([k, v]) => <button key={k} onClick={() => setCpuTrades(k)} aria-pressed={cpuTrades === k} style={chipStyle(cpuTrades === k)}>{v.label}</button>)}
@@ -836,19 +909,21 @@ function Setup({ setup, year, rounds: maxRoundsForYear, onYear, initialTeams, in
               </div>
             )}
 
-            <div style={{ marginTop: 18 }}>
+            {(!redraft || graded) && <div style={{ marginTop: 18 }}>
               <Field label="Player Pool" note={expanded ? "We-Draft.com's expanded board — more of the class than the main board." : "We-Draft.com's class board."}>
                 <button onClick={() => setExpanded(false)} aria-pressed={!expanded} style={chipStyle(!expanded)}>Site Board</button>
                 <button onClick={() => setExpanded(true)} aria-pressed={expanded} style={chipStyle(expanded)}>Expanded Board</button>
               </Field>
-            </div>
+            </div>}
 
-            <div style={{ marginTop: 18 }}>
-              <Field label="Board" note={boardNote}>
-                <button onClick={() => setBoard("community")} aria-pressed={board === "community"} style={chipStyle(board === "community")}>Community</button>
-                <button onClick={() => signedIn && setBoard("mine")} disabled={!signedIn} aria-pressed={board === "mine"} style={{ ...chipStyle(board === "mine"), opacity: signedIn ? 1 : 0.35, cursor: signedIn ? "pointer" : "not-allowed" }}>My Board</button>
-              </Field>
-            </div>
+            {!redraft && (
+              <div style={{ marginTop: 18 }}>
+                <Field label="Board" note={boardNote}>
+                  {boards.map(([k, label]) => <button key={k} onClick={() => setBoard(k)} aria-pressed={board === k} style={chipStyle(board === k)}>{label}</button>)}
+                  <button onClick={() => signedIn && setBoard("mine")} disabled={!signedIn} aria-pressed={board === "mine"} style={{ ...chipStyle(board === "mine"), opacity: signedIn ? 1 : 0.35, cursor: signedIn ? "pointer" : "not-allowed" }}>My Board</button>
+                </Field>
+              </div>
+            )}
 
             {/* Both modes: CPU teams draft off their own boards in each. */}
             <div style={{ marginTop: 18 }}>
@@ -865,7 +940,7 @@ function Setup({ setup, year, rounds: maxRoundsForYear, onYear, initialTeams, in
           </div>
         )}
 
-        <button onClick={() => onStart({ mode, teams, baseRounds: rounds, speed, chatter, board, expanded, orderMode, orderMap: orderMode === "custom" ? orderMap : null, cpuTrades: mode === "mock" ? "off" : cpuTrades, variance, double: double && !!doubleYear })} disabled={starting} style={{
+        <button onClick={() => onStart({ mode, teams, baseRounds: rounds, speed, chatter, board, expanded, orderMode, orderMap: orderMode === "custom" ? orderMap : null, cpuTrades: mode === "mock" || redraft ? "off" : cpuTrades, variance, double: double && !!doubleYear })} disabled={starting} style={{
           marginTop: 20, width: "100%", border: "none", borderRadius: 14, padding: isMobile ? "15px 18px" : "18px 22px", cursor: starting ? "wait" : "pointer",
           background: `linear-gradient(90deg, ${GOLD}, #ffcc66)`, color: "#fff", fontFamily: FONT, fontWeight: 900, fontSize: isMobile ? 16 : 20, letterSpacing: "0.08em",
           textTransform: "uppercase", boxShadow: "0 10px 30px rgba(246,162,29,0.25)",
@@ -886,6 +961,8 @@ function Setup({ setup, year, rounds: maxRoundsForYear, onYear, initialTeams, in
 const MODES = [
   { key: "sim", label: "Draft Sim", note: "The broadcast: on the clock, the desk, trades." },
   { key: "mock", label: "Mock Draft", note: "The sim with no pauses between picks — then post it as a mock." },
+  // Its own page (/draftsim/dynasty/{year} — pages/DynastySim.jsx).
+  { key: "dynasty", label: "Dynasty", note: "Fantasy rookie draft: QB, RB, WR, TE." },
 ];
 
 const ORDER_MODES = [

@@ -383,9 +383,9 @@ const PLAYER_GROUPS = [
 ];
 
 const SECTIONS = [
-  // Go: the quick jobs on a phone (components/AdminGo.jsx) — mobile only,
-  // and what /admin opens to there.
-  { key: "go", label: "Go", icon: "⚡", ready: true, mobileOnly: true },
+  // Go: the quick jobs (components/AdminGo.jsx) — made for a phone, and
+  // what /admin opens to there; on desktop too since 2026-11-24 (user).
+  { key: "go", label: "Go", icon: "⚡", ready: true },
   { key: "players", label: "Players", icon: "🏈", ready: true },
   { key: "videos", label: "Videos", icon: "🎬", ready: true },
   { key: "content", label: "Content", icon: "📝", ready: true },

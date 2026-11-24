@@ -1711,7 +1711,7 @@ function weDraftTrade(e, ctx) {
 // Kenneth's take).
 export const SHOCK_SPOTS = { 1: 10, 2: 25, 3: 25 };
 export function shockOf(e) {
-  const spots = e?.type === "pick" && SHOCK_SPOTS[e.pick.round];
+  const spots = e?.type === "pick" && !e.locked && SHOCK_SPOTS[e.pick.round];
   if (!spots) return null;
   if (e.value >= spots) return "shockSteal";
   if (-e.value >= spots) return "shockReach";
@@ -1784,7 +1784,7 @@ function isaacPick(e, ctx) {
   }
   let cat;
   const need = e.need?.label;
-  if (e.pick.overall === 1) cat = e.prospect.rank > 3 ? "firstSurprise" : "firstOverall";
+  if (e.pick.overall === 1) cat = e.prospect.rank > 3 && !e.locked ? "firstSurprise" : "firstOverall";
   else if (need === "Aging Talent" && ctx.rand() < 0.7) cat = "heir";
   else if (need === "Crowded Room" && ctx.rand() < 0.7) cat = "crowded";
   else if (e.prospect.Position === "QB" && e.pick.round <= 2) cat = "qb";
@@ -1940,7 +1940,7 @@ function guarded(label, fn, fallback = null) {
 
 function choosePersonality(e, ctx, skip = new Set()) {
   const memory = ctx.memory || (ctx.memory = {});
-  const pool = LIVE_ANALYSTS.filter((a) => a.weight && !skip.has(a.id))
+  const pool = LIVE_ANALYSTS.filter((a) => a.weight && !skip.has(a.id) && (!ctx.only || ctx.only.includes(a.id)))
     .map((a) => ({ a, w: (Number(guarded(`${a.id} weight`, () => a.weight(e, ctx), 0)) || 0) * (memory.lastVoice === a.id ? (a.noRepeat ? 0 : 0.35) : 1) }))
     .filter((x) => x.w > 0);
   const total = pool.reduce((t, x) => t + x.w, 0);
@@ -1960,7 +1960,9 @@ export function reactTo(event, ctx) {
   if (round !== memory.round) { memory.round = round; memory.roundLines = {}; }
   const house = ANALYSTS[0];
   const hr = guarded(`${house.id} ${event.type}`, () => house.react(event, ctx));
-  if (hr?.text) posts.push({ analyst: house, ...hr, delay: house.delay });
+  // A re-draft: how the pick compares to the real draft, under the announcement.
+  const april = event.type === "pick" ? guarded("redraft line", () => redraftLine(event, ctx)) : null;
+  if (hr?.text) posts.push({ analyst: house, ...hr, ...(april ? { lines: [...(hr.lines || []), april] } : {}), delay: house.delay });
   if (guarded("chimesIn", () => chimesIn(event, ctx), false)) {
     const tried = new Set();
     for (let k = 0; k < LIVE_ANALYSTS.length; k++) {
@@ -1978,12 +1980,64 @@ export function reactTo(event, ctx) {
     }
   }
   guarded("record pick", () => recordPick(event, ctx));
-  return posts;
+  // The Dynasty Draft Sim's teams are "Team 4" — one team, no "the".
+  return ctx.dynasty ? posts.map((p) => ({ ...p, text: teamGrammar(p.text), ...(p.lines ? { lines: p.lines.map(teamGrammar) } : {}) })) : posts;
+}
+
+// Lines written for NFL nicknames ("the Jets are…") said of "Team 4": no
+// "the", a possessive with its s, and singular verbs.
+const TEAM_VERBS = { are: "is", were: "was", have: "has", "don't": "doesn't", do: "does", go: "goes" };
+const TEAM_S = ["keep", "get", "take", "need", "believe", "love", "land", "grab", "add", "make", "stay", "find", "want", "say", "know", "see", "think", "pick", "draft", "nab", "snag", "steal", "trade", "build", "load", "double", "stack", "hope", "bet", "swing", "reach", "jump"];
+export function teamGrammar(text) {
+  if (typeof text !== "string") return text;
+  return text
+    .replace(/\b[Tt]he (Team \d+)/g, "$1")
+    .replace(/(Team \d+)'(?!s)/g, "$1's")
+    .replace(/(Team \d+) (are|were|have|don't|do|go)\b/g, (_, t, v) => `${t} ${TEAM_VERBS[v]}`)
+    .replace(/(Team \d+) ([a-z]+)\b/g, (m, t, v) => (TEAM_S.includes(v) ? `${t} ${v}s` : m));
+}
+
+// Where a community grade (1 Early First … 10 UDFA) says a player goes:
+// the middle of that round's 32 picks.
+const gradePick = (avg) => {
+  if (avg == null) return null;
+  const g = Math.round(avg);
+  return g <= 3 ? [6, 16, 27][g - 1] : g >= 10 ? 260 : (g - 3) * 32 + 16;
+};
+const GRADE_WORDS = { 1: "early first-round", 2: "middle first-round", 3: "late first-round", 4: "second-round", 5: "third-round", 6: "fourth-round", 7: "fifth-round", 8: "sixth-round", 9: "seventh-round", 10: "undrafted" };
+
+// A re-draft pick against the real draft (ctx.actual — data.js, the
+// re-draft file's { [slug]: { pick, round, team } }), with the community
+// grade when it takes a side. null outside a re-draft. Real pick numbers
+// count comp picks; the sim's don't.
+export function redraftLine(e, ctx) {
+  if (!ctx.actual || !e.prospect) return null;
+  const p = e.prospect, real = ctx.actual[p.Slug];
+  const g = p.avg != null ? GRADE_WORDS[Math.round(p.avg)] : null;
+  if (!real) return `In April: undrafted.${g ? ` The community had a ${g} grade on him.` : ""}`;
+  const d = real.pick - e.pick.overall, team = ctx.nickname(real.team);
+  if (real.team === e.team && Math.abs(d) <= 3) return d === 0 ? `In April: same pick, same team.` : `In April: same team, No. ${real.pick}.`;
+  const gp = gradePick(p.avg);
+  if (d >= 15) return `In April: No. ${real.pick} to the ${team}, ${d} picks later.${gp != null && gp < real.pick - 10 ? ` The community's ${g} grade said he went too late.` : ""}`;
+  if (d <= -15) return `In April: No. ${real.pick} to the ${team}, ${-d} picks earlier.${gp != null && gp > real.pick + 10 ? ` The community had him as ${/^[aeiu]/.test(g) ? "an" : "a"} ${g} pick.` : ""}`;
+  return `In April: No. ${real.pick} to the ${team}.`;
 }
 
 // The desk's opening posts when the sim starts.
 export function openingPosts({ year, userTeams, ctx }) {
   const mine = userTeams.map((t) => ctx.nickname(t)).join(", ");
+  if (ctx.dynasty) {
+    return [
+      { analyst: ANALYSTS[0], text: `The ${year} Dynasty Draft is LIVE.`, lines: ["Quarterbacks, running backs, receivers and tight ends only. Every other team reads the board its own way.", ...(mine ? [`You're on the clock as ${mine}.`] : [])], delay: 0 },
+      { analyst: byId("isaac"), text: "Rookie drafts win dynasty leagues. Don't fall in love with a name.", delay: 900 },
+    ];
+  }
+  if (ctx.actual) {
+    return [
+      { analyst: ANALYSTS[0], text: `The ${year} Re-Draft is LIVE.`, lines: [ctx.todaysNeeds ? "Every team drafts for what it needs today. No comp picks." : "Every team drafts with the roster it had going in. No comp picks: 32 a round.", "Each pick gets checked against what really happened in April.", ...(mine ? [`You're running the war room for: ${mine}.`] : [])], delay: 0 },
+      { analyst: byId("isaac"), text: mine ? `${mine} fans, here's your do-over. Don't waste it.` : "Same draft, no hindsight allowed. Let's see who fixes their mistakes.", delay: 900 },
+    ];
+  }
   return [
     { analyst: ANALYSTS[0], text: `The ${year} NFL Draft Sim is LIVE.`, lines: ["Every CPU pick weighs the We-Draft.com board, positional value and each staff's own draft history.", ...(mine ? [`You're running the war room for: ${mine}.`] : [])], delay: 0 },
     { analyst: byId("isaac"), text: mine ? `Alright ${mine} fans — the clock's yours when it's your turn. Good luck.` : "Pull up a chair. Let's see who's got a plan and who's winging it.", delay: 900 },
@@ -2010,7 +2064,8 @@ function davinSuggestionFor(team, ctx) {
 // Isaac's grade comment for a user team's finished draft (results
 // screen) → { analyst, text }, or null when they made no picks.
 export function gradeTake(haul, ctx) {
-  return guarded("grade take", () => gradeTakeFor(haul, ctx));
+  const take = guarded("grade take", () => gradeTakeFor(haul, ctx));
+  return take && ctx.dynasty ? { ...take, text: teamGrammar(take.text) } : take;
 }
 // The why, most important first: an off-the-board pick, a second QB,
 // good value with the needs left open, a major need with no pick, one
