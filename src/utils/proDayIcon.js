@@ -65,8 +65,8 @@ export const GENERIC_PRO_DAY = { logo: "/logos/nfl-shield.png", color1: "#013369
 // The Combine logo's outline, scaled into the 1000 box: the dome (narrower
 // than the band), the band at full width, then the point — straight-ish
 // sides bowing out a little, like the Combine's.
-const SILHOUETTE = "M87 385 L128 385 L128 325 Q500 145 872 325 L872 385 L913 385 L913 633 L742 652 Q669 791 500 862 Q331 791 258 652 L87 633 Z";
-const BAND = { ruleTop: 402, top: 420, bottom: 603, ruleBottom: 620 };
+export const SILHOUETTE = "M87 385 L128 385 L128 325 Q500 145 872 325 L872 385 L913 385 L913 633 L742 652 Q669 791 500 862 Q331 791 258 652 L87 633 Z";
+export const BAND = { ruleTop: 402, top: 420, bottom: 603, ruleBottom: 620 };
 
 const hex = (c) => {
   const s = String(c || "").trim();

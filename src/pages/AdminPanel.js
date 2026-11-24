@@ -60,6 +60,7 @@ import AdminNflTargets from "../components/AdminNflTargets";
 import { EARLY_LOOK } from "../utils/earlyLook";
 import AdminCombine from "../components/AdminCombine";
 import AdminSideGraphics from "../components/AdminSideGraphics";
+import AdminDraftBreakdowns from "../components/AdminDraftBreakdowns";
 import AdminProDayIcons from "../components/AdminProDayIcons";
 import AdminEvents from "../components/AdminEvents";
 import AdminYouTubeGraphics from "../components/AdminYouTubeGraphics";
@@ -452,6 +453,9 @@ const MOVED_SECTIONS = {
   sidegraphics: ["videos", "sidegraphics"],
   // The thumbnail editor (King Cold Sports' edit sign-in returns here).
   thumbnail: ["videos", "thumbnail"],
+  breakdowns: ["videos", "breakdowns"],
+  portalbreakdowns: ["videos", "portalbreakdowns"],
+  reactions: ["videos", "reactions"],
   ...Object.fromEntries(CONTENT_SECTION_TABS.map((t) => [t.key, ["content", t.key]])),
   // A WX page's own key (?section=risers) opens Content → WX on it.
   ...Object.fromEntries(WX_TABS.map((t) => [t.key, ["content", t.key]])),
@@ -8145,6 +8149,12 @@ const VIDEO_GROUPS = [
       { key: "thumbanalytics", label: "Thumb Analytics" },
       { key: "outline", label: "Outline" },
       { key: "sidegraphics", label: "Side Graphics" },
+      // The player breakdown videos' frames (components/AdminDraftBreakdowns.jsx).
+      { key: "breakdowns", label: "Draft Breakdowns" },
+      // The same generator for transfer portal breakdowns (user, 2026-11-24).
+      { key: "portalbreakdowns", label: "Portal Breakdowns" },
+      // After the draft: Pick Grade in the verdict's place (user, 2026-11-24).
+      { key: "reactions", label: "Draft Reactions" },
     ],
   },
 ];
@@ -8652,6 +8662,9 @@ function VideosSection({ initialTab }) {
     {videoTab === "thumbnail" && <AdminYouTubeGraphics key="thumbnail" kind="thumbnail" />}
     {videoTab === "outline" && <AdminYouTubeGraphics key="outline" kind="outline" />}
     {videoTab === "sidegraphics" && <AdminSideGraphics />}
+    {videoTab === "breakdowns" && <AdminDraftBreakdowns key="draft" kind="draft" />}
+    {videoTab === "portalbreakdowns" && <AdminDraftBreakdowns key="portal" kind="portal" />}
+    {videoTab === "reactions" && <AdminDraftBreakdowns key="reaction" kind="reaction" />}
     {videoTab === "thumbanalytics" && <AdminThumbAnalytics />}
     {videoTab === "manage" && (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 420px", gap: "18px", alignItems: "start" }}>

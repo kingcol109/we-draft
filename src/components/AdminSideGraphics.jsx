@@ -188,7 +188,7 @@ const gameLabel = (g) => `${g.post ? "Postseason" : g.week ? `Wk ${g.week}` : g.
 // named ones in STAT_NAMES order, then the rest; zeros (and games played)
 // last. ranks: CFBD's seasonRanks for that season ({ [category]: { [stat]:
 // "12" | "T-12" } }) — a season's only. game: one of espnGamelog's.
-function statOptions(espn, year, ranks = null, game = null) {
+export function statOptions(espn, year, ranks = null, game = null) {
   const order = Object.keys(STAT_NAMES);
   const rank = (o) => (order.includes(o.key) ? order.indexOf(o.key) : order.length);
   const lines = game ? game.stats : Object.fromEntries(Object.entries(espn?.cats || {}).map(([cat, c]) => [cat, c.seasons[year]?.stats]));
@@ -207,7 +207,7 @@ function statOptions(espn, year, ranks = null, game = null) {
   return all.sort((a, b) => a.zero - b.zero || rank(a) - rank(b) || a.key.localeCompare(b.key)).map(({ zero, ...o }) => o);
 }
 // His position's four, then the first others he has, up to STATS.
-function defaultStats(options, pos) {
+export function defaultStats(options, pos) {
   const picks = (POS_STATS[posGroup(pos)] || []).map((k) => options.find((o) => o.key === k)).filter(Boolean);
   options.forEach((o) => { if (picks.length < STATS && !picks.includes(o)) picks.push(o); });
   return picks.slice(0, STATS).map((o) => ({ ...o }));
@@ -313,7 +313,7 @@ const linkBtn = { border: "none", background: "none", color: BLUE, fontWeight: 9
 // An image the canvas can draw (and still export): CORS-enabled, imgur's
 // links pointed straight at its CDN. null when it won't load.
 const imageCache = {};
-function loadImage(url) {
+export function loadImage(url) {
   const src = sanitizeImgur(url || "") || url;
   if (!src) return Promise.resolve(null);
   if (!imageCache[src]) {
@@ -329,7 +329,7 @@ function loadImage(url) {
 }
 
 // Is Eras Bold ITC on this computer? (A missing font measures like its fallback.)
-function hasEras() {
+export function hasEras() {
   const c = document.createElement("canvas").getContext("2d");
   const t = "SUBSCRIBE FOR MORE 0123";
   c.font = "bold 40px monospace";
