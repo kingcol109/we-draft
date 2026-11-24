@@ -274,6 +274,7 @@ function ProductsTab() {
                   <b>{r.title}</b>
                   <div style={{ color: "#99a", fontSize: 11 }}>{r.id ? <a href={`/shop/${r.id}`} target="_blank" rel="noopener noreferrer">/shop/{r.id}</a> : "not in store"} · Printify {r.printifyProductId}</div>
                   {r.missing && <div style={{ color: "#b3261e", fontSize: 11, fontWeight: 900 }}>Deleted in Printify — not shown</div>}
+                  {r.imported && !r.missing && <DescriptionEditor row={r} busy={busy} run={run} />}
                 </td>
                 <td style={td}>{r.missing ? "—" : `${r.availableCount}/${r.variantCount} available`}</td>
                 <td style={td}>{r.priceRange ? (r.priceRange[0] === r.priceRange[1] ? money(r.priceRange[0]) : `${money(r.priceRange[0])}–${money(r.priceRange[1])}`) : "—"}</td>
@@ -293,6 +294,70 @@ function ProductsTab() {
         </table>
       </div>
       <div style={{ fontFamily: BODY, fontSize: 12, color: "#667", marginTop: 8 }}>Order: lower numbers first; featured products always lead; blank = alphabetical.</div>
+    </div>
+  );
+}
+
+// Our own description, shown above Printify's (which sits under "More
+// product information" on the product page).
+function DescriptionEditor({ row, busy, run }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState(row.customDescription || "");
+  useEffect(() => { setText(row.customDescription || ""); }, [row.customDescription]);
+  const saved = row.customDescription || "";
+  const dirty = text.trim() !== saved;
+  if (!open) {
+    return (
+      <div style={{ marginTop: 6, fontSize: 12, display: "flex", gap: 8, alignItems: "baseline", minWidth: 0 }}>
+        <button onClick={() => setOpen(true)} style={{ ...smallBtn(), padding: "3px 8px", fontSize: 10 }}>{saved ? "EDIT DESCRIPTION" : "+ DESCRIPTION"}</button>
+        {saved && <span style={{ color: "#667", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 320 }}>{saved.split(/\r?\n/)[0]}</span>}
+      </div>
+    );
+  }
+  return (
+    <div style={{ marginTop: 8, minWidth: 300 }}>
+      <textarea value={text} onChange={(e) => setText(e.target.value)} rows={6} maxLength={5000}
+        placeholder="Your description. Shown first on the product page; Printify's text moves under &quot;More product information&quot;. Blank lines start new paragraphs."
+        style={{ width: "100%", boxSizing: "border-box", border: "2px solid #cfd8e3", borderRadius: 6, padding: 8, fontFamily: BODY, fontSize: 13, lineHeight: 1.5, resize: "vertical" }} />
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6 }}>
+        <button disabled={!!busy || !dirty} onClick={async () => { await run(`d${row.id}`, "updateProduct", { id: row.id, customDescription: text }); }} style={{ ...smallBtn("primary"), opacity: dirty ? 1 : 0.5 }}>SAVE</button>
+        <button disabled={!!busy} onClick={() => { setText(saved); setOpen(false); }} style={smallBtn()}>{dirty ? "CANCEL" : "CLOSE"}</button>
+        <span style={{ marginLeft: "auto", fontSize: 11, color: "#99a" }}>{text.length}/5000</span>
+      </div>
+    </div>
+  );
+}
+
+// Lulu (print products): keys set → sign-in → an authenticated read, for
+// the sandbox and live environments.
+function LuluCheck() {
+  const [res, setRes] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const check = async () => {
+    setBusy(true); setErr(null);
+    try { setRes((await shopAdmin("luluCheck")).lulu); } catch (e) { setErr(e.message); } finally { setBusy(false); }
+  };
+  const mark = (ok) => <span style={{ color: ok ? "#1e7d32" : "#b3261e", fontWeight: 900 }}>{ok ? "✓" : "✗"}</span>;
+  return (
+    <div style={{ marginTop: 16, paddingTop: 14, borderTop: "2px solid #eef1f5", fontFamily: BODY, fontSize: 13 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+        <b style={{ flex: 1 }}>Lulu (print products)</b>
+        <button disabled={busy} onClick={check} style={smallBtn("primary")}>{busy ? "CHECKING…" : "TEST LULU CONNECTION"}</button>
+      </div>
+      {err && <Msg msg={{ ok: false, text: err }} />}
+      {res && ["sandbox", "live"].map((m) => {
+        const r = res[m];
+        return (
+          <div key={m} style={{ display: "flex", gap: 14, flexWrap: "wrap", padding: "7px 0", borderBottom: "1px solid #eef1f5" }}>
+            <b style={{ width: 70, textTransform: "uppercase" }}>{m}</b>
+            <span>{mark(r.keysSet)} Keys set</span>
+            <span>{mark(r.auth)} Sign-in</span>
+            <span>{mark(r.api)} API read{r.api && r.printJobs != null ? ` (${r.printJobs} print job${r.printJobs === 1 ? "" : "s"})` : ""}</span>
+            {r.error && <span style={{ color: "#b3261e", flexBasis: "100%" }}>{r.error}</span>}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -340,6 +405,7 @@ function SetupTab() {
         </button>
         <button onClick={load} style={smallBtn()}>RECHECK</button>
       </div>
+      <LuluCheck />
       <div style={{ marginTop: 14, padding: "10px 12px", borderRadius: 8, background: "#fff7e8", fontFamily: BODY, fontSize: 12, color: "#6b4a00", lineHeight: 1.5 }}>
         In Printify, set this store&apos;s <b>Order approval</b> to <b>Manual</b>. New Printify stores auto-approve orders after 24 hours, which would send orders to production (and charge the store) without anyone pressing “Send to production”.
       </div>

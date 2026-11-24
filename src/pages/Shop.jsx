@@ -241,10 +241,22 @@ function ProductView({ id, isMobile }) {
             Added to your cart. <Link to="/shop/cart" style={{ color: BLUE }}>View cart →</Link>
           </div>
         )}
-        {product.description && (
-          <div style={{ marginTop: 22, paddingTop: 18, borderTop: "1px solid #eef1f5", fontFamily: BODY, fontSize: 14, color: "#333", lineHeight: 1.6, whiteSpace: "pre-line" }}>
-            {product.description}
+        {product.about && (
+          <div style={{ marginTop: 22, paddingTop: 18, borderTop: "1px solid #eef1f5", fontFamily: BODY, fontSize: 15, color: "#222", lineHeight: 1.65, whiteSpace: "pre-line" }}>
+            {product.about}
           </div>
+        )}
+        {product.description && (
+          <details className="shop-more" style={{ marginTop: product.about ? 16 : 22, borderTop: "1px solid #eef1f5", borderBottom: "1px solid #eef1f5" }}>
+            <style>{`.shop-more > summary { list-style: none; } .shop-more > summary::-webkit-details-marker { display: none; } .shop-more[open] .shop-more-chev { transform: rotate(180deg); }`}</style>
+            <summary style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "14px 0", cursor: "pointer", fontSize: 13, fontWeight: 900, color: NAVY, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              More product information
+              <span className="shop-more-chev" aria-hidden="true" style={{ transition: "transform .15s", fontSize: 12 }}>▼</span>
+            </summary>
+            <div style={{ paddingBottom: 16, fontFamily: BODY, fontSize: 14, color: "#333", lineHeight: 1.6, whiteSpace: "pre-line" }}>
+              {product.description}
+            </div>
+          </details>
         )}
       </div>
     </div>

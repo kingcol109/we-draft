@@ -11,12 +11,14 @@
 // Firestore: shopProducts/{productId}  — productId is our stable id (a slug
 // chosen when the product was first imported; never renamed after that):
 //   { source: "printify", printifyProductId, title (admin label only),
-//     hidden, featured, sortOrder (number|null), createdAt, updatedAt }
+//     hidden, featured, sortOrder (number|null), customDescription (our
+//     own text; Printify's stays under "More product information"),
+//     createdAt, updatedAt }
 // Product details, variants, prices and images are NOT copied — Printify
 // stays the source of truth.
 //
 // Normalized product:
-//   { id, title, description, featured, sortOrder, images[], options[],
+//   { id, title, about, description, featured, sortOrder, images[], options[],
 //     variants[{ key, title, priceCents, available, optionValueIds[],
 //                fulfillment: { provider: "printify", productId, variantId } }],
 //     priceFromCents, available }
@@ -85,6 +87,7 @@ function normalizePrintifyProduct(p, cfg) {
   return {
     id: cfg.id,
     title: p.title,
+    about: typeof cfg.customDescription === "string" ? cfg.customDescription.trim() : "",
     description: htmlToText(p.description),
     featured: !!cfg.featured,
     sortOrder: Number.isFinite(cfg.sortOrder) ? cfg.sortOrder : null,
@@ -98,7 +101,7 @@ function normalizePrintifyProduct(p, cfg) {
 // What the browser gets: no fulfillment ids, no admin flags.
 function publicProduct(p) {
   return {
-    id: p.id, title: p.title, description: p.description, featured: p.featured,
+    id: p.id, title: p.title, about: p.about, description: p.description, featured: p.featured,
     options: p.options, images: p.images, priceFromCents: p.priceFromCents, available: p.available,
     variants: p.variants.map(({ key, title, priceCents, available, optionValueIds, isDefault }) =>
       ({ key, title, priceCents, available, optionValueIds, isDefault })),
@@ -175,6 +178,7 @@ async function adminProductList(db) {
       imported: !!c,
       hidden: !!c?.hidden, featured: !!c?.featured,
       sortOrder: Number.isFinite(c?.sortOrder) ? c.sortOrder : null,
+      customDescription: c?.customDescription || "",
     };
   });
   // Config docs whose Printify product is gone (deleted in Printify).
@@ -215,7 +219,8 @@ async function importProducts(db, { printifyProductIds = null, hidden = false } 
   return { created };
 }
 
-// Only the display flags are editable — never the Printify mapping.
+// Only the display flags and our own description are editable — never the
+// Printify mapping.
 async function updateProductSettings(db, id, patch) {
   const ref = db.collection(COLLECTION).doc(String(id));
   if (!(await ref.get()).exists) {
@@ -224,6 +229,13 @@ async function updateProductSettings(db, id, patch) {
   const out = { updatedAt: FieldValue.serverTimestamp() };
   if (typeof patch.hidden === "boolean") out.hidden = patch.hidden;
   if (typeof patch.featured === "boolean") out.featured = patch.featured;
+  if (typeof patch.customDescription === "string") {
+    const text = patch.customDescription.replace(/\r\n?/g, "\n").trim();
+    if (text.length > 5000) {
+      const e = new Error("description too long"); e.status = 400; e.publicMessage = "Description must be 5,000 characters or fewer."; throw e;
+    }
+    out.customDescription = text;
+  }
   if (patch.sortOrder === null || patch.sortOrder === "") out.sortOrder = null;
   else if (patch.sortOrder !== undefined) {
     const n = Number(patch.sortOrder);

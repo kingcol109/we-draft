@@ -10,6 +10,7 @@ const { CONTRIBUTIONS } = require("./contributions");
 const fulfillment = require("./fulfillment");
 const catalog = require("./catalog");
 const printify = require("./printify");
+const lulu = require("./lulu");
 const { getStripe } = require("./stripe");
 const { configStatus, SITE_URL, env, userError } = require("./config");
 const { ORDER_TOPICS } = require("./printifyWebhook");
@@ -119,6 +120,7 @@ async function handle(db, action, body) {
     case "updateProduct": await catalog.updateProductSettings(db, body.id, body); return { ok: true };
     case "setup": return setup(db);
     case "registerWebhooks": return registerPrintifyWebhooks();
+    case "luluCheck": return { lulu: await lulu.checkConnection() };
     default: throw userError(400, "Unknown action.");
   }
 }
