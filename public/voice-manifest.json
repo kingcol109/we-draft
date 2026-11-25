@@ -1,0 +1,14 @@
+{
+  "short_name": "WD Voice",
+  "name": "We-Draft.com Voice",
+  "icons": [
+    { "src": "/wd-icon-512.png", "type": "image/png", "sizes": "192x192" },
+    { "src": "/wd-icon-512.png", "type": "image/png", "sizes": "512x512" }
+  ],
+  "start_url": "/voice/admin",
+  "scope": "/voice",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#0b1220",
+  "background_color": "#0b1220"
+}

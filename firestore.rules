@@ -597,6 +597,17 @@ service cloud.firestore {
         && request.resource.data.done == false;
       allow read, update, delete: if isAdmin();
     }
+    // /voice: every question and answer (utils/voice/log.js), for going over
+    // later (scripts/voiceLog.mjs, Review → Log). A signed-in user adds their
+    // own (small, fixed fields); only admins read or delete. Entries carry
+    // expireAt (30 days) for a TTL policy.
+    match /voiceLog/{id} {
+      allow create: if request.auth != null
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.said is string && request.resource.data.said.size() <= 400
+        && request.resource.data.say is string && request.resource.data.say.size() <= 2000;
+      allow read, delete: if isAdmin();
+    }
     // /voice/admin: "admin note …" (the admin's to-review bucket) and
     // "voice note …" (notes for the voice itself). Admin only.
     match /adminNotes/{id} {

@@ -24,8 +24,13 @@ import { useAuth } from "../context/AuthContext";
 import { respond, choose, confirm, more, newState, intentsFor, remember } from "../utils/voice/engine";
 import { applyPronunciations } from "../utils/voice/pronounce";
 import { makeVoiceData } from "../utils/voice/data";
+import { logEntry, deviceOf } from "../utils/voice/log";
 import { listen, speak, hush, canListen, canSpeak, wakeListen, unlockSpeech } from "../utils/voice/speech";
 import { Orb, Stage } from "../components/voice/VoiceStage";
+
+// This page visit, for the conversation log (one sitting reads as one conversation).
+const SESSION = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+const DEVICE = typeof navigator === "undefined" ? "" : deviceOf(navigator.userAgent, navigator.maxTouchPoints || 0);
 
 const C = { bg: "#0b1220", panel: "#121b2e", line: "#24324d", ink: "#eef2f8", soft: "#8f9db5", gold: "#f2b632", blue: "#3b82f6", good: "#4ade80", bad: "#ff8a80" };
 const ALIAS_KEY = "wd.voice.aliases";
@@ -88,6 +93,31 @@ export default function Voice() {
     const t = setTimeout(() => { voiceData.cfbdPeople?.().catch(() => {}); }, 4000);
     return () => clearTimeout(t);
   }, [voiceData]);
+  // An always-on screen: ask the device to keep the screen awake while the page is
+  // showing (Wake Lock — iPadOS 16.4+, Chrome); asked again whenever it comes back.
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !navigator.wakeLock) return undefined;
+    let lock = null;
+    let gone = false;
+    const hold = async () => {
+      if (gone || document.visibilityState !== "visible" || lock) return;
+      try { lock = await navigator.wakeLock.request("screen"); lock.addEventListener("release", () => { lock = null; }); } catch { /* not allowed now; next visit */ }
+    };
+    const onVis = () => { if (document.visibilityState === "visible") hold(); };
+    hold();
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("pointerdown", hold); // some browsers only grant it after a tap
+    return () => { gone = true; document.removeEventListener("visibilitychange", onVis); window.removeEventListener("pointerdown", hold); lock?.release().catch(() => {}); };
+  }, []);
+  // Add to Home Screen from here opens Voice, not the home page: this page's own
+  // manifest (public/voice-manifest.json — starts at /voice/admin) while it's open.
+  useEffect(() => {
+    const link = document.querySelector('link[rel="manifest"]');
+    if (!link) return undefined;
+    const before = link.getAttribute("href");
+    link.setAttribute("href", "/voice-manifest.json");
+    return () => { link.setAttribute("href", before); };
+  }, []);
   // iOS speaks only after a first sound from a tap.
   useEffect(() => {
     const first = () => unlockSpeech();
@@ -95,7 +125,9 @@ export default function Voice() {
     return () => window.removeEventListener("pointerdown", first);
   }, []);
 
-  const show = (said, out) => {
+  // meta: { source: "voice" | "typed" | "wake" | "tap", ms } — for the conversation log.
+  const show = (said, out, meta = {}) => {
+    voiceData.logExchange?.(logEntry(said, out.reply, { ...meta, session: SESSION, device: DEVICE, mode }));
     setState(out.state);
     const id = Date.now();
     setLog((l) => [{ id, said, reply: out.reply }, ...l].slice(0, 40));
@@ -116,14 +148,15 @@ export default function Voice() {
     if (canListen()) listenRef.current();
     else inputRef.current?.focus();
   };
-  const ask = async (text) => {
+  const ask = async (text, source = "tap") => {
     const t = String(text || "").trim();
     if (!t || busy) return;
     setBusy(true);
-    try { show(t, await respond(t, stateRef.current, voiceData)); } finally { setBusy(false); }
+    const t0 = performance.now();
+    try { const out = await respond(t, stateRef.current, voiceData); show(t, out, { source, ms: performance.now() - t0 }); } finally { setBusy(false); }
   };
-  const pick = async (c) => { setBusy(true); try { show(c.label, remember(await choose(c.id, stateRef.current, voiceData), c.label)); } finally { setBusy(false); } };
-  const answer = async (yes) => { setBusy(true); try { show(yes ? "Yes" : "No", await confirm(yes, stateRef.current, voiceData)); } finally { setBusy(false); } };
+  const pick = async (c) => { setBusy(true); try { show(c.label, remember(await choose(c.id, stateRef.current, voiceData), c.label), { source: "tap" }); } finally { setBusy(false); } };
+  const answer = async (yes) => { setBusy(true); try { show(yes ? "Yes" : "No", await confirm(yes, stateRef.current, voiceData), { source: "tap" }); } finally { setBusy(false); } };
   // ⚑ Mark: save this exchange to fix later (same as saying "mark that").
   const markItem = async (item) => {
     if (item.marked || item.reply?.noRecord) return;
@@ -132,7 +165,7 @@ export default function Voice() {
       setLog((l) => l.map((x) => (x.id === item.id ? { ...x, marked: true } : x)));
     } catch (e) { setLog((l) => [{ id: Date.now(), said: "", reply: { say: `Couldn't mark it: ${e.message}`, tone: "miss" } }, ...l]); }
   };
-  const next = async () => { setBusy(true); try { show("Next", remember(await more(stateRef.current, voiceData), "Next")); } finally { setBusy(false); } };
+  const next = async () => { setBusy(true); try { show("Next", remember(await more(stateRef.current, voiceData), "Next"), { source: "tap" }); } finally { setBusy(false); } };
 
   const startListening = () => {
     if (listening) { stopRef.current?.(); return; }
@@ -142,7 +175,7 @@ export default function Voice() {
     setListening(true);
     stopRef.current = listen({
       interim: setInterim,
-      final: (t) => { setInterim(""); ask(t); },
+      final: (t) => { setInterim(""); ask(t, "voice"); },
       end: () => setListening(false),
       error: (code) => { setListening(false); if (code !== "no-speech" && code !== "aborted") setLog((l) => [{ id: Date.now(), said: "", reply: { say: code === "not-allowed" ? "The microphone is blocked. Allow it for this site." : `The microphone stopped (${code}).`, tone: "miss" } }, ...l]); },
     });
@@ -165,7 +198,7 @@ export default function Voice() {
     const ctl = wakeListen({
       wake: () => { setAwake(true); setInterim(""); clearTimeout(closeTimer); closeTimer = setTimeout(() => { setAwake(false); setInterim(""); }, 8000); },
       heard: (t) => setInterim(t),
-      question: (t) => { clearTimeout(closeTimer); setAwake(false); setInterim(""); askRef.current(t); },
+      question: (t) => { clearTimeout(closeTimer); setAwake(false); setInterim(""); askRef.current(t, "wake"); },
       unsupported: () => { setWakeNote("This browser won't keep the microphone on. “Hey We-Draft” works in Chrome; here, tap the logo."); setWakeOn(false); },
     }, () => quietRef.current);
     wakeRef.current = ctl;
@@ -208,7 +241,17 @@ export default function Voice() {
 
   return (
     <div style={{ minHeight: "100vh", background: C.bg, color: C.ink, fontFamily: "Inter, system-ui, sans-serif", display: "flex", flexDirection: "column" }}>
-      <Helmet><title>Voice · We-Draft.com</title><meta name="robots" content="noindex" /></Helmet>
+      <Helmet>
+        <title>Voice · We-Draft.com</title>
+        <meta name="robots" content="noindex" />
+        {/* Add to Home Screen on the iPad: full screen, named "WD Voice", the circle logo. */}
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta name="apple-mobile-web-app-title" content="WD Voice" />
+        <meta name="theme-color" content={C.bg} />
+        <link rel="apple-touch-icon" href="/wd-icon-512.png" />
+      </Helmet>
 
       <header style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", borderBottom: `1px solid ${C.line}`, flexWrap: "wrap" }}>
         <div style={{ fontWeight: 900, fontSize: 18, letterSpacing: "0.02em", flex: 1, minWidth: 160 }}>We-Draft.com <span style={{ color: C.gold }}>Voice</span></div>
@@ -270,7 +313,7 @@ export default function Voice() {
 
       {/* Typing: the other way to ask. */}
       <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, background: `linear-gradient(transparent, ${C.bg} 35%)`, padding: "24px 16px calc(14px + env(safe-area-inset-bottom))" }}>
-        <form onSubmit={(e) => { e.preventDefault(); ask(typed); setTyped(""); }} style={{ maxWidth: 860, margin: "0 auto", display: "flex", gap: 10, alignItems: "center" }}>
+        <form onSubmit={(e) => { e.preventDefault(); ask(typed, "typed"); setTyped(""); }} style={{ maxWidth: 860, margin: "0 auto", display: "flex", gap: 10, alignItems: "center" }}>
           <input ref={inputRef} value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="Type a question" enterKeyHint="send"
             style={{ flex: 1, minWidth: 0, height: 50, borderRadius: 14, border: `1px solid ${C.line}`, background: C.panel, color: C.ink, padding: "0 16px", fontSize: 16, outline: "none" }} />
           <button type="submit" disabled={!typed.trim() || busy} style={{ height: 50, padding: "0 18px", borderRadius: 14, border: "none", fontWeight: 900, fontSize: 15, background: typed.trim() ? C.blue : C.line, color: "#fff", cursor: typed.trim() ? "pointer" : "default" }}>Ask</button>
@@ -374,15 +417,65 @@ function Review({ data, onAsk }) {
   return (
     <div style={{ display: "grid", gap: 8 }}>
       <div style={{ display: "flex", gap: 4, background: C.panel, borderRadius: 999, padding: 3, border: `1px solid ${C.line}`, justifySelf: "start" }}>
-        {[["missed", "Missed"], ["marked", "Marked"], ["pron", "Pronunciations"], ["adminNotes", "Admin notes"], ["voiceNotes", "Voice notes"]].map(([k, l]) => (
+        {[["log", "Log"], ["missed", "Missed"], ["marked", "Marked"], ["pron", "Pronunciations"], ["adminNotes", "Admin notes"], ["voiceNotes", "Voice notes"]].map(([k, l]) => (
           <button key={k} type="button" onClick={() => setTab(k)} style={{ padding: "6px 14px", borderRadius: 999, border: "none", fontSize: 13, fontWeight: 800, cursor: "pointer", background: tab === k ? C.gold : "transparent", color: tab === k ? "#1a1300" : C.soft }}>{l}</button>
         ))}
       </div>
+      {tab === "log" && <ConversationLog data={data} onAsk={onAsk} />}
       {tab === "missed" && <Missed data={data} onAsk={onAsk} />}
       {tab === "marked" && <Marked data={data} onAsk={onAsk} />}
       {tab === "pron" && <Pronunciations data={data} onAsk={onAsk} />}
       {tab === "adminNotes" && <Notes key="admin" kind="admin" data={data} />}
       {tab === "voiceNotes" && <Notes key="voice" kind="voice" data={data} />}
+    </div>
+  );
+}
+
+// Every question and answer (voiceLog — utils/voice/log.js), newest first, one
+// block per sitting (page visit), with the device. scripts/voiceLog.mjs prints
+// the same thing in VS Code.
+const SOURCE_ICON = { voice: "🎙", wake: "👂", typed: "⌨", tap: "👆", refresh: "↻" };
+function ConversationLog({ data, onAsk }) {
+  const [rows, setRows] = useState(null);
+  const [missesOnly, setMissesOnly] = useState(false);
+  const load = () => data.listLog(200).then(setRows).catch(() => setRows([]));
+  useEffect(() => { load(); }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!rows) return <div style={card}>Loading…</div>;
+  const ms = (t) => (t?.toMillis ? t.toMillis() : t?.seconds ? t.seconds * 1000 : 0);
+  const list = rows.filter((r) => !missesOnly || r.miss);
+  const sessions = [];
+  list.forEach((r) => {
+    const last = sessions[sessions.length - 1];
+    if (last && last.id === r.session) last.rows.push(r); else sessions.push({ id: r.session, device: r.device, rows: [r] });
+  });
+  return (
+    <div style={{ ...card, display: "grid", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ fontWeight: 900, fontSize: 17, flex: 1 }}>Conversation log <span style={{ color: C.soft, fontSize: 13 }}>({list.length})</span></div>
+        <label style={{ fontSize: 12, color: C.soft, fontWeight: 700 }}><input type="checkbox" checked={missesOnly} onChange={(e) => setMissesOnly(e.target.checked)} /> Misses only</label>
+        <button type="button" onClick={load} style={{ ...ghost, fontSize: 12 }}>Refresh</button>
+      </div>
+      {!list.length && <div style={{ color: C.soft, fontSize: 14 }}>Nothing logged yet. Every question and answer shows up here.</div>}
+      {sessions.map((s, i) => (
+        <div key={`${s.id}-${i}`} style={{ display: "grid", gap: 6 }}>
+          <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.08em", color: C.soft, textTransform: "uppercase" }}>
+            {s.device || "Unknown device"} · {ms(s.rows[s.rows.length - 1].at) ? new Date(ms(s.rows[s.rows.length - 1].at)).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" }) : ""}
+          </div>
+          {s.rows.map((r) => (
+            <div key={r.id} style={{ display: "grid", gap: 3, padding: "8px 10px", borderRadius: 10, background: "#0f172a", borderLeft: `3px solid ${r.miss ? C.bad : r.asked ? C.gold : C.line}` }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
+                <span title={r.source} style={{ fontSize: 13 }}>{SOURCE_ICON[r.source] || "·"}</span>
+                <span style={{ flex: 1, minWidth: 0, fontWeight: 800, fontSize: 14, overflowWrap: "anywhere" }}>“{r.said}”</span>
+                <button type="button" onClick={() => onAsk(r.said)} style={{ ...ghost, fontSize: 11, padding: "2px 8px" }}>Try</button>
+              </div>
+              <div style={{ fontSize: 13, color: r.miss ? C.bad : C.ink, lineHeight: 1.4 }}>{r.say}</div>
+              <div style={{ fontSize: 11, color: C.soft, fontWeight: 700 }}>
+                {[ms(r.at) && new Date(ms(r.at)).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }), r.intent || "no question type", r.playerName, r.ms != null && `${(r.ms / 1000).toFixed(1)}s`].filter(Boolean).join(" · ")}
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
     </div>
   );
 }

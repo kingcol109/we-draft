@@ -377,6 +377,14 @@ export function makeVoiceData({ user = null } = {}) {
       return addDoc(collection(db, "voiceMisses"), { ...entry, text: String(entry.text || "").slice(0, 400), uid, at: serverTimestamp(), done: false }).catch(() => {});
     },
     listMisses: () => getDocs(collection(db, "voiceMisses")).then((s) => s.docs.map((d) => ({ id: d.id, ...d.data() }))),
+
+    // ── The conversation log (voiceLog — utils/voice/log.js): every question and
+    // answer, for going over later (scripts/voiceLog.mjs, Review → Log). Fire-and-forget. ──
+    logExchange(entry) {
+      if (!uid) return Promise.resolve();
+      return addDoc(collection(db, "voiceLog"), { ...entry, uid, at: serverTimestamp() }).catch(() => {});
+    },
+    listLog: (n = 150) => getDocs(query(collection(db, "voiceLog"), orderBy("at", "desc"), limit(n))).then((s) => s.docs.map((d) => ({ id: d.id, ...d.data() }))),
     markMiss: (id, done) => updateDoc(doc(db, "voiceMisses", id), { done }),
 
     // ── Notes (admin, 2026-11-25): "admin note …" → adminNotes (the admin's
