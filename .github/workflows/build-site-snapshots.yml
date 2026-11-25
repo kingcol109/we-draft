@@ -47,6 +47,20 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
           CFBD_API_KEY: ${{ secrets.CFBD_API_KEY }}
 
+      # Every NFL draft pick on file in one compact doc for /voice's draft
+      # history questions — scripts/buildVoiceDraftHistory.mjs.
+      - name: Build draft history snapshot
+        run: node scripts/buildVoiceDraftHistory.mjs
+        env:
+          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
+
+      # /voice: every CFBD roster player (cfbRosters/*), so players who
+      # aren't on We-Draft.com can still be found by name.
+      - name: Build CFBD people snapshot
+        run: node scripts/buildCfbdPeople.mjs
+        env:
+          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
+
       # ESPN's college football national award winners (Heisman, Doak
       # Walker, …) for the player page's Career Path — server/awards/
       # nationalAwards.js. No API key; a few dozen ESPN calls. Weekly so the

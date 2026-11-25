@@ -575,6 +575,49 @@ service cloud.firestore {
       allow read: if true;
       allow write: if isAdmin();
     }
+    // We-Draft U's page content (utils/weU.js; the structure is config/weU).
+    // Admin-only while U is unreleased — open reads (if true) at launch.
+    match /weUPages/{id} {
+      allow read, write: if isAdmin();
+    }
+    // Film Manager (components/film/*): the admin's game film library —
+    // games (filmGames) and the plays cut from them (filmPlays), with the
+    // players tagged on each. Metadata only; the video stays on the admin's
+    // own disk. Back-office, like the PFF data.
+    match /filmGames/{id} {
+      allow read, write: if isAdmin();
+    }
+    // /voice: questions it couldn't answer (utils/voice/engine.js), logged to
+    // add later. Anyone signed in may log their own; only admins read them.
+    match /voiceMisses/{id} {
+      allow create: if request.auth != null
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.text is string
+        && request.resource.data.text.size() <= 400
+        && request.resource.data.done == false;
+      allow read, update, delete: if isAdmin();
+    }
+    // /voice/admin: "admin note …" (the admin's to-review bucket) and
+    // "voice note …" (notes for the voice itself). Admin only.
+    match /adminNotes/{id} {
+      allow read, write: if isAdmin();
+    }
+    match /voiceNotes/{id} {
+      allow read, write: if isAdmin();
+    }
+    // /voice/admin: answers marked to fix later ("mark that").
+    match /voiceMarks/{id} {
+      allow read, write: if isAdmin();
+    }
+    // /voice: how names are said (an admin locks each one); everyone's
+    // spoken answers use them, so anyone may read.
+    match /voicePronunciations/{key} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /filmPlays/{id} {
+      allow read, write: if isAdmin();
+    }
     match /playerStats/{doc} { allow read, write: if true; }
     // ── We-Draft Live — written only by the central ingester
     // (server/live/*, admin SDK, not subject to these rules). Public

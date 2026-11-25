@@ -135,6 +135,7 @@ const ClassIntro = lazy(() => import("./pages/ClassIntro"));
 const EarlyLook = lazy(() => import("./pages/EarlyLook"));
 // /map, /map/draft, /map/{team} — interactive 3D maps (deck.gl; utils/mapData.js).
 const MapPage = lazy(() => import("./pages/MapPage"));
+const VoicePage = lazy(() => import("./pages/Voice"));
 
 // Articles
 const ArticlePage = lazy(() => import("./pages/ArticlePage"));
@@ -251,6 +252,9 @@ function MainLayout() {
             <Route path="/draftorder" element={<DraftOrderPage />} />
             <Route path="/events" element={<DraftCalendar />} />
             {/* Admin-only until released (user, 2026-11-18): no sitemap, no links. */}
+            {/* Voice: ask by voice or typing — General / Admin (data entry); admin-only for now. */}
+            <Route path="/voice" element={<AdminRoute><VoicePage /></AdminRoute>} />
+            <Route path="/voice/admin" element={<AdminRoute><VoicePage /></AdminRoute>} />
             <Route path="/map" element={<AdminRoute><MapPage /></AdminRoute>} />
             <Route path="/map/:team" element={<AdminRoute><MapPage /></AdminRoute>} />
             <Route path="/calendar" element={<Navigate to="/events" replace />} />
