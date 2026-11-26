@@ -61,6 +61,7 @@ import { EARLY_LOOK } from "../utils/earlyLook";
 import AdminCombine from "../components/AdminCombine";
 import AdminSideGraphics from "../components/AdminSideGraphics";
 import AdminDraftBreakdowns from "../components/AdminDraftBreakdowns";
+import FilmManager from "../components/film/FilmManager";
 import AdminProDayIcons from "../components/AdminProDayIcons";
 import AdminEvents from "../components/AdminEvents";
 import AdminYouTubeGraphics from "../components/AdminYouTubeGraphics";
@@ -388,6 +389,8 @@ const SECTIONS = [
   { key: "go", label: "Go", icon: "⚡", ready: true },
   { key: "players", label: "Players", icon: "🏈", ready: true },
   { key: "videos", label: "Videos", icon: "🎬", ready: true },
+  // Game film on the admin's disk, cut into plays and tagged to players (components/film/FilmManager.jsx).
+  { key: "film", label: "Film Manager", icon: "🎞️", ready: true },
   { key: "content", label: "Content", icon: "📝", ready: true },
   // Player ↔ Instagram accounts (components/AdminSocial.jsx).
   { key: "social", label: "Social", icon: "💬", ready: true },
@@ -15484,6 +15487,7 @@ export default function AdminPanel() {
             {activeSection === "go" && <AdminGo />}
             {activeSection === "players" && <PlayerDataSection />}
             {activeSection === "videos" && <VideosSection initialTab={opened.section === "videos" ? opened.tab : null} />}
+            {activeSection === "film" && <FilmManager />}
             {activeSection === "content" && <ContentSection initialTab={opened.section === "content" ? opened.tab : null} />}
             {activeSection === "social" && <AdminSocial />}
             {activeSection === "analytics" && <AnalyticsSection />}

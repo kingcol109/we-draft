@@ -80,6 +80,24 @@ export const matchFields = (g, how = "auto") => ({
 // The season's games laid out for the film list: weeks → games, each with
 // its two sides' film (filmGames matched to it). onlyTeams: show the games of
 // these teams (the teams with film), every week.
+// The game search (user, 2026-11-25): type the two schools any way —
+// "oklahoma texas", "fsu at clemson", "ohio st mich", "texas a&m lsu".
+// Every word has to start a word of either school (or be its initials /
+// a known short name); "vs", "at", "and" are ignored.
+const searchWords = (s) => String(s || "").toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/&/g, " ").replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter(Boolean);
+const SEARCH_STOP = new Set(["vs", "v", "versus", "at", "and", "the", "@"]);
+export function gameMatches(query, g) {
+  const toks = searchWords(query).filter((w) => !SEARCH_STOP.has(w));
+  if (!toks.length) return true;
+  const teams = [g.home, g.away].filter(Boolean);
+  const hay = teams.flatMap(searchWords);
+  const initials = teams.map((t) => searchWords(t).map((w) => w[0]).join(""));
+  return toks.every((t) => {
+    const alias = CFBD_NAMES[t];
+    if (alias && teams.some((x) => teamKey(x) === teamKey(alias))) return true;
+    return hay.some((w) => w.startsWith(t)) || initials.includes(t) || teams.some((x) => teamKey(x) === t);
+  });
+}
 export function filmWeeks(games, films, onlyTeams = null) {
   const byGame = {};
   films.forEach((f) => { if (f.cfbdGameId) (byGame[f.cfbdGameId] = byGame[f.cfbdGameId] || []).push(f); });
