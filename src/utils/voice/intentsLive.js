@@ -181,14 +181,85 @@ function leaderOut(e, cat, g, people) {
 }
 const PERF_SPAN = "(?<span>today|tonight|this week|this weekend|right now|so far|live)";
 
+// ── Other days (log 2026-11-26: "who plays tomorrow", "what are some college football games
+// this week", "were any college football games played last week", "what game should I watch
+// from last week") ── The week's slate; last week's from liveSlate/week-…; the game to watch =
+// the one with the most players on the board.
+const GAMES_ = "(?:college )?(?:football )?games?";
+const DAY_SPAN = "(?<span>tomorrow(?: night)?|this week|this weekend|on saturday|saturday|this saturday|on friday|friday|last week|last weekend|last saturday|yesterday|last night)";
+const WEEKDAY = { friday: 5, saturday: 6 };
+async function daysAnswer(span0, ctx, { pick = false } = {}) {
+  const span = String(span0 || "").replace(/^(?:on|this) (?=saturday|friday)/, "");
+  const slate = await ctx.liveSlate().catch(() => null);
+  if (!slate?.games) return miss("I can't reach the schedule right now.", "no-slate");
+  const people = await ctx.people().catch(() => []);
+  const onBoard = (g) => people.filter((p) => sides(g).includes(teamKey(p.school))).length;
+  const back = /^(?:last|yesterday)/.test(span);
+  let games = slate.games;
+  let when = span;
+  if (/^(?:last week|last weekend|last saturday)$/.test(span)) {
+    const prev = slate.week > 1 && ctx.liveWeek ? await ctx.liveWeek(slate.season, slate.seasonType, slate.week - 1).catch(() => null) : null;
+    games = (prev?.games || []).filter((g) => g.status === "final");
+    if (span === "last saturday") games = games.filter((g) => new Date(g.startDate).toLocaleDateString("en-US", { timeZone: ET, weekday: "long" }) === "Saturday");
+  } else if (/^(?:yesterday|last night)$/.test(span)) {
+    const y = etDay(new Date(Date.now() - 86400000));
+    games = games.filter((g) => g.startDate && etDay(new Date(g.startDate)) === y);
+    when = "yesterday";
+  } else if (/^tomorrow/.test(span)) {
+    const t = etDay(new Date(Date.now() + 86400000));
+    games = games.filter((g) => g.startDate && etDay(new Date(g.startDate)) === t);
+    when = "tomorrow";
+  } else if (WEEKDAY[span] != null) {
+    games = games.filter((g) => g.startDate && dayName(g.startDate) === span[0].toUpperCase() + span.slice(1));
+    when = `on ${span[0].toUpperCase()}${span.slice(1)}`;
+  }
+  const title = `Games ${when}`;
+  if (!games.length) return { say: back ? `I don't have any finished games from ${when}.` : `There are no games ${when}.`, title, links: [{ to: "/live", label: "Open We-Draft Live", primary: true }], tone: "answer", gap: back ? "live-no-week" : undefined };
+  const byProspects = [...games].sort((a, b) => onBoard(b) - onBoard(a));
+  const best = byProspects[0];
+  const bestN = onBoard(best);
+  const rows = byProspects.map((g) => [gameTitle(g), `${scoreText(g)}${onBoard(g) ? ` · ${onBoard(g)} prospects` : ""}`]);
+  const base = { title, sub: plural(games.length, "game"), rows, games: byProspects.slice(0, 16), links: [{ to: "/live", label: "Open We-Draft Live", primary: true }], tone: "answer" };
+  if (pick) {
+    // The one to go back and watch: the most prospects; the next one if it was closer.
+    const margin = (g) => Math.abs((g.home?.points ?? 0) - (g.away?.points ?? 0));
+    const alt = byProspects[1] && onBoard(byProspects[1]) >= bestN * 0.8 && margin(byProspects[1]) < margin(best) ? byProspects[1] : null;
+    const g = alt || best;
+    return { ...base, say: `I'd go back to ${gameTitle(g)}. ${gameLine(g, ctx)}${onBoard(g) ? `, with ${onBoard(g)} prospects on the field` : ""}.`, games: [g], links: gameLinks(g).length ? gameLinks(g) : base.links };
+  }
+  const top = byProspects.slice(0, 3).map((g) => (back ? gameLine(g, ctx) : `${gameTitle(g)}${g.status === "scheduled" && !g.startTimeTBD ? `, ${/^(?:this|last)/.test(span) ? `${dayName(g.startDate)} ` : ""}at ${timeOf(g.startDate)}` : ""}`));
+  const lead = back ? `${plural(games.length, "game")} ${games.length === 1 ? "was" : "were"} played ${when}.` : `There ${games.length === 1 ? "is" : "are"} ${plural(games.length, "game")} ${when}.`;
+  const most = bestN >= 3 ? ` ${gameTitle(best)} has the most prospects, ${bestN}.` : "";
+  return { ...base, say: `${lead} ${games.length > 3 ? "The biggest ones: " : ""}${top.join(". ")}.${most}` };
+}
+
 export const LIVE_INTENTS = [
+  {
+    id: "live.days",
+    mode: "general",
+    title: "Games on another day",
+    examples: ["who plays tomorrow", "what college football games are on this week", "were any games played last week", "what game should I watch from last week"],
+    patterns: [
+      new RegExp(`^(?:who(?:'s|s| is)? (?:playing|plays)(?: football)?|what ${GAMES_} (?:are|is) (?:on|there|being played|happening|played)|(?:what are |name |give me |list |tell me )?(?:some |the |all the )?${GAMES_}(?: (?:on|being played))?|are there (?:any )?${GAMES_}(?: on)?|any ${GAMES_}(?: on)?|what(?:'s|s| is) on|what(?:'s|s| is) the (?:schedule|slate)) ${DAY_SPAN}$`),
+      new RegExp(`^(?:were|was) (?:there )?(?:any )?${GAMES_} (?:played |on )?${DAY_SPAN}$`),
+      new RegExp(`^(?:who|what teams?) (?:played|won) ${DAY_SPAN}$`),
+      // the game to watch
+      new RegExp(`^(?:what|which) ${GAMES_} should i (?:watch|rewatch|go back and watch|check out|pull up)(?: from)? ${DAY_SPAN}$`),
+      new RegExp(`^(?:what(?:'s|s| is|was)) the (?:best|biggest|top) game ${DAY_SPAN}$`),
+    ],
+    fixed: [{}, {}, {}, { pick: "1" }, { pick: "1" }],
+    accept: (s) => !!s.span,
+    run: async ({ span, pick }, ctx) => daysAnswer(span, ctx, { pick: !!pick }),
+  },
   {
     id: "live.today",
     mode: "general",
     title: "Who's playing today",
     examples: ["who's playing today", "what games are on tonight", "any games on today", "what's on tv tonight"],
     patterns: [
-      /^(?:who(?:'s|s| is) playing|who plays|what games are (?:on|there|being played|happening)|what(?:'s|s| is) on(?: tv)?|any(?: good)? games(?: on)?|are there any games(?: on)?|what games do we have|is there (?:any |college )?football(?: on)?|games|what(?:'s|s| is) the slate)(?: today| tonight| this afternoon| right now)?$/,
+      /^(?:who(?:'s|s| is) playing|who plays|what games are (?:on|there|being played|happening)|what(?:'s|s| is) on(?: tv)?|any(?: good)? games(?: on)?|are there any games(?: on)?|what games do we have|is there (?:any |college )?football(?: on)?|games|what(?:'s|s| is) the slate)(?: (?:college )?football)?(?: games)?(?: today| tonight| this afternoon| right now)?$/,
+      // "who should I watch right now" (log 2026-11-26) — what's on, and the game with the most prospects.
+      /^(?:who|what|which game) should i (?:watch|be watching|tune into|turn on)(?: right now| right| now| today| tonight)?$/,
       /^(?:what's|whats|what is|what are) (?:the )?(?:games|schedule|slate)(?: for)? (?:today|tonight)$/,
       // (The engine drops a trailing "now": "anything live right now" arrives as "anything live right".)
       /^(?:who(?:'s|s| is)|what(?:'s|s| is)|anything|any games|anybody) (?:playing |on )?(?:right now|now|live|right)(?: right(?: now)?)?$/,
@@ -354,6 +425,9 @@ export const LIVE_INTENTS = [
       /^(?:read me |what are |show me |give me )?(?:the |this week's |this weeks )?(?:draft )?risers(?: list| board)?(?: for (?:the )?(?<cls>20\d\d)(?: class)?)?$/,
       /^(?:who(?:'s|s| is)) (?:rising|hot|on fire) in the (?<cls>20\d\d)(?: class)?$/,
       /^(?:any|are there any) (?:breakouts|breakout players|risers|new risers)(?: this week| lately)?$/,
+      // "show me some trending players" (heard as "to her some trending players", log 2026-11-26)
+      /^(?:.*\b)?(?:trending|hot|rising|breakout) (?:players|prospects|guys|names)(?: (?:right now|this week|lately))?(?: in the (?<cls>20\d\d) class)?$/,
+      /^who(?:'s|s| is| are) trending(?: (?:right now|this week|lately))?$/,
     ],
     run: async ({ cls }, ctx) => {
       const year = String(cls || currentDraftClass());

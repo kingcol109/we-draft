@@ -25,12 +25,13 @@
 // Pure apart from what ctx does.
 import { INTENTS } from "./intents";
 import { clean, plain } from "./text";
-import { findPlayer, schoolSaid } from "./names";
+import { findPlayer, schoolSaid, recentPlayer } from "./names";
 import { teamKey } from "../film/schedule";
 import { currentSeason } from "./reply";
 import { phrase, hint } from "./phrase";
 import { respelling } from "./pronounce";
 import { notOnWeDraft } from "./requests";
+import { dictateStep } from "./intentsReport";
 
 export const MODES = { general: "General", admin: "Admin" };
 export const intentsFor = (mode) => INTENTS.filter((i) => i.mode === "general" || mode === "admin");
@@ -48,10 +49,25 @@ const SITE_NAME = /\b(?:wii|wee|whee|we)\s?drafts?(?:\s(?:dot\s)?com)?\b/g;
 const prep = (text) => clean(text).replace(SITE_NAME, "we draft").replace(FILLER, "").replace(TAIL, "")
   // "what are some of his strengths" → "what are his strengths"
   .replace(/\b(?:some|any|a few|a couple|all|one|two|three) of (his|her|their)\b/g, "$1")
+  // How speech writes "who's": "whose main chroma" (log 2026-11-26).
+  .replace(/^whose\b/, "who's")
+  // A restart said twice: "what number what number is Makhi Hughes".
+  .replace(/^((?:\S+ ){1,3}?)\1/, "$1")
   .trim();
 // Said where "him" was meant — speech hears "you" / "the" a lot (user, 2026-11-25: "the system's
 // hearing 'the' way too often"): "where did you go to high school", "what was the star rating".
 const STANDS_FOR_HIM = /^(?:you|your|yours|the|this|that|those|them|it|its|the player|this player|that player|this guy|that guy|this kid|that kid|the kid|her|she)$/;
+// A name slot that's only question words around a "he / his / you" ("what has been his",
+// "do you have any strengths or", "he been") — it means him, not a player named that.
+const NOT_A_NAME = new Set("what what's whats has have had been do does did is was are were any some the a an of or and to me tell give show about more on for in his he him he's hes you your yours strengths strength weaknesses weakness best game games stats numbers playing doing done looking this that so far year season".split(" "));
+const PRONOUN = /\b(?:he|him|his|hes|you|your)\b/;
+export const meansHim = (said) => {
+  const t = plain(said);
+  return PRONOUN.test(t) && t.split(" ").every((w) => NOT_A_NAME.has(w));
+};
+// A name slot with no name in it at all ("career", "some", "what", "how about") — a follow-up's words.
+const TOPIC_WORDS = new Set("career how about and also what's high school background scouting report bio more else anything again same read give show tell pull up let know can could please".split(" "));
+const noName = (said) => plain(said).split(" ").every((w) => NOT_A_NAME.has(w) || TOPIC_WORDS.has(w));
 
 /** The intent and slots a line matches → { intent, slots } | { wrongMode: intent } | null */
 export function understand(text, mode) {
@@ -71,6 +87,22 @@ export function understand(text, mode) {
   return other ? { wrongMode: other } : null;
 }
 
+const RECENT_MAX = 10;
+// Player rows only ({ id, first, last, … }), newest first, no repeats.
+export function addRecent(list = [], add = []) {
+  const rows = [...add, ...(list || [])].filter((p) => p && p.id && p.first != null && p.last != null)
+    .map(({ id, first, last, pos, school, cls, cfbd, cfbdOnly, slug }) => ({ id, first, last, pos, school, cls, ...(cfbd ? { cfbd } : {}), ...(cfbdOnly ? { cfbdOnly } : {}), ...(slug ? { slug } : {}) }));
+  return rows.filter((p, i) => rows.findIndex((q) => q.id === p.id) === i).slice(0, RECENT_MAX);
+}
+// "Did you mean …?" said with the names (user, 2026-11-26: "it will go 'did you mean one of
+// these' without saying who … the voice should exist on its own").
+const choiceName = (p) => `${p.first} ${p.last}${p.school ? ` at ${p.school}` : ""}`;
+export function didYouMean(list, one = false) {
+  if (!list.length) return "";
+  if (one || list.length === 1) return `Did you mean ${choiceName(list[0])}?`;
+  const top = list.slice(0, 3).map(choiceName);
+  return `Did you mean ${top.slice(0, -1).join(", ")}, or ${top[top.length - 1]}?`;
+}
 const label = (p) => `${p.first} ${p.last}${p.pos || p.school ? ` · ${[p.pos, p.school].filter(Boolean).join(", ")}` : ""}`;
 const asChoices = (list) => list.map((p) => ({ id: p.id, label: label(p) }));
 const log = (ctx, state, text, reason, extra = {}) => ctx.logMiss?.({ text, mode: state.mode, reason, ...extra });
@@ -82,6 +114,8 @@ function settle(out0, state0, ctx, text, intent) {
   const { focus, group, offBoard, pending: next, lastGame, ...out } = out0;
   const state = {
     ...state0,
+    // Everyone just talked about or shown, newest first — a misheard name is matched against them first.
+    recent: addRecent(state0.recent, [focus, ...(group || []), ...(out.people || []).filter((p) => p?.id), out.player?.id ? out.player : null, state0.last]),
     // The one game an answer was about ("…5 rushing touchdowns on October 3rd vs Virginia") — "who won that game?"
     ...(lastGame ? { lastGame } : {}),
     ...(focus ? { last: focus, offBoard: null } : {}),
@@ -129,7 +163,7 @@ async function nflExact(said, ctx) {
 async function resolve(intent, slots, state, ctx, text) {
   if (!("who" in slots)) return run(intent, slots, state, ctx, text);
   const said = slots.who;
-  if (HIM.test(plain(said)) || (state.last && STANDS_FOR_HIM.test(plain(said)))) {
+  if (HIM.test(plain(said)) || meansHim(said) || (state.last && STANDS_FOR_HIM.test(plain(said)))) {
     if (state.last) return run(intent, { ...slots, player: state.last }, state, ctx, text);
     if (state.offBoard) {
       log(ctx, state, text, "off-board", { intent: intent.id, said: state.offBoard });
@@ -147,16 +181,27 @@ async function resolve(intent, slots, state, ctx, text) {
       if (breakdown) return run(breakdown, { teams: opp ? `${said} ${opp[1]}` : said }, state, ctx, text);
     }
   }
+  // The exact name of someone just talked about or listed: him, even if the board has another.
+  const sameName = (state.recent || []).filter((r) => nameKey(`${r.first} ${r.last}`) === nameKey(said));
+  if (sameName.length === 1) return run(intent, { ...slots, player: sameName[0] }, state, ctx, text);
   let found = findPlayer(said, people, state.aliases);
   // "kromahs height" (no apostrophe) → try it without the s.
   if (found.none && /s$/.test(plain(said))) {
     const again = findPlayer(plain(said).replace(/s$/, ""), people, state.aliases);
     if (!again.none) found = again;
   }
+  const exactHere = found.player && (found.taught || found.school || nameKey(`${found.player.first} ${found.player.last}`) === nameKey(said));
+  // Someone we were just talking about, loosely ("evangelist" after Evan Tengesdahl, "Isaiah
+  // Johnson" after "who wears 0 for Cincinnati" — that one, not another Isaiah Johnson).
+  if (!exactHere || found.choices) {
+    const near = found.choices ? state.recent?.filter((r) => found.choices.some((c) => c.id === r.id)) : null;
+    if (near?.length === 1) return run(intent, { ...slots, player: near[0] }, state, ctx, text);
+    const rp = !(found.player && (found.score ?? 1) >= 0.9) && recentPlayer(said, state.recent);
+    if (rp) return run(intent, { ...slots, player: rp.player }, state, ctx, text);
+  }
   // A loose board match loses to the exact name somewhere else (user, 2026-11-25: "Ashton Daniels"
   // answered as Ashton Hampton): anyone on a CFBD roster, then an NFL draft pick ("Cam Newton").
   const fullName = nameKey(said).split(" ").length >= 2;
-  const exactHere = found.player && (found.taught || found.school || nameKey(`${found.player.first} ${found.player.last}`) === nameKey(said));
   if (fullName && !exactHere && (!found.player || (found.score ?? 1) < 0.93)) {
     const cfbdAll = ctx.cfbdPeople ? await ctx.cfbdPeople().catch(() => []) : [];
     const exact = cfbdAll.filter((p) => nameKey(`${p.first} ${p.last}`) === nameKey(said));
@@ -168,7 +213,7 @@ async function resolve(intent, slots, state, ctx, text) {
   if (found.player) return run(intent, { ...slots, player: found.player }, state, ctx, text);
   if (found.choices) {
     return {
-      reply: { say: `Which one? ${found.choices.slice(0, 3).map((p) => `${p.first} ${p.last}${p.school ? ` at ${p.school}` : ""}`).join(", or ")}?`, choices: asChoices(found.choices), tone: "ask" },
+      reply: { say: `Which one? ${found.choices.slice(0, 3).map(choiceName).join(", or ")}?`, choices: asChoices(found.choices), tone: "ask" },
       state: { ...state, pending: { kind: "choose", intent: intent.id, slots, said, text, choices: found.choices } },
     };
   }
@@ -196,16 +241,17 @@ async function resolve(intent, slots, state, ctx, text) {
     // CFBD match: unless the CFBD name is all but exact, ask which one.
     if (c.player && found.near?.length && (c.score ?? 1) < 0.95) {
       const choices = [...found.near.slice(0, 4), c.player];
+      const ask = didYouMean(choices, found.lead);
       log(ctx, state, text, "unknown-player", { intent: intent.id, said, school: found.school || null });
       return {
-        reply: { say: `${phrase(ctx, "miss.player", { said })} Did you mean one of these?`, speak: "Did you mean one of these?", choices: asChoices(choices), tone: "ask" },
-        state: { ...state, pending: { kind: "choose", intent: intent.id, slots, said, text, choices, teach: true } },
+        reply: { say: `${phrase(ctx, "miss.player", { said })} ${ask}`, speak: ask, choices: asChoices(choices), tone: "ask" },
+        state: { ...state, pending: { kind: "choose", intent: intent.id, slots, said, text, choices, teach: true, yes: found.lead ? choices[0].id : null } },
       };
     }
     if (c.player) return run(intent, { ...slots, player: c.player }, state, ctx, text);
     if (c.choices) {
       return {
-        reply: { say: `Which one? ${c.choices.slice(0, 3).map((p) => `${p.first} ${p.last}${p.school ? ` at ${p.school}` : ""}`).join(", or ")}?`, choices: asChoices(c.choices), tone: "ask" },
+        reply: { say: `Which one? ${c.choices.slice(0, 3).map(choiceName).join(", or ")}?`, choices: asChoices(c.choices), tone: "ask" },
         state: { ...state, pending: { kind: "choose", intent: intent.id, slots, said, text, choices: c.choices } },
       };
     }
@@ -214,9 +260,10 @@ async function resolve(intent, slots, state, ctx, text) {
   // The "request him" tip only when the words look like a name (not "the number one rated person").
   const nameLike = plain(said).split(" ").length <= 4 && !/\b(?:the|a|an|on|of|in|who|what|person|player|prospect|rated|ranked|number|best|top|guy)\b/.test(plain(said));
   const tip = nameLike ? hint(ctx, "request", state.mode === "admin" ? `To add him, say "add" with his name and school.` : `If he isn't on We-Draft.com, say "request" with his name and school.`) : "";
+  const ask = didYouMean(found.near, found.lead);
   return {
-    reply: { say: `${(found.school ? phrase(ctx, "miss.player.school", { said, school: found.school }) : phrase(ctx, "miss.player", { said }))}${found.near.length ? " Did you mean one of these?" : ""}${tip ? ` ${tip}` : ""}`, speak: found.near.length ? "Did you mean one of these?" : phrase(ctx, "miss.player.short"), choices: asChoices(found.near), tone: "miss" },
-    state: { ...state, pending: found.near.length ? { kind: "choose", intent: intent.id, slots, said, text, choices: found.near, teach: true } : null },
+    reply: { say: `${(found.school ? phrase(ctx, "miss.player.school", { said, school: found.school }) : phrase(ctx, "miss.player", { said }))}${ask ? ` ${ask}` : ""}${tip ? ` ${tip}` : ""}`, speak: ask || phrase(ctx, "miss.player.short"), choices: asChoices(found.near), tone: found.near.length ? "ask" : "miss" },
+    state: { ...state, pending: found.near.length ? { kind: "choose", intent: intent.id, slots, said, text, choices: found.near, teach: true, yes: found.lead || found.near.length === 1 ? found.near[0].id : null } : null },
   };
 }
 
@@ -340,12 +387,46 @@ export const looksLikeFeedback = (t0) => {
   return t.split(" ").length >= 7 && FEEDBACK.test(t);
 };
 
+// ── Topic follow-ups (user, 2026-11-26: "he will introduce the player fine, user asks for his
+// stats, and he doesn't know how to respond") ── A short line, or one that says "he / his / you",
+// with no name in it, about the player we're on → the full question about him. Order matters:
+// the more specific topic first.
+const SEASON_SAID = /\b(?:this (?:season|year)|last (?:season|year)|20\d\d|career|in college|so far)\b/;
+const TOPIC_ASKS = [
+  [/\bstrengths? (?:and|or|&) weakness(?:es)?\b|\bpros and cons\b|\bgood and bad\b/, "what are his strengths and weaknesses"],
+  [/\bweakness(?:es)?\b|\bwork on\b|\bknocks?\b|\bbad at\b|\bconcerns?\b|\bimprove\b|\bstruggles? with\b|\bholes in\b/, "what are his weaknesses"],
+  [/\bstrengths?\b|\bgood at\b|\b(?:does|do) (?:really )?well\b|\bbest traits?\b|\bbest at\b|\bgreat at\b/, "what are his strengths"],
+  [/\bcomps?\b|\bcomparisons?\b|\bcompares? to\b|\bremind\b|\bresembles?\b|\bplays like\b|\bsimilar to\b/, "what are his nfl comps"],
+  [/\bbest game\b|\bbiggest game\b|\btop game\b/, "what was his best game{season}"],
+  [/\b(?:best|biggest|top|good|great) games\b|\bgames? (?:should i|to|i should|worth) (?:watch|pull up|turn on)\b|\bwatch (?:of|for) (?:his|him)\b/, "what are his best games{season}"],
+  [/\btransfer(?:red)?\b|\banywhere (?:else )?before\b|\bplay(?:ed)? (?:anywhere )?before\b|\bbefore (?:he got to|coming to|that)\b|\bother schools?\b|\bwhere else\b|\bcareer path\b|\bprevious(?:ly)?\b|\bbefore [a-z]+(?: [a-z]+){0,2}$/, "what's his career path"],
+  [/\bhigh school\b.*\b(?:ratings?|rated|rankings?|ranked|stars?)\b|\bstars?\b|\bstar rating\b|\brecruit(?:ing|ed)?\b|\brated coming out\b|\btop recruit\b/, "what's his recruiting ranking"],
+  [/\bhigh school\b/, "where did he go to high school"],
+  [/\bwhere(?:'s|s| is) he from\b|\bwhat (?:state|city|town|part of [a-z ]+) is he from\b|\bwhere is he from\b|\bgr[eo]w up\b|\bhome ?town\b|\bfrom where\b|\bwhere(?:'s| is) home\b/, "where is he from"],
+  [/\bscouting report\b|\bwrite ?up\b|\breport on him\b|\bbio\b/, "read his bio"],
+  [/^(?:more|go on|keep going|continue|and)$|\bbackground\b|\btell me more\b|\bmore about\b|\bmore on\b|\bwhat else\b|\banything else\b|\blearn more\b|\bknow more\b|\brundown\b|\bbackstory\b/, "tell me more about him"],
+  [/\branked\b|\brank(?:ing)?\b/, "where is he ranked"],
+  [/\bstats\b|\bstatistics\b|\bnumbers\b|\bproduction\b|\bstat line\b|\bhow(?:'s|s| is| has) he (?:been )?(?:playing|doing|looking|looked|played|performing|performed)\b|\bwhat (?:did|has) he (?:do|done)\b|\bhow (?:was|is|has been|'s|s) his (?:season|year)\b|\bhow(?:'s| is) his season\b/, "what are his stats{season}"],
+];
+export function topicAsk(t, state) {
+  if (!state.last) return null;
+  if (!PRONOUN.test(t) && t.split(" ").length > 4 && !noName(t)) return null;
+  for (const [re, q] of TOPIC_ASKS) {
+    if (!re.test(t)) continue;
+    const s = (t.match(SEASON_SAID) || [])[0];
+    return q.replace("{season}", s && s !== "so far" ? ` ${s}` : s === "so far" ? " this season" : "");
+  }
+  return null;
+}
+
 const LEAD_IN = /^(?<who>[a-z0-9.' ]+?) (?<q>(?:what|what's|whats|how|how's|hows|where|who|who's|when|is|was|does|did|has|tell me|give me|read me)\b.*\b(?:his|he|him|he's)\b.*)$/;
 
 async function respondTo(text, state, ctx) {
   const t = prep(text);
   const p = state.pending;
   if (p?.kind === "pronounce") return pronounceStep(text, state, ctx);
+  // Dictating a scouting report: every line is part of it (or done / scratch that / read it back).
+  if (p?.kind === "dictate") return dictateStep(text, state, ctx);
   if (p?.kind === "confirm") {
     if (YES.test(t)) return confirm(true, state, ctx);
     if (NO.test(t)) return confirm(false, state, ctx);
@@ -354,7 +435,12 @@ async function respondTo(text, state, ctx) {
   if (p?.kind === "choose") {
     const pick = t.replace(/^(?:the |number )/, "").replace(/ one$/, "").trim();
     if (ORDINAL[pick] != null && p.choices[ORDINAL[pick]]) return choose(p.choices[ORDINAL[pick]].id, state, ctx);
-    if (NO.test(t)) return { reply: { say: "Okay.", tone: "answer" }, state: { ...state, pending: null } };
+    // "Did you mean Gunner Stockton at Georgia?" — "yes" / "yeah, him".
+    if (YES.test(t) || /^(?:yes|yeah|yep|yup) (?:him|that's him|that one|the first one)$|^(?:him|that's him|that's the one|that one)$/.test(t)) {
+      if (p.yes) return choose(p.yes, state, ctx);
+      return { reply: { say: `Which one? Say first, second or third.`, tone: "ask" }, state };
+    }
+    if (NO.test(t)) return { reply: { say: "Okay. Try his name with his school, like Georgia's Gunner Stockton.", speak: "Okay. Try his name with his school.", tone: "answer" }, state: { ...state, pending: null } };
     // A name among the choices ("the one at Ohio State" / "Jeremiah").
     const hit = p.choices.filter((c) => [c.first, c.last, c.school].some((w) => w && t.includes(plain(w))));
     if (hit.length === 1) return choose(hit[0].id, state, ctx);
@@ -375,6 +461,27 @@ async function respondTo(text, state, ctx) {
     }
   }
   const u = understand(text, state.mode);
+  // A long remark about the voice itself is a note, even when some pattern half-matches it
+  // ("Again instead of a laundry list … who should I watch …" was taken as watch.team).
+  if (t.split(" ").length >= 14 && looksLikeFeedback(t) && ctx.addNote) {
+    try {
+      await ctx.addNote("voice", { text: String(text).trim(), said: String(text).trim(), player: state?.last?.id || null, mode: state?.mode || null, auto: true, after: state?.lastAnswer || null });
+      return { reply: { say: "Got it. I saved that as a voice note.", speak: phrase(ctx, "ack.note"), tone: "done", noRecord: true }, state: base };
+    } catch { /* not allowed: carry on */ }
+  }
+  // A follow-up named by its topic, about the player we're on ("stats?", "where's he from",
+  // "tell me more", "and weaknesses", "did he go anywhere before West Virginia").
+  const junkWho = u?.intent && u.slots?.who && (meansHim(u.slots.who) || noName(u.slots.who)) && !HIM.test(plain(u.slots.who));
+  if (!u || junkWho) {
+    const q = topicAsk(t, state);
+    const tu = q && understand(q, state.mode);
+    if (tu?.intent) {
+      try { return await resolve(tu.intent, tu.slots, base, ctx, String(text).trim()); } catch (e) {
+        log(ctx, state, String(text).trim(), "error", { intent: tu.intent.id, error: String(e.message || e) });
+        return { reply: { say: `Something went wrong: ${e.message}`, speak: "Something went wrong there.", tone: "miss" }, state: base };
+      }
+    }
+  }
   // "how many touchdowns?" right after "…rushing yards in 2025": the same season / opponents.
   const la = state.lastAsk;
   if (u?.intent && TIMED.has(u.intent.id) && TIMED.has(la?.intent) && u.slots.who === "his" && !u.slots.rest && !u.slots.rest1 && la.rest) {

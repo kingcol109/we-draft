@@ -38,6 +38,29 @@ async function personFor(row, school, teamId, ctx) {
 // ── Jersey numbers ──
 const POS_WORD = { QB: "quarterback", RB: "running back", FB: "fullback", WR: "wide receiver", TE: "tight end", OL: "offensive lineman", OT: "offensive tackle", OG: "guard", G: "guard", C: "center", DL: "defensive lineman", DE: "defensive end", DT: "defensive tackle", NT: "nose tackle", EDGE: "edge rusher", LB: "linebacker", CB: "cornerback", S: "safety", DB: "defensive back", PK: "kicker", K: "kicker", P: "punter", LS: "long snapper", ATH: "athlete" };
 const YEAR_WORD = { 1: "freshman", 2: "sophomore", 3: "junior", 4: "senior", 5: "fifth-year senior" };
+// A jersey number said as words ("zero", "one", "twenty one"; speech hears "nine" as "non" / "nein") → 0–99 | null.
+const JERSEY_ONES = { zero: 0, oh: 0, o: 0, one: 1, won: 1, two: 2, to: 2, too: 2, three: 3, four: 4, for: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, non: 9, nein: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19 };
+const JERSEY_TENS = { twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90 };
+export function jerseyWord(s) {
+  const w = String(s || "").trim().toLowerCase().split(/[\s-]+/).filter(Boolean);
+  if (w.length === 1) return JERSEY_ONES[w[0]] ?? JERSEY_TENS[w[0]] ?? null;
+  if (w.length === 2 && JERSEY_TENS[w[0]] != null && JERSEY_ONES[w[1]] != null && JERSEY_ONES[w[1]] > 0 && JERSEY_ONES[w[1]] < 10) return JERSEY_TENS[w[0]] + JERSEY_ONES[w[1]];
+  return null;
+}
+const OFF_POS = new Set(["QB", "RB", "FB", "WR", "TE", "OL", "OT", "OG", "G", "C", "IOL", "ATH"]);
+const DEF_POS = new Set(["DL", "DE", "DT", "NT", "EDGE", "LB", "ILB", "OLB", "CB", "S", "DB", "SAF"]);
+// "running back" → the roster codes it covers.
+const POS_FROM_WORD = (w) => {
+  const t = String(w || "").trim().replace(/s$/, "");
+  const hit = Object.entries(POS_WORD).filter(([, v]) => v === t).map(([k]) => k);
+  if (/^(?:receiver|wideout)$/.test(t)) hit.push("WR");
+  if (/^(?:lineman|offensive lineman)$/.test(t)) hit.push("OL", "OT", "OG", "G", "C");
+  if (/^(?:corner)$/.test(t)) hit.push("CB");
+  if (/^(?:defensive back)$/.test(t)) hit.push("CB", "S", "DB");
+  if (/^(?:safety)$/.test(t)) hit.push("DB");
+  if (/^(?:edge)$/.test(t)) hit.push("EDGE", "DE");
+  return hit.length ? new Set(hit) : null;
+};
 const whoRow = (r) => {
   const pos = POS_WORD[String(r.pos || "").toUpperCase()] || "";
   const yr = r.yr > 1000 ? "freshman" : YEAR_WORD[r.yr] || "";
@@ -128,20 +151,31 @@ export const LEADER_INTENTS = [
     title: "Who wears a number",
     examples: ["who is number 32 on Florida State", "who wears 7 for LSU"],
     patterns: [
-      /^who(?:'s|s| is| wears| has| was) (?:wearing )?(?:number|no|#|jersey number|jersey) ?(?<no>\d+) (?:on|for|at|with|in) (?:the )?(?<team>.+?)(?: this year| this season| now)?$/,
+      // "who is the running back number 21 on Houston", "who's the wide receiver number zero in Cincinnati"
+      /^who(?:'s|s| is| wears| has| was) (?:wearing )?(?:the )?(?:(?<pos>running back|wide receiver|receiver|quarterback|tight end|cornerback|corner|safety|linebacker|edge rusher|edge|defensive end|defensive tackle|defensive back|defensive lineman|offensive lineman|offensive tackle|lineman|kicker|punter|center|guard|fullback|athlete) )?(?:number|no|#|jersey number|jersey) ?(?<no>\d+|[a-z]+(?: [a-z]+)?) (?:on|for|at|with|in) (?:the )?(?<team>.+?)(?: this year| this season| now)?$/,
       /^who wears (?<no>\d+) (?:on|for|at) (?:the )?(?<team>.+)$/,
-      /^(?:number|no|#) ?(?<no>\d+) (?:on|for|at) (?:the )?(?<team>.+?)(?: who(?:'s|s| is) (?:he|that|it|this))?$/,
+      /^(?:number|no|#) ?(?<no>\d+|[a-z]+(?: [a-z]+)?) (?:on|for|at) (?:the )?(?<team>.+?)(?: who(?:'s|s| is) (?:he|that|it|this))?$/,
       /^who(?:'s|s| is) (?:the )?(?<team>.+?)(?:'s|s)? (?:number|no|#) ?(?<no>\d+)$/,
     ],
-    // Digits only ("who's number one on my board" is the board).
-    accept: (s) => /^\d+$/.test(s.no || "") && !/\b(?:board|we draft|class)\b/.test(s.team || ""),
-    run: async ({ no, team }, ctx) => {
-      const school = schoolSaid(team, await schoolRows(ctx));
-      if (!school) return miss(`I don't know the school "${team}".`, "jersey-no-school");
-      const k = /^\d+$/.test(no) ? Number(no) : nWord(no);
+    // A number, said as digits or words — not "number one on my board / We-Draft / in the class" (the boards).
+    accept: (s) => (/^\d+$/.test(s.no || "") || jerseyWord(s.no) != null) && !/\b(?:board|we draft|class|country|nation|nfl|draft|ranking|rankings)\b/.test(s.team || "")
+      && (!s.pos || !!POS_FROM_WORD(s.pos))
+      // "number one at quarterback / in rushing yards" is a ranking, not a jersey.
+      && !POS_FROM_WORD(s.team) && !/\b(?:rushing|passing|receiving|yards|sacks|tackles|touchdowns|interceptions|position|overall|quarterbacks?|receivers?|backs?|linemen|rushers?)\b/.test(s.team || ""),
+    run: async ({ no, team, pos }, ctx) => {
+      // "West Virginia's defense" → West Virginia, defense only.
+      const side = (String(team).match(/\b(offense|defense|offensive|defensive)$/) || [])[1] || null;
+      const teamName = String(team).replace(/(?:'s|s')?\s+(?:offense|defense|offensive|defensive)(?: side)?$/, "");
+      const school = schoolSaid(teamName, await schoolRows(ctx));
+      if (!school) return miss(`I don't know the school "${teamName}".`, "jersey-no-school");
+      const k = /^\d+$/.test(no) ? Number(no) : jerseyWord(no);
       const roster = ctx.cfbdRoster ? await ctx.cfbdRoster(school).catch(() => null) : null;
       if (!roster?.players?.length) return miss(`I don't have ${school}'s roster.`, "jersey-no-roster");
-      const hits = roster.players.filter((p) => Number(p.no) === k);
+      const want = pos ? POS_FROM_WORD(pos) : null;
+      const sideOk = (p) => !side || (/^(?:off)/.test(side) ? OFF_POS : DEF_POS).has(String(p.pos || "").toUpperCase());
+      const all = roster.players.filter((p) => Number(p.no) === k);
+      const narrowed = all.filter((p) => sideOk(p) && (!want || want.has(String(p.pos || "").toUpperCase())));
+      const hits = narrowed.length ? narrowed : all;
       if (!hits.length) return { say: `Nobody on ${school}'s roster wears number ${k}.`, tone: "answer", gap: "jersey-none" };
       const people = await Promise.all(hits.map((p) => personFor(p, school, roster.teamId, ctx)));
       const said = hits.map((p) => `${p.first} ${p.last}${whoRow(p) ? `, ${whoRow(p)}` : ""}`);

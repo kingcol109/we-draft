@@ -115,10 +115,40 @@ export function splitSchool(said, people) {
   return null;
 }
 
+// ── Players already in the conversation (user, 2026-11-26: "if something sounds like
+// the name after it is talking about that player already, it should be easier to pick
+// that up") — "evangelist" right after Evan Tengesdahl, "main chroma" after Kromah. ──
+const squashed = (s) => plain(s).replace(SUFFIX_ANY, "").replace(/[^a-z]/g, "");
+/** How well the words could be this player, loosely: 0–1. Only for someone just talked about. */
+export function looseScore(said, p) {
+  const words = plain(said).split(" ").filter((w) => w && !SUFFIX.test(w));
+  const s = squashed(said);
+  if (!s || s.length < 3) return 0;
+  const { first, last } = partsOf(p);
+  let best = Math.max(nameScore(said, p), sim(s, first + last), 0.95 * sim(s, last));
+  // One word that runs his name together ("evangelist" — Evan Tengesdahl; "kromahs").
+  if (words.length === 1) {
+    if (first.length >= 3 && s.startsWith(first)) best = Math.max(best, 0.7);
+    if (last.length >= 4 && (s.includes(last) || last.includes(s))) best = Math.max(best, 0.8);
+  }
+  // The last name sounds right, the first is mangled ("main chroma", "going to stockton").
+  const tail = words.length >= 2 ? words[words.length - 1] : "";
+  if (tail && wordScore(tail, last) >= 0.85) best = Math.max(best, 0.75);
+  return best;
+}
+/** The one recent player the words most likely mean → { player, score } | null. */
+export function recentPlayer(said, recent = [], bar = 0.6) {
+  const ranked = recent.filter(Boolean).map((p) => ({ p, s: looseScore(said, p) })).sort((a, b) => b.s - a.s);
+  const [a, b] = ranked;
+  if (!a || a.s < bar || (b && a.s - b.s < 0.05)) return null;
+  return { player: a.p, score: a.s };
+}
+
 function rank(key, people, sure) {
   const ranked = people.map((p) => ({ p, s: nameScore(key, p) })).filter((x) => x.s > 0.5).sort((a, b) => b.s - a.s);
   const best = ranked[0];
-  if (!best || best.s < sure) return { none: true, near: ranked.slice(0, 5).map((x) => x.p) };
+  // A near miss that's clearly ahead of the rest: the voice names just him ("Did you mean Gunner Stockton?").
+  if (!best || best.s < sure) return { none: true, near: ranked.slice(0, 5).map((x) => x.p), lead: best && best.s >= 0.7 && (!ranked[1] || best.s - ranked[1].s >= 0.08) };
   const close = ranked.filter((x) => best.s - x.s < RACE);
   if (close.length > 1) return { choices: close.slice(0, 6).map((x) => x.p) };
   return { player: best.p, score: best.s };
@@ -148,7 +178,7 @@ export function findPlayer(said, people, aliases = {}) {
     if (!all.none) return { ...all, said };
     const elsewhere = rank(at.name, people, SURE);
     const near = [...r.near, ...(elsewhere.near || elsewhere.choices || [elsewhere.player])].filter((p, i, a) => p && a.indexOf(p) === i).slice(0, 5);
-    return { none: true, said, school: at.school, near };
+    return { none: true, said, school: at.school, near, lead: !!r.lead };
   }
   return { ...rank(key, people, SURE), said };
 }

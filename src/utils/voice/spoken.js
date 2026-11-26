@@ -87,6 +87,12 @@ export function forSpeech(text) {
   return String(text || "")
     .replace(/\s*·\s*/g, ", ")
     .replace(/#(\d+)/g, "number $1")
+    // Name suffixes said in full (voice note 2026-11-26: "it's reading Junior as J R").
+    .replace(/\b([A-Z][A-Za-z'’-]+),? Jr\.?(?=[\s,.;:!?)]|$)/g, "$1 Junior")
+    .replace(/\b([A-Z][A-Za-z'’-]+),? Sr\.?(?=[\s,.;:!?)]|$)/g, "$1 Senior")
+    .replace(/\b([A-Z][A-Za-z'’-]+) III(?=[\s,.;:!?)]|$)/g, "$1 the Third")
+    .replace(/\b([A-Z][A-Za-z'’-]+) II(?=[\s,.;:!?)]|$)/g, "$1 the Second")
+    .replace(/\b([A-Z][A-Za-z'’-]+) IV(?=[\s,.;:!?)]|$)/g, "$1 the Fourth")
     .replace(/\b(\d{1,3})\s*[-–]\s*(\d{1,3})\b(?!\s*(?:\d|yard|yd))/g, "$1 to $2")
     .replace(/\s+/g, " ")
     .trim();

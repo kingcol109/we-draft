@@ -417,6 +417,30 @@ const TOPICS = {
     return { say: `${say}${a.rookie ? ` He'll be ${a.estimated ? "about " : ""}${a.rookie} as a rookie.` : ""}`, rows: [["Age", `${a.estimated ? "~" : ""}${a.age}`], ...(a.born ? [["Born", a.born]] : []), ...(a.rookie ? [["Rookie age", `${a.estimated ? "~" : ""}${a.rookie}`]] : [])] };
   },
   home: (d, ctx) => (d.Hometown ? { say: phrase(ctx, "bg.home", { name: nameOf(d), home: d.Hometown }), rows: [["Hometown", d.Hometown]] } : hsText(d) ? { say: `I don't have a hometown for ${nameOf(d)}, but he went to high school at ${hsText(d)}.`, rows: [["High school", hsText(d)]] } : { gap: "no-hometown", say: `I don't know where ${nameOf(d)} is from.` }),
+  // "Tell me more" / "give me some background" (user, 2026-11-26): where he's from, how he was
+  // recruited, where he's played — told like a person would, not a list.
+  more: (d) => {
+    const he = nameOf(d);
+    const hs = d.HighSchool || null;
+    const stars = Number(d.RecruitStars) || null;
+    const rank = /^\d+$/.test(String(d.RecruitRank || "").replace(/^#/, "")) ? String(d.RecruitRank).replace(/^#/, "") : null;
+    const stops = (d.CareerStops || []).filter((s) => s.School);
+    const bits = [];
+    if (d.Hometown) bits.push(`${he} is from ${d.Hometown}${hs ? `, and played his high school ball at ${hs}` : ""}.`);
+    else if (hs) bits.push(`${he} played his high school ball at ${hs}${d.State ? ` in ${d.State}` : ""}.`);
+    if (stars) bits.push(`${bits.length ? "He" : he} came out as a ${stars}-star recruit${rank && rank !== "0" ? `, number ${rank} in the country` : ""}${d.RecruitYear ? `, in the class of ${d.RecruitYear}` : ""}.`);
+    const subj = bits.length ? "He" : he;
+    if (stops.length > 1) {
+      const last = stops[stops.length - 1];
+      const before = stops.slice(0, -1).map((s) => s.School);
+      bits.push(`${subj} started at ${list(before)} and transferred to ${last.School} in ${last.From}.`);
+    } else if (stops.length === 1) bits.push(`${subj}'s been at ${stops[0].School} since ${stops[0].From}.`);
+    const a = ageOf(d);
+    if (a) bits.push(`He's ${a.estimated ? "about " : ""}${Math.floor(Number(a.age))}.`);
+    if (!bits.length) return { gap: "no-background", say: `I don't have much background on ${he} yet.` };
+    const rows = [["Hometown", d.Hometown], ["High school", hsText(d)], ["Recruiting", stars ? `${stars}★${rank ? ` · #${rank}` : ""}${d.RecruitYear ? ` · ${d.RecruitYear}` : ""}` : null], ...stops.map((s) => ["College", stopText(s)]), ["Age", a ? `${a.estimated ? "~" : ""}${a.age}` : null]].filter(([, v]) => v);
+    return { say: `${bits.join(" ")}${d.Bio ? ` Say "read his bio" for more.` : ""}`, rows };
+  },
   recruit: (d) => {
     const stars = Number(d.RecruitStars) || null;
     const rank = String(d.RecruitRank || "").replace(/^#/, "");
@@ -468,6 +492,13 @@ export const PLAYER_INTENTS = [
       /^how many stars (?:was|is|did) (?<who>.+?)(?: have)?(?: coming out of high school| out of high school| as a recruit| in high school)?$/,
       new RegExp(`^(?:what was |what's |whats |what is )?${WHO} (?:recruiting (?:ranking|rank|rating|profile|stars)|star rating|stars|recruiting)$`),
       /^(?:where|how high) was (?<who>.+?) ranked (?:as a recruit|coming out of high school|out of high school|in high school)$/,
+      // more / background
+      /^(?:tell me|give me|i want to know|i'd like to know|let me know) (?:a (?:little|bit|little bit) )?more (?:about|on) (?<who>.+)$/,
+      /^(?:give me|tell me|what's|whats|what is|what do you have for|i want|read me|share) (?:some |a little |a bit of |a little bit of |more |the |any )?(?:background|backstory|back story|history) (?:on|about|for|of) (?<who>.+)$/,
+      /^(?:what's|whats|what is) (?<who>.+?)(?:'s|s')? (?:background|backstory|back story|story)$/,
+      // hometown, more ways
+      /^what (?:state|city|town|part of (?:the country|[a-z ]+)) is (?<who>.+?) from$/,
+      /^where (?:did|does) (?<who>.+?) grow up$/,
     ],
     fixed: [
       { topic: "career" }, { topic: "career" }, { topic: "career" },
@@ -479,8 +510,15 @@ export const PLAYER_INTENTS = [
       { topic: "age" }, { topic: "age" }, { topic: "age" },
       { topic: "home" }, { topic: "home" },
       { topic: "recruit" }, { topic: "recruit" }, { topic: "recruit" },
+      { topic: "more", fresh: "1" }, { topic: "more" }, { topic: "more" },
+      { topic: "home" }, { topic: "home" },
     ],
-    run: async ({ player, topic }, ctx) => {
+    run: async ({ player, topic, fresh }, ctx) => {
+      // "Tell me more about Isaiah Johnson" about someone new (one just listed): who he is first.
+      if (topic === "more" && fresh && !ctx.same) {
+        const profile = ctx.intents?.find((i) => i.id === "player.profile");
+        if (profile) return profile.run({ player }, ctx);
+      }
       const d = await loaded(player, ctx);
       if (!d) return miss(`I couldn't load ${nameOf(player)}.`);
       const out = TOPICS[topic](d, ctx);

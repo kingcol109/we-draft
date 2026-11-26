@@ -193,7 +193,7 @@ export function makeVoiceData({ user = null } = {}) {
       const data = {
         uid, playerId: p.id, playerName: `${p.First || ""} ${p.Last || ""}`.trim(),
         grade: next.grade || "", strengths: next.strengths || [], weaknesses: next.weaknesses || [], nflFit: next.nflFit || "",
-        evaluation: prev?.evaluation || "", visibility: extra.visibility || prev?.visibility || "public", gameNotes: extra.gameNotes || prev?.gameNotes || [],
+        evaluation: extra.evaluation != null ? extra.evaluation : prev?.evaluation || "", visibility: extra.visibility || prev?.visibility || "public", gameNotes: extra.gameNotes || prev?.gameNotes || [],
         firstEvaluatedAt: prev?.firstEvaluatedAt || serverTimestamp(), updatedAt: serverTimestamp(),
       };
       await setDoc(doc(db, "players", p.id, "evaluations", uid), canonicalEvalData(data));

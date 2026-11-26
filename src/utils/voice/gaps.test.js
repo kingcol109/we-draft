@@ -48,7 +48,9 @@ const ask = async (t, ctx = ctxOf(), st = newState()) => respond(t, st, ctx);
 test("a misspelled board name doesn't jump to a CFBD stranger: it asks which one", async () => {
   // "osman kromer": a near miss for Kromah on the board (0.76), a loose CFBD match (0.80).
   const out = await ask("who is osman kromer");
-  expect(out.reply.say).toMatch(/Did you mean one of these\?$/);
+  // Said with the name (user, 2026-11-26: never "one of these" without saying who).
+  expect(out.reply.say).toMatch(/Did you mean Ousmane Kromah at Florida State\?$/);
+  expect(out.reply.speak).toBe("Did you mean Ousmane Kromah at Florida State?");
   expect(out.reply.choices.map((c) => c.id)).toEqual(["k", "cfbd_1"]);
   expect(out.state.pending.teach).toBe(true);
   // Close enough to the board's name: just him.
@@ -94,6 +96,8 @@ describe("the wake word", () => {
     expect(afterWake("that was a draft pick")).toBeNull();
     expect(afterWake("the draft is in april")).toBeNull();
     expect(WAKE.test("hey we draft dot com")).toBe(true);
+    // "Hey Film Manager" is the film editor's wake word, not this page's.
+    expect(afterWake("hey film manager how's kromah playing")).toBeNull();
   });
   test("a question with the wake word still in it is understood", async () => {
     expect((await ask("hey we draft how's kromah playing")).reply.say).toMatch(/^Ousmane Kromah has 48 rushing yards/);

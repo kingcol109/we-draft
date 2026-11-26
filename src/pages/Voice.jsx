@@ -27,7 +27,8 @@ import { applyPronunciations } from "../utils/voice/pronounce";
 import { forSpeech } from "../utils/voice/spoken";
 import { makeVoiceData } from "../utils/voice/data";
 import { logEntry, deviceOf } from "../utils/voice/log";
-import { listen, speak, hush, canListen, canSpeak, wakeListen, unlockSpeech, speechUnlocked, isIOS, speakTest, iosOtherBrowser, englishVoices, preferredVoiceName, setPreferredVoice } from "../utils/voice/speech";
+import { listen, speak, hush, canListen, canSpeak, wakeListen, unlockSpeech, speechUnlocked, isIOS, speakTest, iosOtherBrowser, englishVoices, onVoicesChanged, preferredVoiceName, setPreferredVoice } from "../utils/voice/speech";
+import { localWakeListen, canWakeLocally } from "../utils/voice/localWake";
 import { Orb, Stage } from "../components/voice/VoiceStage";
 
 // This page visit, for the conversation log (one sitting reads as one conversation).
@@ -47,7 +48,7 @@ const LIVE_REFRESH_MS = 30000;
 // The longest an answer may take before the page gives up on it.
 const ANSWER_LIMIT_MS = 15000;
 // "Microsoft Aria Online (Natural) - English (United States)" → "Aria (Natural)".
-const voiceLabel = (v) => String(v?.name || "").replace(/^(?:Microsoft|Google|Apple)\s+/i, "").replace(/\s+Online/i, "").replace(/\s*-\s*English.*$/i, "").trim() || v?.name || "";
+const voiceLabel = (v) => { const n = String(v?.name || "").replace(/^(?:Microsoft|Google|Apple)\s+/i, "").replace(/\s+Online/i, "").replace(/\s*-\s*English.*$/i, "").trim() || v?.name || ""; return v?.quality && !new RegExp(v.quality, "i").test(n) ? `${n} (${v.quality})` : n; };
 const load = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } };
 const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private window */ } };
 const TONE = { answer: C.ink, done: C.good, ask: C.gold, miss: C.bad };
@@ -77,11 +78,11 @@ export default function Voice() {
   // The voice picker: this device's English voices and the one picked (remembered here).
   const [voices, setVoices] = useState([]);
   const [voiceName, setVoiceName] = useState(() => preferredVoiceName());
-  useEffect(() => { englishVoices().then(setVoices).catch(() => {}); }, []);
+  useEffect(() => { englishVoices().then(setVoices).catch(() => {}); return onVoicesChanged(setVoices); }, []);
   const pickVoice = (name) => {
     setPreferredVoice(name);
     setVoiceName(name);
-    const v = voices.find((x) => x.name === name);
+    const v = voices.find((x) => x.id === name);
     speakTest(`This is ${v ? voiceLabel(v) : "the automatic voice"}.`);
   };
   // The logo pulses while it talks, a beat on each word.
@@ -102,7 +103,7 @@ export default function Voice() {
 
   useEffect(() => { setState((s) => ({ ...s, mode, pending: null })); }, [mode]);
   useEffect(() => { save(ALIAS_KEY, state.aliases); }, [state.aliases]);
-  useEffect(() => { save(LAST_KEY, { last: state.last || null, lastAsk: state.lastAsk || null }); }, [state.last, state.lastAsk]);
+  useEffect(() => { save(LAST_KEY, { last: state.last || null, lastAsk: state.lastAsk || null, recent: state.recent || [] }); }, [state.last, state.lastAsk, state.recent]);
   useEffect(() => { save(SPEAK_KEY, talk); if (!talk) { hush(); setSpeaking(false); } }, [talk]);
   useEffect(() => { save(BRIEF_KEY, brief); }, [brief]);
   useEffect(() => { voiceData.people(); voiceData.pronunciations(); }, [voiceData]); // warm the name list and how names are said
@@ -188,15 +189,19 @@ export default function Voice() {
     const id = Date.now();
     setLog((l) => [{ id, said, reply: out.reply }, ...l].slice(0, 40));
     setPendingFor(out.state.pending ? id : null);
+    // Dictating a scouting report: after each "Got it.", listen for the next point on its own
+    // (the iPad's Safari only starts the mic from a tap — there, tap the logo for each one).
+    const dictating = out.state.pending?.kind === "dictate";
+    const keepGoing = () => { if (dictating) setTimeout(() => dictateRef.current(), 250); };
     if (talk) {
       // After a spoken question, give iOS a moment to move the audio off the mic.
       const afterMic = meta.source === "voice" || meta.source === "wake" ? 350 : 0;
       setTimeout(() => speak(applyPronunciations(forSpeech(out.reply.speak || out.reply.say), voiceData.pronMap()), {
-        start: () => setSpeaking(true), end: () => setSpeaking(false), word: () => setBeat((b) => b + 1),
+        start: () => setSpeaking(true), end: () => { setSpeaking(false); keepGoing(); }, word: () => setBeat((b) => b + 1),
         // Swallowed (iOS before a tap has unlocked speech): offer "Tap to hear" on this answer.
         report: (r) => { speechReport(r); if (r.phase === "never" || r.phase === "error") setLog((l) => l.map((x) => (x.id === id ? { ...x, silent: true } : x))); },
       }), afterMic);
-    }
+    } else keepGoing();
     window.scrollTo?.({ top: 0, behavior: "smooth" });
   };
   // The logo: talking → stop talking; wake word on → it's listening already, so
@@ -236,7 +241,7 @@ export default function Voice() {
   };
   const next = async () => { setBusy(true); try { show("Next", remember(await more(stateRef.current, voiceData), "Next"), { source: "tap" }); } finally { setBusy(false); } };
 
-  const startListening = () => {
+  const startListening = (opts = {}) => {
     if (listening) { stopRef.current?.(); return; }
     if (iosOtherBrowser()) {
       setLog((l) => [{ id: Date.now(), said: "", reply: { say: "On the iPad, the microphone only works in Safari. Open we-draft.com/voice/admin in Safari, or type your question below.", tone: "miss" } }, ...l]);
@@ -255,10 +260,19 @@ export default function Voice() {
       final: (t) => { setInterim(""); ask(t, "voice"); },
       end: () => setListening(false),
       error: (code) => { setListening(false); if (code !== "no-speech" && code !== "aborted") setLog((l) => [{ id: Date.now(), said: "", reply: { say: code === "not-allowed" ? "The microphone is blocked. Allow it for this site." : `The microphone stopped (${code}).`, tone: "miss" } }, ...l]); },
-    });
+    // Dictating, or a tap during a dictation: people pause to think between sentences.
+    }, opts.slower || stateRef.current?.pending?.kind === "dictate" ? { slower: 1.4, nothingMs: 15000 } : {});
   };
   const listenRef = useRef(startListening);
   listenRef.current = startListening;
+  // The next point of a dictated report: the wake word's window, else the mic (not on iOS — it needs a tap).
+  const continueDictation = () => {
+    if (stateRef.current?.pending?.kind !== "dictate" || listening) return;
+    if (wakeOn && wakeRef.current) { wakeRef.current.wake(); return; }
+    if (canListen() && !isIOS() && !iosOtherBrowser()) startListening({ slower: true });
+  };
+  const dictateRef = useRef(continueDictation);
+  dictateRef.current = continueDictation;
   const orbRef = useRef(tapOrb);
   orbRef.current = tapOrb;
   const askRef = useRef(null);
@@ -272,14 +286,43 @@ export default function Voice() {
     if (!canListen()) { setWakeNote("This browser can't listen. Use Chrome for “Hey We-Draft”."); setWakeOn(false); return undefined; }
     setWakeNote("");
     let closeTimer = null;
-    const ctl = wakeListen({
+    let ctl = null;
+    let gone = false;
+    const handlers = {
       wake: () => { setAwake(true); setInterim(""); clearTimeout(closeTimer); closeTimer = setTimeout(() => { setAwake(false); setInterim(""); }, 8000); },
       heard: (t) => setInterim(t),
       question: (t) => { clearTimeout(closeTimer); setAwake(false); setInterim(""); askRef.current(t, "wake"); },
-      unsupported: () => { setWakeNote("This browser won't keep the microphone on. “Hey We-Draft” works in Chrome; here, tap the logo."); setWakeOn(false); },
-    }, () => quietRef.current);
-    wakeRef.current = ctl;
-    return () => { clearTimeout(closeTimer); ctl.stop(); wakeRef.current = null; };
+    };
+    // Chrome's own speech service as the wake listener (the old way): it stops in a background tab.
+    const startChromeWake = () => {
+      ctl = wakeListen({
+        ...handlers,
+        unsupported: () => { setWakeNote("This browser won't keep the microphone on. “Hey We-Draft” works in Chrome; here, tap the logo."); setWakeOn(false); },
+      }, () => quietRef.current);
+      wakeRef.current = ctl;
+    };
+    // Heard on this computer (user, 2026-11-26): keeps listening with the tab in the background.
+    if (canWakeLocally()) {
+      ctl = localWakeListen({
+        ...handlers,
+        state: (s) => setWakeNote(
+          s === "loading" ? "Loading the wake word (first time only, ~40 MB)…"
+          : s === "needs-tap" ? "Click anywhere on the page to start listening."
+          : s === "mic-lost" ? "Microphone disconnected — reconnecting…"
+          : ""),
+        unsupported: (why) => {
+          if (gone) return;
+          if (why === "not-allowed") { setWakeNote("Microphone blocked. Allow it for this site (lock icon in the address bar), then turn the wake word on again."); setWakeOn(false); return; }
+          setWakeNote("Couldn't load the background wake word — listening the old way (keep this tab in front).");
+          ctl?.stop();
+          startChromeWake();
+        },
+      }, () => quietRef.current);
+      wakeRef.current = ctl;
+    } else {
+      startChromeWake();
+    }
+    return () => { gone = true; clearTimeout(closeTimer); ctl?.stop(); wakeRef.current = null; };
   }, [wakeOn]);
 
   // A live game's answer on screen: re-ask it every 30 seconds, quietly (no
@@ -348,12 +391,12 @@ export default function Voice() {
         {/* Which voice — this device's English voices, the natural-sounding ones (★) first. */}
         {canSpeak() && voices.length > 1 && (
           <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-            <select value={voiceName} onChange={(e) => pickVoice(e.target.value)} title="The voice it answers in (remembered on this device)" aria-label="Voice"
+            <select value={(voices.find((v) => v.id === voiceName || v.name === voiceName) || {}).id || voiceName} onChange={(e) => pickVoice(e.target.value)} title="The voice it answers in (remembered on this device)" aria-label="Voice"
               style={{ ...ghost, maxWidth: 220, padding: "6px 10px", background: C.panel, appearance: "auto" }}>
               <option value="">Voice: automatic</option>
-              {voices.map((v) => <option key={v.name} value={v.name}>{v.natural ? "★ " : ""}{voiceLabel(v)}</option>)}
+              {voices.map((v) => <option key={v.id} value={v.id}>{v.natural ? "★ " : ""}{voiceLabel(v)}</option>)}
             </select>
-            <button type="button" onClick={() => speakTest(`This is ${voiceName ? voiceLabel(voices.find((v) => v.name === voiceName) || { name: voiceName }) : "the automatic voice"}. How's Kromah playing?`, speechReport)} title="Hear this voice" aria-label="Hear this voice" style={{ ...ghost, padding: "6px 10px" }}>▶</button>
+            <button type="button" onClick={() => speakTest(`This is ${voiceName ? voiceLabel((voices.find((v) => v.id === voiceName) || voices.find((v) => v.name === voiceName)) || { name: voiceName }) : "the automatic voice"}. How's Kromah playing?`, speechReport)} title="Hear this voice" aria-label="Hear this voice" style={{ ...ghost, padding: "6px 10px" }}>▶</button>
           </span>
         )}
       </header>
@@ -455,6 +498,9 @@ function Answer({ item, big: isNow, pending, onPick, onConfirm, onAsk, onNext, b
 
       {r.body && (
         <div style={{ marginTop: 12, padding: isNow ? "12px 14px" : "8px 10px", borderRadius: 10, background: "#0f172a", border: `1px solid ${C.line}`, fontSize: isNow ? 15 : 12, lineHeight: 1.5, whiteSpace: "pre-wrap", maxHeight: isNow ? 320 : 90, overflow: "auto" }}>{r.body}</div>
+      )}
+      {isNow && r.tips?.length > 0 && (
+        <div style={{ marginTop: 8, fontSize: 12, color: C.soft }}>Say: {r.tips.map((x) => `“${x}”`).join(" · ")}</div>
       )}
 
       {r.help && (

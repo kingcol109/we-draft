@@ -35,7 +35,7 @@ export const FACT_INTENTS = [
     examples: ["how big is Kromah", "what are Kromah's measurements", "Kromah's height and weight"],
     patterns: [
       /^how (?:big|tall and heavy) is (?<who>.+)$/,
-      new RegExp(`^(?:what (?:is|are) |what's |whats )?(?:the )?${WHO} (?:measurements|size|height and weight|measurables|listed size|height weight)$`),
+      new RegExp(`^(?:what (?:is|are|were|was) |what's |whats )?(?:the )?${WHO} (?:combine )?(?:measurements|size|height and weight|measurable(?:'s|s)|measureables|listed size|height weight)$`),
       /^what (?:is|are) (?:the )?(?:measurements|size|height and weight) (?:of|for) (?<who>.+)$/,
     ],
     run: async ({ player }, ctx) => {

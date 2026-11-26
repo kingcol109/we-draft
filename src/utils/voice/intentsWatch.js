@@ -190,6 +190,7 @@ export const WATCH_INTENTS = [
       const named = [];
       const offBoard = [];
       const cards = []; // the players named, drawn on the page
+      const spokenPicks = [];
       for (const { school, side } of asks) {
         const posSet = side === "offense" ? OFFENSE : DEFENSE;
         // Our board's prospects there (not already on yours), best class rank first.
@@ -209,6 +210,10 @@ export const WATCH_INTENTS = [
           if (top && top.value > 0 && !prod.some((x) => x.id === top.id)) prod.push(top);
         });
         const label = `${school} ${side}`;
+        // Spoken: the board's best two, then one producer not already named — three at most.
+        const picks = [...ranked.slice(0, 2).map(({ p }) => `${p.first} ${p.last}`), ...prod.map((l) => l.name)]
+          .filter((n, i, a) => n && a.indexOf(n) === i).slice(0, 3);
+        if (picks.length) spokenPicks.push(`${spokenPicks.length ? `On ${school}'s ${side}` : `On the ${school} ${side}`}, ${spokenPicks.length ? "" : "keep an eye on "}${list(picks)}.`);
         const boardBit = ranked.length ? `on our board, ${list(ranked.slice(0, 4).map(({ p, rank }) => `${p.first} ${p.last}, ${POS_NAMES[p.pos] || p.pos}${rank < 9999 ? `, ranked ${ordinal(rank)} in the ${p.cls} class` : `, ${p.cls} class`}`))}` : "";
         const prodBit = prod.length ? `producing this season: ${list(prod.map((l) => `${l.pos ? `${l.pos} ` : ""}${l.name} with ${LEADER[l.cat][1](l.value)}`))}` : "";
         say.push(`${label}: ${[boardBit, prodBit].filter(Boolean).join(". And ") || "nobody stands out on our board or in ESPN's leaders"}`);
@@ -222,6 +227,9 @@ export const WATCH_INTENTS = [
       }
       const one = named.length === 1 ? named[0] : null;
       return {
+        // Out loud: two or three names a side, not the whole list (user, 2026-11-25: "the graphic
+        // doesn't need to be a transcript"). The screen keeps everyone.
+        speak: spokenPicks.length ? spokenPicks.join(" ") : undefined,
         say: join(`${say.join(". ")}.`, one ? hint(ctx, "watchlist", `Say "add him to my watchlist" to save ${one.first} ${one.last}.`) : named.length > 1 ? hint(ctx, "watchlist", `Say "add them to my watchlist" to save the ones on our board.`) : ""),
         title: "Worth watching", sub: asks.map((a) => `${a.school} ${a.side}`).join(" · "), rows, people: cards, tone: "answer",
         ...(one ? { focus: one } : {}), ...(named.length ? { group: named } : {}), ...(!named.length && offBoard.length === 1 ? { offBoard: offBoard[0] } : {}),

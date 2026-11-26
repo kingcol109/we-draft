@@ -44,6 +44,7 @@ import { gameStory, bestGamesSpoken, gameOf } from "./spoken";
 import { LEADER_INTENTS } from "./intentsLeaders";
 import { GAME_INTENTS } from "./intentsGames";
 import { NFL_INTENTS } from "./intentsNfl";
+import { REPORT_INTENTS } from "./intentsReport";
 
 const LIST = "(?<list>strengths?|weakness(?:es)?)";
 const listOf = (l) => (/^s/.test(l) ? "strengths" : "weaknesses");
@@ -51,8 +52,13 @@ const listOf = (l) => (/^s/.test(l) ? "strengths" : "weaknesses");
 // "in 2025 against ohio state and lsu" → { seasons, opps } | null (words it can't place).
 const SEASON_RE = /\b(?:in |during |for |from |over |of )?(?:the )?(?:20\d\d(?: (?:and|or|to) 20\d\d)*|this (?:season|year)|last (?:season|year)|current season|(?:his )?career|all time|in college)(?: season)?\b/g;
 export function parseRest(rest) {
-  const t = plain(rest || "");
+  let t = plain(rest || "");
   if (!t) return { seasons: null, opps: [] };
+  // "last week", "in his last game", "on saturday" — his most recent game (log 2026-11-26).
+  const LAST_GAME = /\b(?:(?:in |during |on )?(?:his |the )?(?:last|latest|most recent|previous) (?:game|week|weekend|outing|time out)|(?:on |this |last )?saturday|last night|yesterday)\b/;
+  let lastGame = false;
+  if (LAST_GAME.test(t)) { lastGame = true; t = t.replace(LAST_GAME, " ").replace(/\s+/g, " ").trim(); }
+  if (lastGame && !t) return { seasons: null, opps: [], lastGame };
   let opps = [];
   const om = t.match(/\b(?:against|vs|versus|verse|v|facing|playing)\s+(.+?)(?=\s+(?:in|during|this|last|for|over)\b|$)/);
   let left = t;
@@ -64,7 +70,7 @@ export function parseRest(rest) {
   const seasonWords = (left.match(SEASON_RE) || []).join(" ");
   left = left.replace(SEASON_RE, " ").replace(/\b(?:so far|this|games?|the|in|total|overall|on the season|season|with|up with|the year with|the season with|year|finish|finished|end|ended)\b/g, " ").trim();
   if (left) return null;
-  return { seasons: seasonWords, opps, ...(at ? { at } : {}) };
+  return { seasons: seasonWords, opps, ...(at ? { at } : {}), ...(lastGame ? { lastGame } : {}) };
 }
 // The seasons he spent at a school (his career stops) → ["2025"] | null
 function yearsAt(d, at, years) {
@@ -82,6 +88,13 @@ export async function lineFor(d, ctx, restText) {
   const data = await ctx.seasons(d);
   if (!data || !data.years.length) return { gap: "no-stats" };
   const sel = seasonsSaid(rest.seasons, data.years);
+  if (rest.lastGame) {
+    const latest = data.years[data.years.length - 1];
+    const games = (await ctx.games(d, [latest])).filter((g) => g.date).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    const g = games[games.length - 1];
+    if (!g) return { gap: "no-season" };
+    return { line: g.line, label: `vs ${g.opp}`, games: [g], missed: [], kind: "vs", opps: [g.opp], data };
+  }
   if (rest.opps.length) {
     const years = Array.isArray(sel) ? sel : null; // default / career: every season
     const games = await ctx.games(d, years || data.years);
@@ -199,7 +212,7 @@ const BASE = [
     mode: "general",
     title: "How a player did against a team",
     examples: ["how did Kromah do against Alabama", "how did Kromah play this season"],
-    patterns: [/^how (?:did|does|has|was) (?<who>.+?) (?:do|play|look|perform|fare|done|played|looked|been)(?: (?<rest>.+))?$/],
+    patterns: [/^how (?:did|does|has|have|was) (?<who>.+?)(?:(?:been|done) )?(?:doing|playing|looking|performing|faring|do|play|look|perform|fare|done|played|looked|performed|been)(?: (?<rest>.+))?$/],
     accept: restOk,
     run: async ({ player, rest }, ctx) => {
       const d = await loaded(player, ctx);
@@ -283,11 +296,18 @@ const BASE = [
       new RegExp(`^(?:read|read me|read off|give me|tell me|pull up|what is|what's|whats)? ?(?:the )?${WHO} (?:scouting report|report|writeup|profile summary)$`),
       /^(?:read|read me|give me|tell me) (?:his|the) (?:scouting report|report|write up|writeup)$/,
     ],
+    fixed: [{}, {}, {}, {}, { who: "his" }],
     run: async ({ player }, ctx) => {
       const d = await loaded(player, ctx);
       if (!d) return miss(`I couldn't load ${nameOf(player)}.`);
       const bio = String(d.Bio || "").replace(/^["“]+|["”]+$/g, "").trim();
-      if (!bio) return miss(`${nameOf(d)} doesn't have a bio yet.`, "no-bio", d);
+      if (!bio) {
+        // No bio: the community's write-ups instead, if there are any.
+        const evals = ctx.intents?.find((i) => i.id === "evals.public");
+        const out = evals && ctx.publicEvals ? await evals.run({ player }, ctx).catch(() => null) : null;
+        if (out && out.tone !== "miss") return { ...out, say: `There's no bio for ${nameOf(d)} yet, so here's the community's. ${out.say}` };
+        return miss(`${nameOf(d)} doesn't have a bio or a public evaluation yet.`, "no-bio", d);
+      }
       return { say: bio, ...card(d), body: bio, tone: "answer" };
     },
   },
@@ -397,7 +417,11 @@ const BASE = [
       /^how (?:did i grade|do i have|have i got|did i rank|do i see|did i list) (?<who>.+?)(?: (?:listed|graded|ranked|on my board|rated))?$/,
       /^where do i have (?<who>.+?)(?: (?:listed|graded|ranked|on my board))?$/,
       /^what do i (?:have|think) (?:on |of |about )?(?<who>.+)$/,
+      // "do I have a scouting report for X", "what's my scouting report on him" (log 2026-11-26)
+      /^(?:do i have|did i write|did i do|have i written|have i done|is there) (?:a |an |my )?(?<part>scouting report|report|evaluation|eval|write up|writeup) (?:on|for|of|about) (?<who>.+)$/,
+      /^(?:what is |what's |whats |read |read me )?my (?<part>scouting report|report|evaluation|eval|write up|writeup|grade|take)$/,
     ],
+    fixed: [{}, {}, {}, {}, {}, {}, {}, { who: "his" }],
     run: async ({ player, part = "" }, ctx) => {
       const d = await loaded(player, ctx);
       if (!d) return miss(`I couldn't load ${nameOf(player)}.`);
@@ -609,6 +633,7 @@ export const INTENTS = [
   ...READOUT_INTENTS,
   // Notes and suggestions first (their words can be anything); "request / add <player>" last.
   ...REQUEST_INTENTS.filter((i) => i.id !== "request.player"),
+  ...REPORT_INTENTS,
   ...LEADER_INTENTS, ...GAME_INTENTS, ...NFL_INTENTS,
   ...WATCH_INTENTS, ...BOARD_INTENTS, ...NOTE_INTENTS,
   byId["my.read"], byId["my.grade"], byId["my.traits"], byId["my.fit"],
@@ -630,7 +655,7 @@ export const INTENTS = [
 //   save:   writes something about him (your grade, traits, fit, notes, watchlist; admin edits)
 //   status: We-Draft.com's own data on him (rank, evaluations, community, comps, projection, bio)
 const WE_DRAFT_ONLY = {
-  "my.grade": "save", "my.traits": "save", "my.fit": "save", "my.note": "save", "watchlist.add": "save", "player.set": "save",
+  "my.grade": "save", "my.report": "save", "my.traits": "save", "my.fit": "save", "my.note": "save", "watchlist.add": "save", "player.set": "save",
   "my.read": "status", "my.notes.read": "status", "player.rank": "status", "evals.public": "status", "community.traits": "status",
   "player.comps": "status", "draft.projection": "status", "followup.rank": "status", "player.bio": "status", "film.count": "status",
   "player.onWeDraft": "status", "analytics.player": "status",

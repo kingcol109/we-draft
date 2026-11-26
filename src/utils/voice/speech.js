@@ -5,9 +5,22 @@
 // One question per listen; the page starts it from the mic button / Space.
 // Hands-free (a wake word, "Hey We-Draft") is the next layer on top of this.
 
-// Words unchanged this long = done talking (Safari's own pause is 1.5–3 s).
-// Doubled (user, 2026-11-25: "it stops listening way too fast").
-const QUIET_MS = 1800;
+// When the question is over (user, 2026-11-25 and again 2026-11-26: "it stops listening way too
+// fast … should be at least double", "it cuts the user off too often"). The browser's own end of
+// speech (~1 s in Chrome) no longer ends the question: the mic stays open until the words have
+// stopped for QUIET_MS — longer when the last word can't end a sentence ("…a better job of").
+export const QUIET_MS = 2600;
+const QUIET_UNFINISHED_MS = 4000;
+const MAX_LISTEN_MS = 30000; // one question, at most
+const NOTHING_MS = 8000; // nothing said at all: give up
+// Words a question can't end on ("…a better job of", "how many rushing yards did his"). Not ones a
+// question often ends with ("does he have", "where is he from", "who does he compare to").
+const UNFINISHED = /\b(?:and|or|but|the|a|an|of|for|about|by|than|his|her|their|my|your|our|is|was|are|were|how|what|which|who|where|when|many|much|me|against|vs|versus|between|if|um|uh|because|some|any)$/i;
+/** How long to wait after these words before taking them as the question. */
+export const quietFor = (text) => {
+  const t = String(text || "").trim();
+  return !t || t.split(/\s+/).length <= 2 || UNFINISHED.test(t) ? QUIET_UNFINISHED_MS : QUIET_MS;
+};
 export const canListen = () => typeof window !== "undefined" && !!(window.SpeechRecognition || window.webkitSpeechRecognition);
 export const canSpeak = () => typeof window !== "undefined" && "speechSynthesis" in window;
 
@@ -25,7 +38,7 @@ const RETRIES = 2;
  * report({ phase: "start" | "cut-off" | "error" | "end", error?, ms, retry, heard }) }
  * → stop()
  */
-export function listen(on) {
+export function listen(on, opts = {}) {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) { on.error?.("unsupported"); return () => {}; }
   let rec = null;
@@ -34,13 +47,32 @@ export function listen(on) {
   let retry = 0;
   let heard = false;
   let t0 = 0;
+  let text = ""; // everything heard so far
+  const ios = isIOS();
   // iOS only lets the mic start from a tap — a retry from a timer just flickers.
-  const retries = isIOS() ? 0 : RETRIES;
+  const retries = ios ? 0 : RETRIES;
+  const nothingMs = opts.nothingMs || NOTHING_MS;
+  let settle = null;
+  let cap = null;
+  let idle = null;
+  const finish = (said) => {
+    if (done) return;
+    const q = String(said || "").trim();
+    if (!q) return;
+    done = true;
+    clearTimeout(settle); clearTimeout(cap); clearTimeout(idle);
+    // Let go of the mic first — iOS keeps the audio set up for recording
+    // (answers play quietly or not at all) until recognition has stopped.
+    try { rec.abort(); } catch { /* stopped */ }
+    on.final?.(q);
+  };
   const begin = () => {
     rec = new SR();
     rec.lang = "en-US";
     rec.interimResults = true;
-    rec.continuous = false;
+    // Continuous: a pause mid-question doesn't end it — the quiet timer does. Safari on the
+    // iPad keeps its own one-shot mode (its continuous mode is unreliable); its pause is longer.
+    rec.continuous = !ios;
     rec.maxAlternatives = 1;
     t0 = Date.now();
     rec.onstart = () => on.report?.({ phase: "start", retry, ms: 0 });
@@ -53,6 +85,8 @@ export function listen(on) {
     };
     rec.onend = () => {
       if (done || stopped) { on.end?.(); return; }
+      // The browser ended it with words heard (Safari's own end of speech, a network blip): that's the question.
+      if (text.trim()) { finish(text); on.end?.(); return; }
       const ms = Date.now() - t0;
       if (!heard && ms < CUT_OFF_MS && retry < retries) {
         retry += 1;
@@ -65,29 +99,27 @@ export function listen(on) {
     };
     try { rec.start(); } catch (e) { on.report?.({ phase: "error", error: e.message, retry, ms: 0 }); on.error?.(e.message); }
   };
-  // Speed (user, 2026-11-25): Safari waits through a long silence before calling a
-  // result final. Once the words have stopped changing for QUIET_MS, that's the question.
-  let settle = null;
-  const finish = (text) => {
-    if (done || !text) return;
-    done = true;
-    clearTimeout(settle);
-    try { rec.abort(); } catch { /* stopped */ }
-    on.final?.(text);
-  };
   function onResult(e) {
-    let text = "";
-    let final = false;
-    for (let i = 0; i < e.results.length; i += 1) { text += e.results[i][0].transcript; if (e.results[i].isFinal) final = true; }
-    if (text.trim()) heard = true;
+    let all = "";
+    for (let i = 0; i < e.results.length; i += 1) all += `${e.results[i][0].transcript} `;
+    text = all.replace(/\s+/g, " ").trim();
+    if (!text) return;
+    if (!heard) { heard = true; clearTimeout(idle); cap = setTimeout(() => finish(text), MAX_LISTEN_MS); }
+    on.interim?.(text);
+    // Done when the words stop for a while — not at the browser's first short pause.
     clearTimeout(settle);
-    if (!final && text.trim()) settle = setTimeout(() => finish(text.trim()), QUIET_MS);
-    // Final: let go of the mic first — iOS keeps the audio set up for recording
-    // (answers play quietly or not at all) until recognition has stopped.
-    if (final) finish(text.trim()); else on.interim?.(text.trim());
+    settle = setTimeout(() => finish(text), quietFor(text) * (opts.slower || 1));
   }
   begin();
-  return () => { stopped = true; try { rec?.stop(); } catch { /* already stopped */ } };
+  // Nothing said at all: stop (Chrome's continuous mode would otherwise wait a long time).
+  idle = setTimeout(() => { if (!heard && !done && !stopped) { stopped = true; try { rec?.stop(); } catch { /* stopped */ } } }, nothingMs);
+  // stop(): the person tapped to stop — take what was heard so far. stop({ discard: true }): drop it.
+  return (o = {}) => {
+    if (!o.discard && !done && text.trim()) { finish(text); return; }
+    done = done || !!o.discard;
+    stopped = true; clearTimeout(settle); clearTimeout(cap); clearTimeout(idle);
+    try { rec?.stop(); } catch { /* already stopped */ }
+  };
 }
 
 /**
@@ -104,7 +136,7 @@ const NATURAL = /natural|neural|online|premium|enhanced|siri|google/i;
 // The voice to use: the one picked on this device, else a US English one (on the device first).
 function chooseVoice(vs) {
   const want = preferredVoiceName();
-  return (want && vs.find((v) => v.name === want)) || vs.find((v) => /^en[-_]US$/i.test(v.lang) && v.localService) || vs.find((v) => /^en[-_]US$/i.test(v.lang)) || vs.find((v) => /^en/i.test(v.lang)) || null;
+  return (want && (vs.find((v) => v.voiceURI === want) || vs.find((v) => v.name === want))) || vs.find((v) => /^en[-_]US$/i.test(v.lang) && v.localService) || vs.find((v) => /^en[-_]US$/i.test(v.lang)) || vs.find((v) => /^en/i.test(v.lang)) || null;
 }
 
 // The device's voices load in the background (iOS especially); speaking before
@@ -123,13 +155,35 @@ function voiceReady() {
   });
 }
 
-/** The browser's English voices for the picker, natural-sounding first: [{ name, lang, natural, local }]. */
+// iOS gives a downloaded Premium / Enhanced voice the SAME name as the basic one
+// ("Ava" twice) — only voiceURI (com.apple.voice.premium.en-US.Ava) tells them apart.
+const voiceQuality = (v) => (/premium/i.test(v.voiceURI || "") || /premium/i.test(v.name) ? "Premium"
+  : /enhanced/i.test(v.voiceURI || "") || /enhanced/i.test(v.name) ? "Enhanced" : "");
+
+/** The browser's English voices for the picker, natural-sounding first: [{ id, name, quality, lang, natural, local }]. id = voiceURI. */
 export function englishVoices() {
   if (!canSpeak()) return Promise.resolve([]);
-  return voiceReady().then(() => (window.speechSynthesis.getVoices() || [])
+  return voiceReady().then(() => listEnglish());
+}
+function listEnglish() {
+  const seen = new Set();
+  return (window.speechSynthesis.getVoices() || [])
     .filter((v) => /^en/i.test(v.lang))
-    .map((v) => ({ name: v.name, lang: v.lang, natural: NATURAL.test(v.name), local: !!v.localService }))
-    .sort((a, b) => (b.natural - a.natural) || (/en[-_]US/i.test(b.lang) - /en[-_]US/i.test(a.lang)) || a.name.localeCompare(b.name)));
+    .map((v) => {
+      const quality = voiceQuality(v);
+      return { id: v.voiceURI || v.name, name: v.name, quality, lang: v.lang, natural: !!quality || NATURAL.test(v.name), local: !!v.localService };
+    })
+    .filter((v) => (seen.has(v.id) ? false : seen.add(v.id)))
+    .sort((a, b) => (b.natural - a.natural) || (/en[-_]US/i.test(b.lang) - /en[-_]US/i.test(a.lang)) || a.name.localeCompare(b.name));
+}
+/** Calls back with the fresh list whenever the device's voices change (iOS loads them late). Returns an unsubscribe. */
+export function onVoicesChanged(cb) {
+  if (!canSpeak()) return () => {};
+  const synth = window.speechSynthesis;
+  const h = () => cb(listEnglish());
+  synth.addEventListener?.("voiceschanged", h);
+  const t = setTimeout(h, 3000); // some iOS builds never fire the event
+  return () => { clearTimeout(t); synth.removeEventListener?.("voiceschanged", h); };
 }
 
 /**
@@ -209,7 +263,8 @@ export function speakTest(text = "Voice is on.", report = null) {
   return true;
 }
 
-// ── The wake word: "Hey We-Draft" (user, 2026-11-25) ──
+// ── The wake word: "Hey We-Draft" (user, 2026-11-25; confirmed 2026-11-26 —
+// "Hey Film Manager" is the film editor's own, not /voice's) ──
 // How it's heard: "hey we draft", "hey wedraft", "hey we-draft", "hey wee
 // draft", "okay we draft"… — the browser's transcript, lowercased. Not "a
 // draft" or "the draft": a greeting word has to come first.
@@ -244,6 +299,24 @@ export function wakeListen(on, paused = () => false) {
   let heardAny = false;
   const WINDOW = 8000;
   const openWindow = () => { awakeUntil = Date.now() + WINDOW; on.wake?.(); };
+  // The question builds across results; it's asked once the words stop for quietFor() —
+  // not at the recognizer's first short pause (user, 2026-11-26: cut off mid-sentence).
+  let q = { done: "", now: "", timer: null };
+  const resetQ = () => { clearTimeout(q.timer); q = { done: "", now: "", timer: null }; };
+  const askNow = () => {
+    const text = `${q.done} ${q.now}`.replace(/\s+/g, " ").trim();
+    resetQ();
+    awakeUntil = 0;
+    if (text) on.question?.(text);
+  };
+  const heardQ = (piece, final) => {
+    if (final) { q.done = `${q.done} ${piece}`; q.now = ""; } else q.now = piece;
+    const text = `${q.done} ${q.now}`.replace(/\s+/g, " ").trim();
+    on.heard?.(text);
+    awakeUntil = Math.max(awakeUntil, Date.now() + 1000); // still talking: keep the window open
+    clearTimeout(q.timer);
+    if (text) q.timer = setTimeout(askNow, quietFor(text));
+  };
   const start = () => {
     if (stopped) return;
     rec = new SR();
@@ -258,13 +331,13 @@ export function wakeListen(on, paused = () => false) {
         const text = e.results[i][0].transcript.trim();
         const final = e.results[i].isFinal;
         const rest = afterWake(text);
-        if (Date.now() < awakeUntil) {
-          // Awake: this is the question (minus a repeated wake word).
-          on.heard?.(rest ?? text);
-          if (final && (rest ?? text)) { awakeUntil = 0; on.question?.(rest ?? text); }
+        if (Date.now() < awakeUntil || q.timer) {
+          // Awake: this is (more of) the question, minus a repeated wake word.
+          if (rest ?? text) heardQ(rest ?? text, final);
         } else if (rest != null) {
-          if (final && rest.split(" ").length >= 2) on.question?.(rest);
-          else if (final || !rest) { if (Date.now() >= awakeUntil) openWindow(); }
+          // "Hey We-Draft, how many…" in one breath: the question has started — keep listening for the rest.
+          openWindow();
+          if (rest) heardQ(rest, final);
         }
       }
     };
@@ -285,7 +358,7 @@ export function wakeListen(on, paused = () => false) {
   };
   start();
   return {
-    stop() { stopped = true; try { rec?.abort(); } catch { /* stopped */ } },
+    stop() { stopped = true; resetQ(); try { rec?.abort(); } catch { /* stopped */ } },
     wake() { openWindow(); },
   };
 }
