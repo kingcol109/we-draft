@@ -42,6 +42,8 @@ const BRIEF_KEY = "wd.voice.brief";
 const WAKE_KEY = "wd.voice.wake";
 // A live game's answer re-asks itself this often while it's on screen (quietly).
 const LIVE_REFRESH_MS = 30000;
+// The longest an answer may take before the page gives up on it.
+const ANSWER_LIMIT_MS = 15000;
 const load = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } };
 const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private window */ } };
 const TONE = { answer: C.ink, done: C.good, ask: C.gold, miss: C.bad };
@@ -87,6 +89,21 @@ export default function Voice() {
   useEffect(() => { save(SPEAK_KEY, talk); if (!talk) { hush(); setSpeaking(false); } }, [talk]);
   useEffect(() => { save(BRIEF_KEY, brief); }, [brief]);
   useEffect(() => { voiceData.people(); voiceData.pronunciations(); }, [voiceData]); // warm the name list and how names are said
+  // Warm what answers lean on (speed — user, 2026-11-25): the team list, this week's
+  // games, and the last player asked about (his ESPN numbers), so the first questions
+  // don't wait on the network.
+  useEffect(() => {
+    const t = setTimeout(async () => {
+      voiceData.teams?.().catch(() => {});
+      voiceData.liveSlate?.().catch(() => {});
+      const last = stateRef.current.last;
+      if (last?.id) {
+        const d = await voiceData.player(last.id).catch(() => null);
+        if (d) voiceData.seasons(d).catch(() => {});
+      }
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [voiceData]);
   // Every CFBD roster player's name (~840 KB, 3 reads): loaded a few seconds in, so the
   // first question about a player who isn't on the board doesn't wait for it.
   useEffect(() => {
@@ -125,6 +142,15 @@ export default function Voice() {
     return () => window.removeEventListener("pointerdown", first);
   }, []);
 
+  // What the browser did with each spoken answer (started / error / never started),
+  // logged so a silent device can be diagnosed from the log (user, 2026-11-25:
+  // "its working but audio not playing"). The first few a visit only.
+  const reports = useRef(0);
+  const speechReport = (r) => {
+    if (r.phase === "end" || reports.current >= 8) return;
+    reports.current += 1;
+    voiceData.logExchange?.(logEntry(`(speech ${r.test ? "test" : "check"})`, { say: JSON.stringify(r).slice(0, 500), intent: "speech.debug", tone: r.phase === "start" ? "answer" : "miss" }, { source: "debug", session: SESSION, device: DEVICE, mode }));
+  };
   // meta: { source: "voice" | "typed" | "wake" | "tap", ms } — for the conversation log.
   const show = (said, out, meta = {}) => {
     voiceData.logExchange?.(logEntry(said, out.reply, { ...meta, session: SESSION, device: DEVICE, mode }));
@@ -136,7 +162,7 @@ export default function Voice() {
       // After a spoken question, give iOS a moment to move the audio off the mic.
       const afterMic = meta.source === "voice" || meta.source === "wake" ? 350 : 0;
       setTimeout(() => speak(applyPronunciations(out.reply.speak || out.reply.say, voiceData.pronMap()), {
-        start: () => setSpeaking(true), end: () => setSpeaking(false), word: () => setBeat((b) => b + 1),
+        start: () => setSpeaking(true), end: () => setSpeaking(false), word: () => setBeat((b) => b + 1), report: speechReport,
       }), afterMic);
     }
     window.scrollTo?.({ top: 0, behavior: "smooth" });
@@ -155,7 +181,17 @@ export default function Voice() {
     if (!t || busy) return;
     setBusy(true);
     const t0 = performance.now();
-    try { const out = await respond(t, stateRef.current, voiceData); show(t, out, { source, ms: performance.now() - t0 }); } finally { setBusy(false); }
+    // Never stuck on "One second…": after ANSWER_LIMIT_MS, give up on this one (a late
+    // answer is dropped), say so, and log it as a timeout so it can be found and fixed.
+    let timer = null;
+    const late = new Promise((resolve) => { timer = setTimeout(() => resolve(null), ANSWER_LIMIT_MS); });
+    try {
+      const out = await Promise.race([respond(t, stateRef.current, voiceData), late]);
+      if (out) show(t, out, { source, ms: performance.now() - t0 });
+      else show(t, { state: stateRef.current, reply: { say: "That took too long. Try again, or ask it another way.", tone: "miss", intent: "timeout" } }, { source, ms: performance.now() - t0 });
+    } catch (e) {
+      show(t, { state: stateRef.current, reply: { say: `Something went wrong: ${e.message}`, tone: "miss", intent: "error" } }, { source, ms: performance.now() - t0 });
+    } finally { clearTimeout(timer); setBusy(false); }
   };
   const pick = async (c) => { setBusy(true); try { show(c.label, remember(await choose(c.id, stateRef.current, voiceData), c.label), { source: "tap" }); } finally { setBusy(false); } };
   const answer = async (yes) => { setBusy(true); try { show(yes ? "Yes" : "No", await confirm(yes, stateRef.current, voiceData), { source: "tap" }); } finally { setBusy(false); } };
@@ -268,7 +304,7 @@ export default function Voice() {
         )}
         <button type="button" onClick={() => setBrief((x) => !x)} title="Brief: just the answer. Full: the answer plus what's notable and tips." style={{ ...ghost, color: brief ? C.gold : C.ink }}>{brief ? "Brief" : "Full"}</button>
         {canSpeak() && (
-          <button type="button" onClick={() => { if (!talk) speakTest("Voice is on."); setTalk((x) => !x); }} title="Turn the voice on or off (turning it on says “Voice is on.”)" style={{ ...ghost, color: talk ? C.ink : C.soft }}>{talk ? "🔊 Speaking" : "🔇 Muted"}</button>
+          <button type="button" onClick={() => { if (!talk) speakTest("Voice is on.", speechReport); setTalk((x) => !x); }} title="Turn the voice on or off (turning it on says “Voice is on.”)" style={{ ...ghost, color: talk ? C.ink : C.soft }}>{talk ? "🔊 Speaking" : "🔇 Muted"}</button>
         )}
       </header>
 

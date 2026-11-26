@@ -17,8 +17,32 @@ const once = (key, fn) => {
   return cache[key];
 };
 const nameKey = (n) => String(n || "").toLowerCase().replace(/\b(jr|sr|ii|iii|iv|v)\b\.?/g, "").replace(/[^a-z]/g, "");
+// Speed (user, 2026-11-25: "we need it to work a lot faster"): kept on the
+// device across visits too — an ESPN id for 30 days, stats for an hour —
+// so a player asked about before answers without waiting on ESPN.
+const HOUR = 3600e3;
+function stored(key, ttl, fn) {
+  return once(key, async () => {
+    const k = `wd.voice.espn.${key}`;
+    try {
+      const hit = JSON.parse(localStorage.getItem(k) || "null");
+      if (hit && Date.now() - hit.at < ttl) return hit.v;
+    } catch { /* private window */ }
+    const v = await fn();
+    if (v != null) { try { localStorage.setItem(k, JSON.stringify({ at: Date.now(), v })); } catch { /* full / private */ } }
+    return v;
+  });
+}
 
 /** A school's ESPN team id (= its CFBD id), one read per school per session. */
+// ESPN JSON with a time limit (8 s): a stalled request on a weak connection
+// otherwise leaves the answer waiting forever (user, 2026-11-25: "stuck on one second").
+export function getJson(url, ms = 8000) {
+  const ctl = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const t = setTimeout(() => ctl?.abort(), ms);
+  return fetch(url, ctl ? { signal: ctl.signal } : undefined).then((r) => r.json()).finally(() => clearTimeout(t));
+}
+
 export function schoolTeamId(school) {
   return once(`school/${school}`, async () => {
     if (!school) return null;
@@ -29,13 +53,15 @@ export function schoolTeamId(school) {
 
 /** His ESPN athlete id: the one his headshot came from, else his name on his school's ESPN roster. */
 export function espnAthleteId(p) {
-  return once(`id/${p.id}`, async () => {
-    // A CFBD-only player ("cfbd_…") has no We-Draft.com headshot to look up.
+  return stored(`id/${p.id}`, 30 * 24 * HOUR, async () => {
+    // His headshot's ESPN id and his school's team id, looked up side by side.
+    // (A CFBD-only player — "cfbd_…" — has no We-Draft.com headshot.)
+    const teamP = schoolTeamId(p.School);
     const photo = String(p.id).startsWith("cfbd_") ? null : await getDoc(doc(db, "playerPhotos", p.id)).then((s) => (s.exists() ? s.data() : null)).catch(() => null);
     if (photo?.headshot?.espnId) return String(photo.headshot.espnId);
-    const teamId = await schoolTeamId(p.School);
+    const teamId = await teamP;
     if (!teamId) return null;
-    const r = await fetch(`${ESPN}/site/v2/sports/football/college-football/teams/${teamId}/roster`).then((x) => x.json()).catch(() => ({}));
+    const r = await getJson(`${ESPN}/site/v2/sports/football/college-football/teams/${teamId}/roster`).catch(() => ({}));
     const all = (r.athletes || []).flatMap((g) => g.items || []);
     const full = nameKey(`${p.First} ${p.Last}`);
     const hit = all.find((a) => nameKey(a.fullName) === full) || (all.filter((a) => nameKey(a.lastName) === nameKey(p.Last)).length === 1 ? all.find((a) => nameKey(a.lastName) === nameKey(p.Last)) : null);
@@ -48,8 +74,8 @@ export function espnAthleteId(p) {
  *   career: { [cat]: { [name]: number } } }
  */
 export function espnSeasons(athleteId) {
-  return once(`stats/${athleteId}`, async () => {
-    const j = await fetch(`${CFB}/${athleteId}/stats`).then((r) => r.json());
+  return stored(`stats/${athleteId}`, HOUR, async () => {
+    const j = await getJson(`${CFB}/${athleteId}/stats`);
     const seasons = {};
     const career = {};
     (j.categories || []).forEach((c) => {
@@ -68,8 +94,9 @@ export function espnSeasons(athleteId) {
 
 /** One season's games, oldest first: [{ id, season, date, week, post, at, opp, oppAbbr, oppRank (AP, then), result, score, line: { [cat]: { [name]: number } } }] */
 export function espnGames(athleteId, season) {
-  return once(`log/${athleteId}/${season}`, async () => {
-    const j = await fetch(`${CFB}/${athleteId}/gamelog?season=${season}`).then((r) => r.json());
+  // A past season never changes: kept a month; this season, an hour.
+  return stored(`log/${athleteId}/${season}`, Number(season) < new Date().getFullYear() ? 30 * 24 * HOUR : HOUR, async () => {
+    const j = await getJson(`${CFB}/${athleteId}/gamelog?season=${season}`);
     const names = j.names || [];
     const catOf = (j.categories || []).flatMap((c) => Array(c.count || 0).fill(c.name));
     const games = new Map();

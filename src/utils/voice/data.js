@@ -18,7 +18,7 @@ import { classSnapshotRanks } from "../classRanks";
 import { gradeLabel } from "../gradeScale";
 import { canonicalEvalData } from "../evaluationCopies";
 import { playsForPlayer, gamesByIds } from "../film/data";
-import { espnAthleteId, espnSeasons, espnAllGames, schoolTeamId } from "./espn";
+import { espnAthleteId, espnSeasons, espnAllGames, schoolTeamId, getJson } from "./espn";
 import { decodeDraft } from "./draftRows";
 import { pronKey } from "./pronounce";
 import { stateName } from "../highSchoolMatch";
@@ -347,8 +347,8 @@ export function makeVoiceData({ user = null } = {}) {
         const teamId = await schoolTeamId(school);
         if (!teamId) return [];
         const [lead, roster] = await Promise.all([
-          fetch(`https://sports.core.api.espn.com/v2/sports/football/leagues/college-football/seasons/${season}/types/2/teams/${teamId}/leaders`).then((r) => r.json()).catch(() => ({})),
-          fetch(`https://site.web.api.espn.com/apis/site/v2/sports/football/college-football/teams/${teamId}/roster`).then((r) => r.json()).catch(() => ({})),
+          getJson(`https://sports.core.api.espn.com/v2/sports/football/leagues/college-football/seasons/${season}/types/2/teams/${teamId}/leaders`).catch(() => ({})),
+          getJson(`https://site.web.api.espn.com/apis/site/v2/sports/football/college-football/teams/${teamId}/roster`).catch(() => ({})),
         ]);
         const people = Object.fromEntries((roster.athletes || []).flatMap((g) => g.items || []).map((a) => [String(a.id), { name: a.fullName, pos: a.position?.abbreviation || "", year: a.experience?.displayValue || "" }]));
         const WANT = ["passingYards", "rushingYards", "receivingYards", "totalTackles", "sacks", "interceptions"];
