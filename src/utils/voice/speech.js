@@ -14,15 +14,53 @@ export const canSpeak = () => typeof window !== "undefined" && "speechSynthesis"
  * Listen for one question.
  * on: { interim(text), final(text), end(), error(code) } → stop()
  */
+// A tap's listening that ends this fast with nothing heard was cut off (iPad:
+// "it turns off as soon as I tap it") — start it again, up to RETRIES times.
+const CUT_OFF_MS = 1500;
+const RETRIES = 2;
+
+/**
+ * Listen for one question. on: { interim(text), final(text), end(), error(code),
+ * report({ phase: "start" | "cut-off" | "error" | "end", error?, ms, retry, heard }) }
+ * → stop()
+ */
 export function listen(on) {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) { on.error?.("unsupported"); return () => {}; }
-  const rec = new SR();
-  rec.lang = "en-US";
-  rec.interimResults = true;
-  rec.continuous = false;
-  rec.maxAlternatives = 1;
+  let rec = null;
   let done = false;
+  let stopped = false;
+  let retry = 0;
+  let heard = false;
+  let t0 = 0;
+  const begin = () => {
+    rec = new SR();
+    rec.lang = "en-US";
+    rec.interimResults = true;
+    rec.continuous = false;
+    rec.maxAlternatives = 1;
+    t0 = Date.now();
+    rec.onstart = () => on.report?.({ phase: "start", retry, ms: 0 });
+    rec.onresult = onResult;
+    rec.onerror = (e) => {
+      on.report?.({ phase: "error", error: e.error, retry, ms: Date.now() - t0, heard });
+      // A cut-off ("aborted" / "no-speech" right away) gets retried in onend; the rest are real.
+      if (e.error === "not-allowed" || e.error === "service-not-allowed" || e.error === "audio-capture") { stopped = true; on.error?.(e.error); }
+    };
+    rec.onend = () => {
+      if (done || stopped) { on.end?.(); return; }
+      const ms = Date.now() - t0;
+      if (!heard && ms < CUT_OFF_MS && retry < RETRIES) {
+        retry += 1;
+        on.report?.({ phase: "cut-off", retry, ms });
+        setTimeout(() => { if (!stopped && !done) { try { begin(); } catch { on.end?.(); } } }, 250);
+        return;
+      }
+      on.report?.({ phase: "end", retry, ms, heard });
+      on.end?.();
+    };
+    try { rec.start(); } catch (e) { on.report?.({ phase: "error", error: e.message, retry, ms: 0 }); on.error?.(e.message); }
+  };
   // Speed (user, 2026-11-25): Safari waits through a long silence before calling a
   // result final. Once the words have stopped changing for QUIET_MS, that's the question.
   let settle = null;
@@ -33,20 +71,19 @@ export function listen(on) {
     try { rec.abort(); } catch { /* stopped */ }
     on.final?.(text);
   };
-  rec.onresult = (e) => {
+  function onResult(e) {
     let text = "";
     let final = false;
     for (let i = 0; i < e.results.length; i += 1) { text += e.results[i][0].transcript; if (e.results[i].isFinal) final = true; }
+    if (text.trim()) heard = true;
     clearTimeout(settle);
     if (!final && text.trim()) settle = setTimeout(() => finish(text.trim()), QUIET_MS);
     // Final: let go of the mic first — iOS keeps the audio set up for recording
     // (answers play quietly or not at all) until recognition has stopped.
     if (final) finish(text.trim()); else on.interim?.(text.trim());
-  };
-  rec.onerror = (e) => on.error?.(e.error);
-  rec.onend = () => on.end?.();
-  try { rec.start(); } catch (e) { on.error?.(e.message); }
-  return () => { try { rec.stop(); } catch { /* already stopped */ } };
+  }
+  begin();
+  return () => { stopped = true; try { rec?.stop(); } catch { /* already stopped */ } };
 }
 
 /**
@@ -126,16 +163,23 @@ export function speak(text, on = {}) {
 }
 export const hush = () => { if (canSpeak()) window.speechSynthesis.cancel(); };
 
-// iOS won't speak until a first utterance comes from a tap. An empty one,
-// spoken inside the tap, opens it (a blank at volume 0 isn't always enough).
+/** iPad / iPhone (an iPad's Safari says "Macintosh"; a touch screen gives it away). Every iOS browser is Safari underneath. */
+export const isIOS = () => typeof navigator !== "undefined" && (/iPad|iPhone|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && (navigator.maxTouchPoints || 0) > 1));
+
+// iOS won't speak until a REAL utterance is spoken inside a tap (the log showed
+// a blank one doesn't count: answers were swallowed until "Voice is on." was
+// tapped). A short word at volume 0 — silent, but spoken.
 let unlocked = false;
+export const speechUnlocked = () => unlocked;
 export function unlockSpeech() {
   if (unlocked || !canSpeak()) return;
   unlocked = true;
   try {
     const synth = window.speechSynthesis;
     synth.resume();
-    const u = new SpeechSynthesisUtterance("");
+    const u = new SpeechSynthesisUtterance("ok");
+    u.volume = 0;
+    u.rate = 2;
     synth.speak(u);
   } catch { /* fine */ }
 }
@@ -188,6 +232,10 @@ export function wakeListen(on, paused = () => false) {
   let awakeUntil = 0;
   let fails = 0;
   let startedAt = 0;
+  // Starts in the last minute with nothing heard: Safari ends it every few
+  // seconds (the on-off clicking) — that's "won't stay on", not a hiccup.
+  let starts = [];
+  let heardAny = false;
   const WINDOW = 8000;
   const openWindow = () => { awakeUntil = Date.now() + WINDOW; on.wake?.(); };
   const start = () => {
@@ -198,6 +246,7 @@ export function wakeListen(on, paused = () => false) {
     rec.interimResults = true;
     rec.maxAlternatives = 1;
     rec.onresult = (e) => {
+      heardAny = true;
       if (paused()) return;
       for (let i = e.resultIndex; i < e.results.length; i += 1) {
         const text = e.results[i][0].transcript.trim();
@@ -220,10 +269,12 @@ export function wakeListen(on, paused = () => false) {
       if (stopped) return;
       // Ended right after starting, over and over: this browser won't keep it open.
       fails = Date.now() - startedAt < 1500 ? fails + 1 : 0;
-      if (fails >= 5) { stopped = true; on.unsupported?.("keeps-stopping"); return; }
+      starts = starts.filter((t) => Date.now() - t < 60000);
+      if (fails >= 5 || (starts.length >= 6 && !heardAny)) { stopped = true; on.unsupported?.("keeps-stopping"); return; }
       setTimeout(start, fails ? 500 * fails : 250);
     };
     startedAt = Date.now();
+    starts.push(startedAt);
     try { rec.start(); on.state?.("standby"); } catch (err) { if (!stopped) setTimeout(start, 1000); }
   };
   start();

@@ -25,7 +25,7 @@ import { respond, choose, confirm, more, newState, intentsFor, remember } from "
 import { applyPronunciations } from "../utils/voice/pronounce";
 import { makeVoiceData } from "../utils/voice/data";
 import { logEntry, deviceOf } from "../utils/voice/log";
-import { listen, speak, hush, canListen, canSpeak, wakeListen, unlockSpeech, speakTest, englishVoices, preferredVoiceName, setPreferredVoice } from "../utils/voice/speech";
+import { listen, speak, hush, canListen, canSpeak, wakeListen, unlockSpeech, speechUnlocked, isIOS, speakTest, englishVoices, preferredVoiceName, setPreferredVoice } from "../utils/voice/speech";
 import { Orb, Stage } from "../components/voice/VoiceStage";
 
 // This page visit, for the conversation log (one sitting reads as one conversation).
@@ -88,7 +88,8 @@ export default function Voice() {
   const stateRef = useRef(state);
   stateRef.current = state;
   // The wake word: on / off, its listener, and the 8-second window after "Hey We-Draft".
-  const [wakeOn, setWakeOn] = useState(() => load(WAKE_KEY, false));
+  // Never on an iPad / iPhone: Safari won't keep the mic open (it clicks on and off).
+  const [wakeOn, setWakeOn] = useState(() => !isIOS() && load(WAKE_KEY, false));
   const [awake, setAwake] = useState(false);
   const [wakeNote, setWakeNote] = useState("");
   const wakeRef = useRef(null);
@@ -149,8 +150,13 @@ export default function Voice() {
   }, []);
   // iOS speaks only after a first sound from a tap.
   useEffect(() => {
-    const first = () => unlockSpeech();
-    window.addEventListener("pointerdown", first, { once: true });
+    // Any tap but the logo (the logo starts the mic — speech then would fight it).
+    const first = (e) => {
+      if (e.target?.closest?.(".wdv-orb")) return;
+      unlockSpeech();
+      if (speechUnlocked()) window.removeEventListener("pointerdown", first);
+    };
+    window.addEventListener("pointerdown", first);
     return () => window.removeEventListener("pointerdown", first);
   }, []);
 
@@ -163,6 +169,14 @@ export default function Voice() {
     reports.current += 1;
     voiceData.logExchange?.(logEntry(`(speech ${r.test ? "test" : "check"})`, { say: JSON.stringify(r).slice(0, 500), intent: "speech.debug", tone: r.phase === "start" ? "answer" : "miss" }, { source: "debug", session: SESSION, device: DEVICE, mode }));
   };
+  // What the mic did on each tap (started / cut off and retried / error / ended),
+  // logged like the speech checks (user, 2026-11-25: "it turns off right away").
+  const micReports = useRef(0);
+  const micReport = (r) => {
+    if (micReports.current >= 12) return;
+    micReports.current += 1;
+    voiceData.logExchange?.(logEntry("(mic check)", { say: JSON.stringify(r).slice(0, 500), intent: "mic.debug", tone: r.phase === "error" || r.phase === "cut-off" ? "miss" : "answer" }, { source: "debug", session: SESSION, device: DEVICE, mode }));
+  };
   // meta: { source: "voice" | "typed" | "wake" | "tap", ms } — for the conversation log.
   const show = (said, out, meta = {}) => {
     voiceData.logExchange?.(logEntry(said, out.reply, { ...meta, session: SESSION, device: DEVICE, mode }));
@@ -174,7 +188,9 @@ export default function Voice() {
       // After a spoken question, give iOS a moment to move the audio off the mic.
       const afterMic = meta.source === "voice" || meta.source === "wake" ? 350 : 0;
       setTimeout(() => speak(applyPronunciations(out.reply.speak || out.reply.say, voiceData.pronMap()), {
-        start: () => setSpeaking(true), end: () => setSpeaking(false), word: () => setBeat((b) => b + 1), report: speechReport,
+        start: () => setSpeaking(true), end: () => setSpeaking(false), word: () => setBeat((b) => b + 1),
+        // Swallowed (iOS before a tap has unlocked speech): offer "Tap to hear" on this answer.
+        report: (r) => { speechReport(r); if (r.phase === "never" || r.phase === "error") setLog((l) => l.map((x) => (x.id === id ? { ...x, silent: true } : x))); },
       }), afterMic);
     }
     window.scrollTo?.({ top: 0, behavior: "smooth" });
@@ -182,7 +198,6 @@ export default function Voice() {
   // The logo: talking → stop talking; wake word on → it's listening already, so
   // open the question window; else listen once (no mic → the text box).
   const tapOrb = () => {
-    unlockSpeech();
     if (speaking) { hush(); setSpeaking(false); return; }
     if (wakeOn && wakeRef.current) { wakeRef.current.wake(); return; }
     if (canListen()) listenRef.current();
@@ -219,11 +234,14 @@ export default function Voice() {
 
   const startListening = () => {
     if (listening) { stopRef.current?.(); return; }
-    hush();
+    // Only stop the voice if it's actually talking: touching speech as the mic
+    // starts can cut the mic off on iOS.
+    if (canSpeak() && (window.speechSynthesis.speaking || window.speechSynthesis.pending)) hush();
     setSpeaking(false);
     setInterim("");
     setListening(true);
     stopRef.current = listen({
+      report: micReport,
       interim: setInterim,
       final: (t) => { setInterim(""); ask(t, "voice"); },
       end: () => setListening(false),
@@ -311,7 +329,7 @@ export default function Voice() {
           ))}
         </nav>
         {mode === "admin" && <button type="button" onClick={() => setShowMissed((x) => !x)} style={{ ...ghost, color: showMissed ? C.gold : C.ink }}>Review</button>}
-        {canListen() && (
+        {canListen() && !isIOS() && (
           <button type="button" onClick={() => { unlockSpeech(); setWakeOn((x) => !x); }} title="Always listen for “Hey We-Draft” (works in Chrome)" style={{ ...ghost, color: wakeOn ? C.good : C.ink, borderColor: wakeOn ? C.good : C.line }}>{wakeOn ? "👂 Hey We-Draft: on" : "👂 Hey We-Draft: off"}</button>
         )}
         <button type="button" onClick={() => setBrief((x) => !x)} title="Brief: just the answer. Full: the answer plus what's notable and tips." style={{ ...ghost, color: brief ? C.gold : C.ink }}>{brief ? "Brief" : "Full"}</button>
@@ -340,6 +358,10 @@ export default function Voice() {
           <div style={{ minHeight: 26, textAlign: "center", fontSize: now ? 16 : 18, fontWeight: 800, color: interim ? C.ink : C.soft, maxWidth: 640 }}>
             {listening || awake ? (interim || "Listening…") : busy ? "One second…" : speaking ? (now?.said ? `“${now.said}”` : "") : now?.said ? `“${now.said}”` : wakeOn ? "Say “Hey We-Draft”" : canListen() ? "Tap the logo and ask" : "Type a question below"}
           </div>
+          {now?.silent && talk && (
+            <button type="button" onClick={() => { speakTest(applyPronunciations(now.reply.speak || now.reply.say, voiceData.pronMap()), speechReport); setLog((l) => l.map((x) => (x.id === now.id ? { ...x, silent: false } : x))); }}
+              style={{ ...ghost, borderColor: C.gold, color: C.gold, fontSize: 15, padding: "8px 16px" }}>🔊 Tap to hear</button>
+          )}
           {wakeNote && <div style={{ fontSize: 13, fontWeight: 700, color: C.gold, textAlign: "center", maxWidth: 560 }}>{wakeNote}</div>}
           {now?.reply?.live && <div style={{ fontSize: 12, fontWeight: 900, color: C.bad, letterSpacing: "0.08em" }}>● LIVE · updates every 30 seconds</div>}
         </section>
