@@ -99,3 +99,25 @@ describe("the wake word", () => {
     expect((await ask("hey we draft how's kromah playing")).reply.say).toMatch(/^Ousmane Kromah has 48 rushing yards/);
   });
 });
+
+describe("who's #1 on We-Draft.com (asked on the iPad, 2026-11-25)", () => {
+  const top = [
+    { id: "k", first: "Ousmane", last: "Kromah", pos: "RB", school: "Florida State", cls: "2027" },
+    { id: "l", first: "Jesse", last: "Legree", pos: "RB", school: "Florida State", cls: "2027" },
+  ];
+  const ctx = () => ctxOf({ topProspects: async () => top });
+  test("the way speech wrote it: \"wiidraft.com\"", async () => {
+    const out = await ask("Who is the number one rated person on wiidraft.com", ctx());
+    expect(out.reply.intent).toBe("board.topOverall");
+    expect(out.reply.say).toMatch(/^The top-ranked player in the 20\d\d class on We-Draft\.com is Ousmane Kromah, a running back from Florida State\.$/);
+    expect(out.state.last.id).toBe("k");
+  });
+  test("other wordings; a top few", async () => {
+    expect((await ask("who's number one on we draft in 2028", ctx())).reply.say).toMatch(/2028 class on We-Draft\.com is Ousmane Kromah/);
+    expect((await ask("top 2 players on wee draft", ctx())).reply.say).toMatch(/^The top 2 in the 20\d\d class on We-Draft\.com: 1, Ousmane Kromah, Florida State and 2, Jesse Legree, Florida State\.$/);
+  });
+  test("no \"request him\" tip when the words aren't a name", async () => {
+    const out = await ask("who is the best quarterback person ever");
+    expect(out.reply.say).not.toMatch(/request/);
+  });
+});

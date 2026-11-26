@@ -43,7 +43,9 @@ const NO = /^(?:no|nope|cancel|stop|never mind|nevermind|don't|wrong|forget it)$
 const MORE = /^(?:next|next one|another|another one|more|read another|read the next one|keep going|go on|continue|and)$/;
 const ORDINAL = { first: 0, one: 0, "1": 0, second: 1, two: 1, "2": 1, third: 2, three: 2, "3": 2, fourth: 3, four: 3, "4": 3, fifth: 4, five: 4, "5": 4, sixth: 5, six: 5, "6": 5 };
 const HIM = /^(?:he|him|his|he's|that guy|the same guy|them|it)$/;
-const prep = (text) => clean(text).replace(FILLER, "").replace(TAIL, "").trim();
+// How speech writes the site's name ("wiidraft.com", "wee draft", "we drafts") → "we draft".
+const SITE_NAME = /\b(?:wii|wee|whee|we)\s?drafts?(?:\s(?:dot\s)?com)?\b/g;
+const prep = (text) => clean(text).replace(SITE_NAME, "we draft").replace(FILLER, "").replace(TAIL, "").trim();
 
 /** The intent and slots a line matches → { intent, slots } | { wrongMode: intent } | null */
 export function understand(text, mode) {
@@ -170,7 +172,9 @@ async function resolve(intent, slots, state, ctx, text) {
     }
   }
   log(ctx, state, text, "unknown-player", { intent: intent.id, said, school: found.school || null });
-  const tip = hint(ctx, "request", state.mode === "admin" ? `To add him, say "add" with his name and school.` : `If he isn't on We-Draft.com, say "request" with his name and school.`);
+  // The "request him" tip only when the words look like a name (not "the number one rated person").
+  const nameLike = plain(said).split(" ").length <= 4 && !/\b(?:the|a|an|on|of|in|who|what|person|player|prospect|rated|ranked|number|best|top|guy)\b/.test(plain(said));
+  const tip = nameLike ? hint(ctx, "request", state.mode === "admin" ? `To add him, say "add" with his name and school.` : `If he isn't on We-Draft.com, say "request" with his name and school.`) : "";
   return {
     reply: { say: `${(found.school ? phrase(ctx, "miss.player.school", { said, school: found.school }) : phrase(ctx, "miss.player", { said }))}${found.near.length ? " Did you mean one of these?" : ""}${tip ? ` ${tip}` : ""}`, choices: asChoices(found.near), tone: "miss" },
     state: { ...state, pending: found.near.length ? { kind: "choose", intent: intent.id, slots, said, text, choices: found.near, teach: true } : null },

@@ -25,7 +25,9 @@ export function listen(on) {
     let text = "";
     let final = false;
     for (let i = 0; i < e.results.length; i += 1) { text += e.results[i][0].transcript; if (e.results[i].isFinal) final = true; }
-    if (final && !done) { done = true; on.final?.(text.trim()); } else if (!final) on.interim?.(text.trim());
+    // Final: let go of the mic first — iOS keeps the audio set up for recording
+    // (answers play quietly or not at all) until recognition has stopped.
+    if (final && !done) { done = true; try { rec.abort(); } catch { /* stopped */ } on.final?.(text.trim()); } else if (!final) on.interim?.(text.trim());
   };
   rec.onerror = (e) => on.error?.(e.error);
   rec.onend = () => on.end?.();
@@ -40,24 +42,47 @@ export function listen(on) {
  */
 export function speak(text, on = {}) {
   if (!canSpeak() || !text) { on.end?.(); return; }
-  window.speechSynthesis.cancel();
+  const synth = window.speechSynthesis;
   const u = new SpeechSynthesisUtterance(text);
   u.lang = "en-US";
   u.rate = 1.05;
+  u.volume = 1;
   u.onstart = () => on.start?.();
   u.onend = () => on.end?.();
   u.onerror = () => on.end?.();
   u.onboundary = (e) => { if (e.name === "word" || e.name == null) on.word?.(); };
-  window.speechSynthesis.speak(u);
+  // iOS Safari drops an utterance queued right after cancel(), and can be left
+  // paused: cancel only when something is playing, then speak a beat later; resume first.
+  const busy = synth.speaking || synth.pending;
+  if (busy) synth.cancel();
+  setTimeout(() => { try { synth.resume(); } catch { /* fine */ } synth.speak(u); }, busy ? 150 : 0);
 }
 export const hush = () => { if (canSpeak()) window.speechSynthesis.cancel(); };
 
-// iOS won't speak until a first utterance comes from a tap: say nothing, once, on the first tap.
+// iOS won't speak until a first utterance comes from a tap. An empty one,
+// spoken inside the tap, opens it (a blank at volume 0 isn't always enough).
 let unlocked = false;
 export function unlockSpeech() {
   if (unlocked || !canSpeak()) return;
   unlocked = true;
-  try { const u = new SpeechSynthesisUtterance(" "); u.volume = 0; window.speechSynthesis.speak(u); } catch { /* fine */ }
+  try {
+    const synth = window.speechSynthesis;
+    synth.resume();
+    const u = new SpeechSynthesisUtterance("");
+    synth.speak(u);
+  } catch { /* fine */ }
+}
+/** Say a short line right now, inside a tap — the "is the voice working?" check. */
+export function speakTest(text = "Voice is on.") {
+  unlocked = true;
+  if (!canSpeak()) return false;
+  const synth = window.speechSynthesis;
+  try { synth.cancel(); synth.resume(); } catch { /* fine */ }
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = "en-US";
+  u.volume = 1;
+  synth.speak(u);
+  return true;
 }
 
 // ── The wake word: "Hey We-Draft" (user, 2026-11-25) ──

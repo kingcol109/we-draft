@@ -13,7 +13,7 @@ import { parseRest } from "./intents";
 import { eligibilityInfo, currentDraftClass } from "../eligibility";
 import { teamKey } from "../film/schedule";
 import { phrase, extra, join, resultPhrase, datePhrase, shortTeam } from "./phrase";
-import { nameFor } from "./refs";
+import { nameFor, POS_NAMES } from "./refs";
 import { GRADE_SCALE } from "../gradeScale";
 
 const CLS = "(?: (?:in|for|from) (?:the )?(?<cls>20\\d\\d)(?: class| draft| draft class)?)?";
@@ -120,7 +120,38 @@ export const BOARD_INTENTS = [
 ];
 
 // ════════ The community's board ════════
+const TOP_WORD = { one: 1, two: 2, three: 3, five: 5, ten: 10 };
 export const COMMUNITY_INTENTS = [
+  {
+    // "Who's the number one player on We-Draft.com?" — the class's overall board (compSnapshots/_top).
+    id: "board.topOverall",
+    mode: "general",
+    title: "Who's #1 on We-Draft.com",
+    examples: ["who is the number one rated player on We-Draft", "who's number one on We-Draft in 2028", "top 5 players on We-Draft"],
+    patterns: [
+      /^(?:who(?:'s|s| is| are)|what(?:'s|s| is)) (?:the )?(?:number one|no 1|#1|top|best|highest|first)(?: (?:rated|ranked|graded))? (?:person|player|prospect|guy|overall player)(?: (?:on|at|according to) we draft(?: com)?| overall| right now)?(?: (?:in|for) (?:the )?(?<cls>20\d\d)(?: class| draft)?)?$/,
+      /^who(?:'s|s| is) (?:number one|no 1|#1|first|on top|at the top) (?:on|at|of) (?:we draft(?: com)?|the board|the community board)(?: (?:in|for) (?:the )?(?<cls>20\d\d)(?: class| draft)?)?$/,
+      /^(?:who are |what are |give me |show me |read me )?(?:the )?top (?<n>\d+|two|three|five|ten) (?:players|prospects|guys)(?: (?:on|at|according to) we draft(?: com)?| overall)?(?: (?:in|for) (?:the )?(?<cls>20\d\d)(?: class| draft)?)?$/,
+    ],
+    run: async ({ cls, n }, ctx) => {
+      const year = String(cls || currentDraftClass());
+      const top = ctx.topProspects ? await ctx.topProspects(year).catch(() => []) : [];
+      if (!top.length) return miss(`I don't have the ${year} board yet.`, "no-top-board");
+      const k = Math.min(TOP_WORD[n] || Number(n) || 1, 25);
+      if (k === 1) {
+        const p = top[0];
+        const d = await ctx.player(p.id).catch(() => null);
+        const who = `${p.first} ${p.last}, ${POS_NAMES[p.pos] ? `${/^[aeiou]/i.test(POS_NAMES[p.pos]) ? "an" : "a"} ${POS_NAMES[p.pos]}` : p.pos} from ${p.school}`;
+        return { say: `The top-ranked player in the ${year} class on We-Draft.com is ${who}.`, ...(d ? card(d) : { title: `${p.first} ${p.last}` }), focus: p, people: top.slice(1, 5).map((x, i) => ({ ...x, note: `#${i + 2}` })), tone: "answer" };
+      }
+      const list0 = top.slice(0, k);
+      return {
+        say: `The top ${list0.length} in the ${year} class on We-Draft.com: ${list(list0.map((x, i) => `${i + 1}, ${x.first} ${x.last}, ${x.school}`))}.`,
+        title: `${year} top ${list0.length}`, sub: "We-Draft.com community board",
+        people: list0.map((x, i) => ({ ...x, note: `#${i + 1}` })), group: list0, tone: "answer",
+      };
+    },
+  },
   {
     id: "board.community",
     mode: "general",

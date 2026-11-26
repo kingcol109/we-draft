@@ -25,7 +25,7 @@ import { respond, choose, confirm, more, newState, intentsFor, remember } from "
 import { applyPronunciations } from "../utils/voice/pronounce";
 import { makeVoiceData } from "../utils/voice/data";
 import { logEntry, deviceOf } from "../utils/voice/log";
-import { listen, speak, hush, canListen, canSpeak, wakeListen, unlockSpeech } from "../utils/voice/speech";
+import { listen, speak, hush, canListen, canSpeak, wakeListen, unlockSpeech, speakTest } from "../utils/voice/speech";
 import { Orb, Stage } from "../components/voice/VoiceStage";
 
 // This page visit, for the conversation log (one sitting reads as one conversation).
@@ -133,9 +133,11 @@ export default function Voice() {
     setLog((l) => [{ id, said, reply: out.reply }, ...l].slice(0, 40));
     setPendingFor(out.state.pending ? id : null);
     if (talk) {
-      speak(applyPronunciations(out.reply.speak || out.reply.say, voiceData.pronMap()), {
+      // After a spoken question, give iOS a moment to move the audio off the mic.
+      const afterMic = meta.source === "voice" || meta.source === "wake" ? 350 : 0;
+      setTimeout(() => speak(applyPronunciations(out.reply.speak || out.reply.say, voiceData.pronMap()), {
         start: () => setSpeaking(true), end: () => setSpeaking(false), word: () => setBeat((b) => b + 1),
-      });
+      }), afterMic);
     }
     window.scrollTo?.({ top: 0, behavior: "smooth" });
   };
@@ -266,7 +268,7 @@ export default function Voice() {
         )}
         <button type="button" onClick={() => setBrief((x) => !x)} title="Brief: just the answer. Full: the answer plus what's notable and tips." style={{ ...ghost, color: brief ? C.gold : C.ink }}>{brief ? "Brief" : "Full"}</button>
         {canSpeak() && (
-          <button type="button" onClick={() => setTalk((x) => !x)} style={{ ...ghost, color: talk ? C.ink : C.soft }}>{talk ? "🔊 Speaking" : "🔇 Muted"}</button>
+          <button type="button" onClick={() => { if (!talk) speakTest("Voice is on."); setTalk((x) => !x); }} title="Turn the voice on or off (turning it on says “Voice is on.”)" style={{ ...ghost, color: talk ? C.ink : C.soft }}>{talk ? "🔊 Speaking" : "🔇 Muted"}</button>
         )}
       </header>
 

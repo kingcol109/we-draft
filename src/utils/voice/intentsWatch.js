@@ -169,7 +169,8 @@ export const WATCH_INTENTS = [
     title: "Who's worth watching on a team",
     examples: ["I'm watching Louisiana Tech's offense, is there anybody else on their offense or Charlotte's defense I should watch", "who should I watch on Ohio State's defense", "anybody worth watching on Charlotte"],
     patterns: [/^(?<q>.*\b(?:watch|watching|worth|anybody|anyone|somebody|someone|players?|guys|prospects|names)\b.*\b(?:offense|defense|offensive|defensive|on [a-z].*)$)/],
-    accept: (s) => !/\bmy (?:board|watch ?list|notes)\b/.test(s.q) && !/^(?:add|put|suggest|recommend)\b/.test(s.q),
+    // Not the site's own board ("top 5 players on We-Draft", "number one on We-Draft").
+    accept: (s) => !/\bmy (?:board|watch ?list|notes)\b/.test(s.q) && !/^(?:add|put|suggest|recommend)\b/.test(s.q) && !/\bwe ?draft\b|\btop (?:\d+|two|three|five|ten) (?:players|prospects)\b|\bnumber one\b/.test(s.q),
     run: async ({ q: said }, ctx) => {
       const teams = await ctx.teams();
       const people = await ctx.people();
