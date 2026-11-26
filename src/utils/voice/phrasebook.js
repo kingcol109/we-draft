@@ -409,7 +409,38 @@ export const BOOK = {
     (v) => `${v.name} is worth a look.`,
   ],
 
+  // ── The community's traits, out loud (no percentages) ──
+  "traits.strengths": [
+    (v) => `People like ${v.name}'s ${v.list} the most.`,
+    (v) => `The community's biggest strengths for ${v.name} are ${v.list}.`,
+    (v) => `What stands out on ${v.name} is ${v.list}.`,
+    (v) => `Evaluators keep pointing to ${v.name}'s ${v.list}.`,
+  ],
+  "traits.weaknesses": [
+    (v) => (v.only ? `The knocks on ${v.name} are ${v.list}.` : `The knocks on him are ${v.list}.`),
+    (v) => (v.only ? `People worry most about ${v.name}'s ${v.list}.` : `Where people have concerns is ${v.list}.`),
+    (v) => (v.only ? `The weaknesses people flag for ${v.name} are ${v.list}.` : `On the other side, people flag ${v.list}.`),
+  ],
+
+  // ── Stat leaders ──
+  "leader.team": [
+    (v) => `${v.name} leads ${v.team} with ${v.value}${v.when}.`,
+    (v) => `That's ${v.name}, with ${v.value} for ${v.team}${v.when}.`,
+    (v) => `${v.team}'s leader is ${v.name}, at ${v.value}${v.when}.`,
+  ],
+  "leader.nation": [
+    (v) => `${v.name} of ${v.school} leads the country with ${v.value}.`,
+    (v) => `Nobody has more than ${v.name} at ${v.school}, with ${v.value}.`,
+    (v) => `The national leader is ${v.name} of ${v.school}, with ${v.value}.`,
+  ],
+
+  // ── Misses, out loud: short — the screen shows what was heard (user, 2026-11-25) ──
+  "miss.short": [() => "Sorry, I didn't get that.", () => "I can't answer that one yet.", () => "Not sure on that one. Try asking it another way.", () => "That one's not in my playbook yet."],
+  "miss.player.short": [() => "I couldn't find that player.", () => "I'm not sure who that is.", () => "I didn't catch that name."],
+
   // ── Acknowledgments ──
+  "ack.pronounced": [(v) => `Got it. ${v.name}.`, (v) => `Okay, ${v.name}. I'll say it that way from now on.`, (v) => `Thanks. ${v.name}, got it.`],
+  "ack.note": [() => "Got it. I saved that.", () => "Noted.", () => "Got it, I'll pass that along.", () => "Saved as a voice note."],
   "ack.saved": [() => "Saved.", () => "Done.", () => "Got it."],
   "ack.done": [() => "Done.", () => "Updated.", () => "Saved."],
   "ack.cancel": [() => "Okay, I didn't change anything.", () => "Okay, I left it alone.", () => "Got it. Nothing changed."],

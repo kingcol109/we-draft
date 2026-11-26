@@ -338,7 +338,7 @@ export function makeVoiceData({ user = null } = {}) {
     teams() {
       return once(caches, "teams", async () => {
         const d = await getSiteSnapshot("_cfbTeams");
-        return Object.values(d?.teams || {}).map((t) => ({ school: t.School, short: t.Short, mascot: t.Mascot, conference: t.Conference }));
+        return Object.values(d?.teams || {}).map((t) => ({ school: t.School, short: t.Short, mascot: t.Mascot, conference: t.Conference, state: t.State }));
       });
     },
     // [{ cat, value, id, name, pos, year }] — passing / rushing / receiving yards, tackles, sacks, interceptions.
@@ -411,6 +411,10 @@ export function makeVoiceData({ user = null } = {}) {
     livePerformances: () => fresh("perf", 30e3, () => getDoc(doc(db, "liveSlate", "performances")).then((s) => s.data() || null)),
     // A past week, kept whole by the ingester (liveSlate/week-{season}-{seasonType}-{week}).
     liveWeek: (season, seasonType, week) => fresh(`week:${season}-${seasonType}-${week}`, 10 * 60e3, () => getDoc(doc(db, "liveSlate", `week-${season}-${seasonType}-${week}`)).then((s) => s.data() || null)),
+    // National stat leaders (cfbLeaders/current — /cfb/stats' top 50 per category).
+    // A Combine year (compSnapshots/_combine_{year}: rows with results { height, weight, forty, … }).
+    combine: (year) => once(caches, `combine/${year}`, () => getSiteSnapshot(`_combine_${year}`).then((x) => x?.rows || []).catch(() => [])),
+    cfbLeaders: () => fresh("cfbLeaders", 60 * 60e3, () => getDoc(doc(db, "cfbLeaders", "current")).then((s) => s.data() || null)),
     livePlayStats: (gameId) => fresh(`pbp:${gameId}`, 20e3, () => getDoc(doc(db, "liveGames", String(gameId), "box", "live")).then((s) => s.data() || null)),
 
     // ── Draft Risers: a class's board (risers/{year}, utils/risers.js) ──

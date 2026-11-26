@@ -45,7 +45,13 @@ const ORDINAL = { first: 0, one: 0, "1": 0, second: 1, two: 1, "2": 1, third: 2,
 const HIM = /^(?:he|him|his|he's|that guy|the same guy|them|it)$/;
 // How speech writes the site's name ("wiidraft.com", "wee draft", "we drafts") → "we draft".
 const SITE_NAME = /\b(?:wii|wee|whee|we)\s?drafts?(?:\s(?:dot\s)?com)?\b/g;
-const prep = (text) => clean(text).replace(SITE_NAME, "we draft").replace(FILLER, "").replace(TAIL, "").trim();
+const prep = (text) => clean(text).replace(SITE_NAME, "we draft").replace(FILLER, "").replace(TAIL, "")
+  // "what are some of his strengths" → "what are his strengths"
+  .replace(/\b(?:some|any|a few|a couple|all|one|two|three) of (his|her|their)\b/g, "$1")
+  .trim();
+// Said where "him" was meant — speech hears "you" / "the" a lot (user, 2026-11-25: "the system's
+// hearing 'the' way too often"): "where did you go to high school", "what was the star rating".
+const STANDS_FOR_HIM = /^(?:you|your|yours|the|this|that|those|them|it|its|the player|this player|that player|this guy|that guy|this kid|that kid|the kid|her|she)$/;
 
 /** The intent and slots a line matches → { intent, slots } | { wrongMode: intent } | null */
 export function understand(text, mode) {
@@ -73,9 +79,11 @@ const log = (ctx, state, text, reason, extra = {}) => ctx.logMiss?.({ text, mode
 function settle(out0, state0, ctx, text, intent) {
   // Who "him" / "them" means next: the one player (focus) or the few (group) a
   // reply named; a name not on our board (offBoard) can't be him.
-  const { focus, group, offBoard, pending: next, ...out } = out0;
+  const { focus, group, offBoard, pending: next, lastGame, ...out } = out0;
   const state = {
     ...state0,
+    // The one game an answer was about ("…5 rushing touchdowns on October 3rd vs Virginia") — "who won that game?"
+    ...(lastGame ? { lastGame } : {}),
     ...(focus ? { last: focus, offBoard: null } : {}),
     ...(group ? { group } : {}),
     ...(offBoard ? { offBoard, last: null } : {}),
@@ -107,11 +115,21 @@ async function run(intent, slots, state, ctx, text) {
   return settle(out, { ...state, lastAsk, last: slots.player || state.last, ...(slots.player ? { offBoard: null } : {}) }, ctx, text, intent);
 }
 
+// A name compared whole: no suffixes ("David Sanders Junior" = "David Sanders Jr.").
+const nameKey = (s) => plain(s).replace(/\b(?:jr|sr|ii|iii|iv|v|junior|senior)\b/g, "").replace(/\s+/g, " ").trim();
+// An NFL draft pick by his exact name (compSnapshots/_draftHistory) → his latest row | null.
+async function nflExact(said, ctx) {
+  if (!ctx.draftHistory) return null;
+  const { rows } = await ctx.draftHistory().catch(() => ({ rows: [] }));
+  const hits = (rows || []).filter((r) => nameKey(r.name) === nameKey(said));
+  return hits.length ? hits[hits.length - 1] : null;
+}
+
 // A (?<who>) slot → a player, or a question back.
 async function resolve(intent, slots, state, ctx, text) {
   if (!("who" in slots)) return run(intent, slots, state, ctx, text);
   const said = slots.who;
-  if (HIM.test(plain(said))) {
+  if (HIM.test(plain(said)) || (state.last && STANDS_FOR_HIM.test(plain(said)))) {
     if (state.last) return run(intent, { ...slots, player: state.last }, state, ctx, text);
     if (state.offBoard) {
       log(ctx, state, text, "off-board", { intent: intent.id, said: state.offBoard });
@@ -120,11 +138,32 @@ async function resolve(intent, slots, state, ctx, text) {
     return { reply: { say: "Who do you mean?", tone: "miss" }, state };
   }
   const people = await ctx.people();
+  // "how did Houston do against West Virginia / last week": teams, not a player — that game, broken down.
+  if (intent.id === "stats.vs" && schoolSaid(said, people)) {
+    const r = plain(slots.rest || "");
+    const opp = r.match(/^(?:against|vs|versus|at|with|over) (?:the )?(.+?)(?: last week| on saturday| saturday)?$/);
+    if ((opp && schoolSaid(opp[1], people)) || /\b(?:last week|saturday|last game|last night|yesterday|weekend|last time out)\b/.test(r)) {
+      const breakdown = INTENTS.find((i) => i.id === "game.breakdown");
+      if (breakdown) return run(breakdown, { teams: opp ? `${said} ${opp[1]}` : said }, state, ctx, text);
+    }
+  }
   let found = findPlayer(said, people, state.aliases);
   // "kromahs height" (no apostrophe) → try it without the s.
   if (found.none && /s$/.test(plain(said))) {
     const again = findPlayer(plain(said).replace(/s$/, ""), people, state.aliases);
     if (!again.none) found = again;
+  }
+  // A loose board match loses to the exact name somewhere else (user, 2026-11-25: "Ashton Daniels"
+  // answered as Ashton Hampton): anyone on a CFBD roster, then an NFL draft pick ("Cam Newton").
+  const fullName = nameKey(said).split(" ").length >= 2;
+  const exactHere = found.player && (found.taught || found.school || nameKey(`${found.player.first} ${found.player.last}`) === nameKey(said));
+  if (fullName && !exactHere && (!found.player || (found.score ?? 1) < 0.93)) {
+    const cfbdAll = ctx.cfbdPeople ? await ctx.cfbdPeople().catch(() => []) : [];
+    const exact = cfbdAll.filter((p) => nameKey(`${p.first} ${p.last}`) === nameKey(said));
+    if (exact.length === 1) return run(intent, { ...slots, player: exact[0] }, state, ctx, text);
+    const nfl = await nflExact(said, ctx);
+    const nflIntent = nfl && INTENTS.find((i) => i.id === "nfl.player");
+    if (nflIntent) return run(nflIntent, { nfl, ask: intent.id, field: slots.field || null, topic: slots.topic || null, metric: slots.metric || null }, state, ctx, text);
   }
   if (found.player) return run(intent, { ...slots, player: found.player }, state, ctx, text);
   if (found.choices) {
@@ -159,7 +198,7 @@ async function resolve(intent, slots, state, ctx, text) {
       const choices = [...found.near.slice(0, 4), c.player];
       log(ctx, state, text, "unknown-player", { intent: intent.id, said, school: found.school || null });
       return {
-        reply: { say: `${phrase(ctx, "miss.player", { said })} Did you mean one of these?`, choices: asChoices(choices), tone: "ask" },
+        reply: { say: `${phrase(ctx, "miss.player", { said })} Did you mean one of these?`, speak: "Did you mean one of these?", choices: asChoices(choices), tone: "ask" },
         state: { ...state, pending: { kind: "choose", intent: intent.id, slots, said, text, choices, teach: true } },
       };
     }
@@ -176,7 +215,7 @@ async function resolve(intent, slots, state, ctx, text) {
   const nameLike = plain(said).split(" ").length <= 4 && !/\b(?:the|a|an|on|of|in|who|what|person|player|prospect|rated|ranked|number|best|top|guy)\b/.test(plain(said));
   const tip = nameLike ? hint(ctx, "request", state.mode === "admin" ? `To add him, say "add" with his name and school.` : `If he isn't on We-Draft.com, say "request" with his name and school.`) : "";
   return {
-    reply: { say: `${(found.school ? phrase(ctx, "miss.player.school", { said, school: found.school }) : phrase(ctx, "miss.player", { said }))}${found.near.length ? " Did you mean one of these?" : ""}${tip ? ` ${tip}` : ""}`, choices: asChoices(found.near), tone: "miss" },
+    reply: { say: `${(found.school ? phrase(ctx, "miss.player.school", { said, school: found.school }) : phrase(ctx, "miss.player", { said }))}${found.near.length ? " Did you mean one of these?" : ""}${tip ? ` ${tip}` : ""}`, speak: found.near.length ? "Did you mean one of these?" : phrase(ctx, "miss.player.short"), choices: asChoices(found.near), tone: "miss" },
     state: { ...state, pending: found.near.length ? { kind: "choose", intent: intent.id, slots, said, text, choices: found.near, teach: true } : null },
   };
 }
@@ -291,6 +330,18 @@ async function pronounceStep(text, state, ctx) {
   }, { ...p, candidate: cand });
 }
 
+// Feedback about the voice itself, said to it (user, 2026-11-25: "I don't like the last answer…",
+// "the audio stops listening way too fast…"): long, and about how it talks / answers.
+const FEEDBACK = /\b(?:i don't like|i do not like|i dont like|i want (?:it|you|the)|it should|you should|it shouldn't|you shouldn't|should be|shouldn't|should just|should always|should never|sounds (?:so |too |very |really )?(?:robotic|weird|wrong|bad)|too (?:fast|slow|long|short|robotic)|way too|the (?:audio|voice|answer|last answer|system|mic|microphone)\b.*\b(?:should|is|was|needs?)|needs to)\b/;
+export const looksLikeFeedback = (t0) => {
+  const t = String(t0 || "").replace(/'/g, "'").replace(/\b(do|should|does|is|was)nt\b/g, "$1n't");
+  // A question ("what should I watch…") isn't feedback unless it's clearly about the voice.
+  if (/^(?:who|what|how many|how much|where|which)\b/.test(t) && !/\b(?:the (?:audio|voice|system|mic)|you|your answer)\b/.test(t)) return false;
+  return t.split(" ").length >= 7 && FEEDBACK.test(t);
+};
+
+const LEAD_IN = /^(?<who>[a-z0-9.' ]+?) (?<q>(?:what|what's|whats|how|how's|hows|where|who|who's|when|is|was|does|did|has|tell me|give me|read me)\b.*\b(?:his|he|him|he's)\b.*)$/;
+
 async function respondTo(text, state, ctx) {
   const t = prep(text);
   const p = state.pending;
@@ -311,6 +362,18 @@ async function respondTo(text, state, ctx) {
   const base = { ...state, pending: null };
   const fr = followRest(t, state);
   if (fr) return resolve(fr.intent, fr.slots, base, ctx, String(text).trim());
+  // The player said first, then the question about "him" (user, 2026-11-25: "David Sanders at
+  // Tennessee, what are his strengths and weaknesses") — any question that works with "his" works this way.
+  const lead = !state.leadIn && t.match(LEAD_IN);
+  if (lead) {
+    let f = findPlayer(lead.groups.who, await ctx.people(), state.aliases);
+    if (!f.player && !understand(text, state.mode) && ctx.cfbdPeople) f = findPlayer(lead.groups.who, await ctx.cfbdPeople().catch(() => []), state.aliases);
+    if (f.player) {
+      const out = await respondTo(lead.groups.q, { ...state, last: f.player, offBoard: null, pending: null, leadIn: true }, ctx);
+      if (out?.state) delete out.state.leadIn;
+      return out;
+    }
+  }
   const u = understand(text, state.mode);
   // "how many touchdowns?" right after "…rushing yards in 2025": the same season / opponents.
   const la = state.lastAsk;
@@ -321,11 +384,23 @@ async function respondTo(text, state, ctx) {
   const fw = !u && (await followWho(t, state, ctx));
   if (fw) return resolve(fw.intent, fw.slots, base, ctx, String(text).trim());
   if (!u) {
+    // Guidance said to the voice ("it should…", "that sounds robotic…"): a voice note, not a miss.
+    if (looksLikeFeedback(t) && ctx.addNote) {
+      try {
+        await ctx.addNote("voice", { text: String(text).trim(), said: String(text).trim(), player: state?.last?.id || null, mode: state?.mode || null, auto: true, after: state?.lastAnswer || null });
+        return { reply: { say: "Got it. I saved that as a voice note.", speak: phrase(ctx, "ack.note"), tone: "done", noRecord: true }, state: base };
+      } catch { /* not allowed: a miss as usual */ }
+    }
     log(ctx, state, String(text).trim(), "not-understood");
     const tip = hint(ctx, "help", 'Say "help" for what I can do.');
-    return { reply: { say: `${phrase(ctx, "miss.question", { text: String(text).trim() })}${tip ? ` ${tip}` : ""}`, tone: "miss" }, state: base };
+    return { reply: { say: `${phrase(ctx, "miss.question", { text: String(text).trim() })}${tip ? ` ${tip}` : ""}`, speak: phrase(ctx, "miss.short"), tone: "miss" }, state: base };
   }
-  if (u.wrongMode) return { reply: { say: `"${u.wrongMode.title}" is an admin command. Use the admin version.`, tone: "miss" }, state: base };
+  if (u.wrongMode && ctx.isAdmin) {
+    // An admin asking on /voice: run it anyway ("morning readout" said on the general page).
+    const again = understand(text, "admin");
+    if (again?.intent) return resolve(again.intent, again.slots, { ...base, mode: "admin" }, ctx, String(text).trim()).then((o) => (o?.state ? { ...o, state: { ...o.state, mode: state.mode } } : o));
+  }
+  if (u.wrongMode) return { reply: { say: `"${u.wrongMode.title}" is an admin command. Use the admin version.`, speak: "That's on the admin page.", tone: "miss" }, state: base };
   if (u.intent.signIn && !ctx.uid) return { reply: { say: "Sign in first. That's your own evaluation.", tone: "miss" }, state: base };
   try {
     return await resolve(u.intent, u.slots, base, ctx, String(text).trim());

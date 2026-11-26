@@ -9,7 +9,9 @@
 // people: [{ id, first, last, pos, school, cls }]
 import { plain } from "./text";
 
-const SUFFIX = /^(jr|sr|ii|iii|iv|v)$/;
+const SUFFIX = /^(jr|sr|ii|iii|iv|v|junior|senior)$/;
+const SUFFIX_ANY = /\b(?:jr|sr|ii|iii|iv|v|junior|senior)\b/g;
+const fullKey = (p) => plain(`${p.first || ""} ${p.last || ""}`).replace(SUFFIX_ANY, "").replace(/\s+/g, " ").trim();
 
 export function lev(a, b) {
   const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
@@ -131,6 +133,10 @@ export function findPlayer(said, people, aliases = {}) {
   const key = plain(said);
   if (!key) return { none: true, said, near: [] };
   const taught = aliases[key] && people.find((p) => p.id === aliases[key]);
+  // A name taught from a "did you mean" pick never beats someone with exactly that name
+  // (2026-11-25: "Ashton Daniels" had been taught as Ashton Hampton).
+  const exact = taught && people.filter((p) => p.id !== taught.id && fullKey(p) === key.replace(SUFFIX_ANY, "").replace(/\s+/g, " ").trim());
+  if (taught && exact.length === 1) return { player: exact[0], score: 1 };
   if (taught) return { player: taught, score: 1, taught: true };
   // With a school: only that school's players. Nobody there by that name →
   // the whole list (a first name like "Troy" isn't a school), still noting it.

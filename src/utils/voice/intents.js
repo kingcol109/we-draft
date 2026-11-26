@@ -40,6 +40,10 @@ import { LIVE_INTENTS } from "./intentsLive";
 import { phrase, extra, hint, join, whenPhrase } from "./phrase";
 import { seasonChange, bestSeasonYet } from "./insights";
 import { nameFor, POS_PLURAL } from "./refs";
+import { gameStory, bestGamesSpoken, gameOf } from "./spoken";
+import { LEADER_INTENTS } from "./intentsLeaders";
+import { GAME_INTENTS } from "./intentsGames";
+import { NFL_INTENTS } from "./intentsNfl";
 
 const LIST = "(?<list>strengths?|weakness(?:es)?)";
 const listOf = (l) => (/^s/.test(l) ? "strengths" : "weaknesses");
@@ -53,10 +57,22 @@ export function parseRest(rest) {
   const om = t.match(/\b(?:against|vs|versus|verse|v|facing|playing)\s+(.+?)(?=\s+(?:in|during|this|last|for|over)\b|$)/);
   let left = t;
   if (om) { opps = opponentPhrases(om[1]); left = t.replace(om[0], " "); }
+  // A school he played for: "at Auburn", "in Auburn", "while he was at Stanford" (user, 2026-11-25).
+  let at = null;
+  const am = left.match(/\b(?:while (?:he was )?at|when he was at|during his time at|at|in) (?!20\d\d\b|this\b|last\b|his\b|the (?:season|year)\b|career\b|college\b|games?\b|total\b|a game\b|one game\b|so far\b)([a-z][a-z ]*?)(?=\s+(?:in|during|this|last|against|vs|versus)\b|$)/);
+  if (am && !/^(?:the )?(?:season|year|nfl|draft|class)$/.test(am[1])) { at = am[1].replace(/^the /, ""); left = left.replace(am[0], " "); }
   const seasonWords = (left.match(SEASON_RE) || []).join(" ");
   left = left.replace(SEASON_RE, " ").replace(/\b(?:so far|this|games?|the|in|total|overall|on the season|season|with|up with|the year with|the season with|year|finish|finished|end|ended)\b/g, " ").trim();
   if (left) return null;
-  return { seasons: seasonWords, opps };
+  return { seasons: seasonWords, opps, ...(at ? { at } : {}) };
+}
+// The seasons he spent at a school (his career stops) → ["2025"] | null
+function yearsAt(d, at, years) {
+  const key = plain(at).replace(/\s+/g, "");
+  const stops = (d.CareerStops || []).filter((s) => { const k = plain(s.School || "").replace(/\s+/g, ""); return k && (k === key || k.startsWith(key) || key.startsWith(k)); });
+  if (!stops.length) return null;
+  const out = years.filter((y) => stops.some((s) => Number(y) >= Number(s.From) && Number(y) <= Number(s.To || s.From)));
+  return { years: out, school: stops[0].School };
 }
 const restOk = (s) => parseRest([s.rest1, s.rest].filter(Boolean).join(" ")) != null;
 
@@ -76,6 +92,12 @@ export async function lineFor(d, ctx, restText) {
     const uniq = [...new Map(hit.map((g) => [g.id, g])).values()];
     const opps = [...new Set(uniq.map((g) => g.opp))];
     return { line: sumLines(uniq.map((g) => g.line)), label: `vs ${opps.join(" and ")}${uniq.length > 1 ? ` (${uniq.length} games)` : ""}`, games: uniq, missed, kind: "vs", opps, data };
+  }
+  if (rest.at) {
+    const a = yearsAt(d, rest.at, data.years);
+    if (!a) return { gap: "no-school-stop", at: rest.at };
+    if (!a.years.length) return { gap: "no-season" };
+    return { line: sumLines(a.years.map((y) => data.seasons[y])), label: `at ${a.school}`, kind: "at", school: a.school, years: a.years, data };
   }
   if (sel === "career") return { line: data.career, label: "career", kind: "career", data };
   const years = Array.isArray(sel) && sel.length ? sel : [data.years[data.years.length - 1]];
@@ -123,7 +145,7 @@ const BASE = [
       const r = await lineFor(d, ctx, [rest1, rest].filter(Boolean).join(" "));
       if (r.gap === "no-stats") return miss(`I don't have stats for ${nameOf(d)} yet.`, "no-stats", d);
       if (r.gap === "no-opponent") return miss(`I don't see a game for ${nameOf(d)} against ${r.missed.join(" or ")}.`, "no-opponent", d);
-      if (r.gap) return miss(`I don't have ${nameOf(d)}'s numbers for that season.`, r.gap, d);
+      if (r.gap) return miss(r.gap === "no-school-stop" ? `I don't have ${nameOf(d)} playing at ${r.at}.` : `I don't have ${nameOf(d)}'s numbers for that season.`, r.gap, d);
       const rows = lineKeys(d.Position).map((k) => [STATS[k].label, statValue(r.line, k)]).filter(([, v]) => v != null);
       if (!rows.length) return miss(`${nameOf(d)} has no stats there.`, "no-stats", d);
       const keys = lineKeys(d.Position).filter((k) => statValue(r.line, k) != null);
@@ -154,7 +176,7 @@ const BASE = [
       const r = await lineFor(d, ctx, [rest1, rest].filter(Boolean).join(" "));
       if (r.gap === "no-stats") return miss(`I don't have stats for ${nameOf(d)} yet.`, "no-stats", d);
       if (r.gap === "no-opponent") return miss(`I don't see a game for ${nameOf(d)} against ${r.missed.join(" or ")}.`, "no-opponent", d);
-      if (r.gap) return miss(`I don't have ${nameOf(d)}'s numbers for that season.`, r.gap, d);
+      if (r.gap) return miss(r.gap === "no-school-stop" ? `I don't have ${nameOf(d)} playing at ${r.at}.` : `I don't have ${nameOf(d)}'s numbers for that season.`, r.gap, d);
       const v = statValue(r.line, key);
       if (v == null) return miss(`I don't have ${STATS[key].label} for ${nameOf(d)}.`, "no-stat", d);
       // Say the one stat; show its whole line (user, 2026-11-25: rushing yards → carries, yards per carry, touchdowns too).
@@ -185,12 +207,14 @@ const BASE = [
       const r = await lineFor(d, ctx, rest);
       if (r.gap === "no-stats") return miss(`I don't have stats for ${nameOf(d)} yet.`, "no-stats", d);
       if (r.gap === "no-opponent") return miss(`I don't see a game for ${nameOf(d)} against ${r.missed.join(" or ")}.`, "no-opponent", d);
-      if (r.gap) return miss(`I don't have ${nameOf(d)}'s numbers for that season.`, r.gap, d);
+      if (r.gap) return miss(r.gap === "no-school-stop" ? `I don't have ${nameOf(d)} playing at ${r.at}.` : `I don't have ${nameOf(d)}'s numbers for that season.`, r.gap, d);
       const games = r.games || [];
       if (games.length) {
         const rows = games.map((g) => [`${gameWhen(g)} ${gameTitle(g)} · ${gameResult(g)}`, gameSummary(g.line, d.Position) || "no stats"]);
         const say = games.map((g) => `${gameWhen(g)} ${gameTitle(g)}, ${gameResult(g)}: ${gameSummary(g.line, d.Position) || "no stats"}`).join(". ");
-        return { say: `${nameOf(d)}. ${say}.`, ...card(d), rows, tone: "answer" };
+        // Out loud: told like a breakdown, not read off the box (user, 2026-11-25).
+        const speak = games.slice(0, 3).map((g) => gameStory(nameOf(d), d.School, g)).join(" ");
+        return { say: `${nameOf(d)}. ${say}.`, speak, ...card(d), rows, ...(games.length === 1 ? { lastGame: gameOf(d, games[0]) } : {}), tone: "answer" };
       }
       const keys = lineKeys(d.Position).filter((k) => statValue(r.line, k) != null);
       return { say: phrase(ctx, "stat.line", { name: await nameFor(d, ctx), label: r.label, when: whenPhrase(r), list: keys.slice(0, 4).map((k) => statSay(k, statValue(r.line, k))).join(", ") }), ...card(d), rows: keys.map((k) => [STATS[k].label, statText(k, statValue(r.line, k))]), tone: "answer" };
@@ -220,7 +244,7 @@ const BASE = [
       const film = ctx.filmGames ? await ctx.filmGames(d.id).catch(() => ({})) : {};
       const rows = top.map(({ game: g }) => [`${gameWhen(g)} ${gameTitle(g)} · ${gameResult(g)}${film[g.id] ? ` · 🎞 ${film[g.id]} plays` : ""}`, gameSummary(g.line, d.Position)]);
       const say = top.slice(0, 3).map(({ game: g }) => `${gameTitle(g)}, ${gameWhen(g)}: ${gameSummary(g.line, d.Position)}`).join(". ");
-      return { say: phrase(ctx, "games.best", { name: await nameFor(d, ctx), list: say }), ...card(d, { sub: `${facts(d)} · best games, ${years.join(" + ")}` }), rows, tone: "answer" };
+      return { say: phrase(ctx, "games.best", { name: await nameFor(d, ctx), list: say }), speak: bestGamesSpoken(nameOf(d), top.map((x) => x.game)), ...card(d, { sub: `${facts(d)} · best games, ${years.join(" + ")}` }), rows, tone: "answer" };
     },
   },
 
@@ -250,10 +274,14 @@ const BASE = [
     id: "player.bio",
     mode: "general",
     title: "A player's bio",
-    examples: ["read his bio", "read Kromah's bio", "what's Kromah's bio"],
+    examples: ["read his bio", "read Kromah's bio", "what's Kromah's bio", "read me a scouting report on Kromah"],
     patterns: [
       new RegExp(`^(?:read|read me|read off|what is|what's|whats|give me|tell me)? ?(?:the )?${WHO} (?:bio|biography|write up|story)$`),
       /^(?:read|read me|read off|give me|tell me) (?:the )?(?:bio|biography) (?:for|of|on) (?<who>.+)$/,
+      // A scouting report: his We-Draft.com write-up (user, 2026-11-25: "read me a scouting report on Jesse Legree").
+      /^(?:read|read me|read off|give me|tell me|pull up|what's|whats|what is|do you have|do we have)(?: a| the| his| an)? (?:scouting report|report|write up|writeup|evaluation|eval|profile|summary|rundown|breakdown) (?:for|of|on|about) (?<who>.+)$/,
+      new RegExp(`^(?:read|read me|read off|give me|tell me|pull up|what is|what's|whats)? ?(?:the )?${WHO} (?:scouting report|report|writeup|profile summary)$`),
+      /^(?:read|read me|give me|tell me) (?:his|the) (?:scouting report|report|write up|writeup)$/,
     ],
     run: async ({ player }, ctx) => {
       const d = await loaded(player, ctx);
@@ -283,7 +311,17 @@ const BASE = [
       if (!d || !f) return miss(`I couldn't load ${nameOf(player)}.`);
       const v = d[f.key];
       if (!v) return miss(`I don't have a ${f.label.toLowerCase()} for ${nameOf(d)}.`, `no-${f.key.toLowerCase()}`, d);
-      return { say: `${nameOf(d)}: ${f.say(v)}.`, ...card(d), rows: [[f.label, f.key === "Weight" ? weightText(v) : v]], tone: "answer" };
+      // Out loud, a sentence: "George MacIntyre is 6 foot 6." (the screen keeps the row).
+      const name = nameOf(d);
+      const POS_WORDS = { QB: "quarterback", RB: "running back", WR: "wide receiver", TE: "tight end", OL: "offensive lineman", DL: "defensive lineman", EDGE: "edge rusher", LB: "linebacker", DB: "defensive back", K: "kicker", P: "punter" };
+      const speak = {
+        Height: `${name} is ${f.say(v)}.`,
+        Weight: `${name} weighs ${f.say(v)}.`,
+        School: `${name} plays at ${v}.`,
+        Position: `${name} plays ${POS_WORDS[v] || v}.`,
+        Eligible: `${name} is in the ${v} draft class.`,
+      }[f.key] || `${name}: ${f.say(v)}.`;
+      return { say: `${name}: ${f.say(v)}.`, speak, ...card(d), rows: [[f.label, f.key === "Weight" ? weightText(v) : v]], tone: "answer" };
     },
   },
   {
@@ -571,6 +609,7 @@ export const INTENTS = [
   ...READOUT_INTENTS,
   // Notes and suggestions first (their words can be anything); "request / add <player>" last.
   ...REQUEST_INTENTS.filter((i) => i.id !== "request.player"),
+  ...LEADER_INTENTS, ...GAME_INTENTS, ...NFL_INTENTS,
   ...WATCH_INTENTS, ...BOARD_INTENTS, ...NOTE_INTENTS,
   byId["my.read"], byId["my.grade"], byId["my.traits"], byId["my.fit"],
   ...COMMUNITY_INTENTS, ...LIVE_INTENTS, ...FACT_INTENTS.filter((i) => i.id !== "team.roster"), ...STATS_MAX_INTENTS,

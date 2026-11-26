@@ -14,6 +14,7 @@ import { eligibilityInfo, currentDraftClass } from "../eligibility";
 import { teamKey } from "../film/schedule";
 import { phrase, extra, join, resultPhrase, datePhrase, shortTeam } from "./phrase";
 import { nameFor, POS_NAMES } from "./refs";
+import { gameOf } from "./spoken";
 import { GRADE_SCALE } from "../gradeScale";
 
 const CLS = "(?: (?:in|for|from) (?:the )?(?<cls>20\\d\\d)(?: class| draft| draft class)?)?";
@@ -52,14 +53,17 @@ export const BOARD_INTENTS = [
     title: "Your top players",
     examples: ["who's my top running back", "who are my top 5 quarterbacks in 2027", "who's my number one player"],
     patterns: [
-      new RegExp(`^(?:who(?:'s| is| are)|what(?:'s| is| are)) my (?:top|best|highest graded|highest rated|number one|#1|no 1)(?: (?<n>\\d+|one|two|three|four|five|ten))? (?<pos>${POS_RE}|players?|prospects?|guys?)${CLS}$`),
+      new RegExp(`^(?:who(?:'s| is| are)|what(?:'s| is| are)) my (?:top|best|highest|number one|#1|no 1|first)(?: (?:graded|rated|ranked))?(?: (?<n>\\d+|one|two|three|four|five|ten))? (?<pos>${POS_RE}|players?|prospects?|guys?)(?: on my board)?${CLS}$`),
+      // "who is the highest quarterback I have on my 2028 board"
+      new RegExp(`^who(?:'s|s| is| are) (?:the )?(?:top|best|highest|number one|first)(?: (?:graded|rated|ranked))? (?<pos>${POS_RE}|players?|prospects?|guys?)(?:(?: (?:that )?i (?:have|got|graded|ranked)(?: (?:the )?(?:highest|best|top))?)(?: on my (?:(?<cls>20\\d\\d) )?board)?| on my (?:(?<cls2>20\\d\\d) )?board)$`),
       new RegExp(`^(?:who(?:'s|s| is)) (?:the )?(?:top|best) (?<pos>${POS_RE}|player|prospect) on my board${CLS}$`),
       new RegExp(`^who(?:'s|s| is) (?:#1|number one|no 1|first|at the top) on my board(?: at (?<pos>${POS_RE}))?${CLS}$`),
       new RegExp(`^who do i have (?:as )?(?:my )?(?:top|number one|#1|first|highest)(?: (?<pos>${POS_RE}|player|prospect))?${CLS}$`),
       new RegExp(`^(?:who|which) (?<pos>${POS_RE}|player|prospect) do i (?:have|grade|like) (?:the )?(?:highest|most|best|first)${CLS}$`),
     ],
     accept: (s) => !s.pos || /^(?:players?|prospects?|guys?)$/.test(s.pos) || !!positionSaid(s.pos),
-    run: async ({ pos, n, cls }, ctx) => {
+    run: async ({ pos, n, cls: cls1, cls2 }, ctx) => {
+      const cls = cls1 || cls2;
       const wanted = !pos || /^(?:players?|prospects?|guys?)$/.test(pos) ? "players" : pos;
       const { pos: P, hits } = await boardHits(ctx, wanted, null, cls);
       if (P?.sub) return miss(`I can only sort your board by defensive backs for now, not ${P.label}.`, "board-subposition");
@@ -175,7 +179,9 @@ export const COMMUNITY_INTENTS = [
         // "top 5 running backs" → 5; "the top running back" → 1; "the top running backs" → 10.
         const k = word(n) || (/s$/.test(plain(pos)) ? 10 : 1);
         const top = all.slice(0, k);
+        const one = k === 1 && top[0] ? { id: top[0].id, first: top[0].first, last: top[0].last, school: top[0].school, pos: P.pos, cls: year } : null;
         return {
+          ...(one ? { focus: one, speak: `${top[0].first} ${top[0].last} from ${top[0].school} is the top ${P.label.replace(/s$/, "")} in the ${year} class on We-Draft.com.` } : {}),
           say: `The top ${k === 1 ? "" : `${top.length} `}${k === 1 ? P.label.replace(/s$/, "") : P.label} in the ${year} class on We-Draft.com: ${list(top.map((r, i) => `${k === 1 ? "" : `${i + 1}, `}${r.first} ${r.last}, ${r.school}`))}.`,
           title: `${year} ${P.label}`, sub: "We-Draft.com community board", rows: top.map((r, i) => [`${i + 1}. ${r.first} ${r.last} · ${r.school}`, r.grade || "—"]),
           people: top.map((r, i) => ({ id: r.id, first: r.first, last: r.last, school: r.school, pos: P.pos, cls: year, note: `#${i + 1}${r.grade ? ` · ${r.grade}` : ""}` })), tone: "answer",
@@ -194,8 +200,10 @@ export const COMMUNITY_INTENTS = [
     title: "The community's strengths, weaknesses and fits",
     examples: ["what are the strengths and weaknesses for Kromah", "what are Kromah's strengths", "what do people like about Kromah", "what NFL teams do people think Kromah fits"],
     patterns: [
-      /^what are (?:the )?(?:public |community |consensus |people's |users' |his )?(?<which>strengths and weaknesses|weaknesses and strengths|strengths|weaknesses|pros and cons)(?: listed| people have| on file)? (?:for|of|on|about) (?<who>.+)$/,
-      new RegExp(`^(?:what are )?${WHO} (?:public |community )?(?<which>strengths and weaknesses|weaknesses and strengths|strengths|weaknesses|pros and cons)$`),
+      /^what are (?:the )?(?:public |community |consensus |people's |users' |his )?(?<which>strengths? and weakness(?:es)?|weakness(?:es)? and strengths?|strengths?|weakness(?:es)?|pros and cons)(?: listed| people have| on file)? (?:for|of|on|about) (?<who>.+)$/,
+      // "David Sanders at Tennessee, what are his strengths and weaknesses"
+      /^(?<who>.+?),? (?:what are|what're|whats|what's|what is|tell me|give me) (?:his|their|the) (?<which>strengths? and weakness(?:es)?|weakness(?:es)? and strengths?|strengths?|weakness(?:es)?|pros and cons)$/,
+      new RegExp(`^(?:what are )?${WHO} (?:public |community )?(?<which>strengths? and weakness(?:es)?|weakness(?:es)? and strengths?|strengths?|weakness(?:es)?|pros and cons)$`),
       /^what (?:do people|does the community|do users|do fans|does everyone) (?<which>like|love|dislike|not like|worry about|knock) (?:about )?(?<who>.+)$/,
       /^what (?:nfl )?(?:teams?|fits?) (?:do people|does the community|do users|does everyone) (?:think |see |have )?(?<who>.+?) (?<which>fits?|fitting)(?: with| on| in)?$/,
       /^(?:what are |what's |whats )?(?:the )?(?:community |public )?(?<which>nfl fits?|team fits?) (?:for|of) (?<who>.+)$/,
@@ -227,7 +235,13 @@ export const COMMUNITY_INTENTS = [
       if (showS || (!showW && !showF)) { say.push(S.length ? `The community's strengths for ${name}: ${list(S.map(([t, c]) => `${t}, ${pct(c)}`))}` : `No strengths picked for ${name} yet`); S.forEach(([t, c]) => rows.push([`Strength · ${t}`, pct(c)])); }
       if (showW || (!showS && !showF)) { say.push(W.length ? `Weaknesses: ${list(W.map(([t, c]) => `${t}, ${pct(c)}`))}` : `No weaknesses picked yet`); W.forEach(([t, c]) => rows.push([`Weakness · ${t}`, pct(c)])); }
       if (showF) { say.push(F.length ? `Top NFL fits for ${name}: ${list(F.map(([t]) => `the ${t}`))}` : `Nobody has picked an NFL fit for ${name} yet`); F.forEach(([t, c]) => rows.push([`Fit · ${t}`, String(c)])); }
-      return { say: `${say.join(". ")}. From ${plural(reports, "evaluation")}.`, ...card(d), rows, tone: "answer" };
+      // Out loud (user, 2026-11-25): the top traits like a scout would say them — no percentages.
+      const low = (t) => String(t).toLowerCase();
+      const spoken = [];
+      if (showS || (!showW && !showF)) spoken.push(S.length ? phrase(ctx, "traits.strengths", { name, list: list(S.slice(0, 3).map(([t]) => low(t))) }) : `Nobody has picked strengths for ${name} yet.`);
+      if (showW || (!showS && !showF)) spoken.push(W.length ? phrase(ctx, "traits.weaknesses", { list: list(W.slice(0, 3).map(([t]) => low(t))), only: !(showS || (!showW && !showF)), name }) : "Nobody has flagged a weakness yet.");
+      if (showF) spoken.push(F.length ? `People see him fitting best with the ${list(F.map(([t]) => t))}.` : `Nobody has picked an NFL fit for ${name} yet.`);
+      return { say: `${say.join(". ")}. From ${plural(reports, "evaluation")}.`, speak: spoken.join(" "), ...card(d), rows, tone: "answer" };
     },
   },
   {
@@ -239,8 +253,12 @@ export const COMMUNITY_INTENTS = [
       /^(?:does|do) (?<who>.+?) (?:have )?(?:any )?(?:nfl )?(?:comparisons|comps|comp|comparison|player comps|pro comps)$/,
       /^(?:what are |who are |give me |what's |whats |what is |read off |read )?(?:some |the |his |any )?(?:good )?(?:nfl )?(?:comparisons|comps|comp|comparison|player comps|pro comps) (?:for|of|to|on) (?<who>.+)$/,
       /^who (?:does|is) (?<who>.+?) (?:compare to|comparable to|remind you of|play like|similar to|look like|compare with)$/,
-      new RegExp(`^${WHO} (?:nfl )?(?:comps|comparisons|comp|comparison|pro comp|pro comps)$`),
+      // "what are the NFL comps" / "who's his comp": him.
+      /^(?:what (?:is|are|was|were)|what's|whats|who (?:is|are)|who's|whos|give me|read me|tell me) (?:the |his |some |any )?(?:nfl |pro |player )?(?:comps|comparisons|comp|comparison)$/,
+      new RegExp(`^(?:what (?:is|are|was|were) |what's |whats |who (?:is|are) |who's |give me |read me |tell me )?(?:the )?${WHO} (?:nfl |pro |player )?(?:comps|comparisons|comp|comparison|pro comp|pro comps)$`),
+      /^who (?:does|do) (?<who>he|you|they|that guy|this guy) (?:compare to|remind you of|play like|look like)$/,
     ],
+    fixed: [{}, {}, {}, { who: "him" }, {}, {}],
     run: async ({ player }, ctx) => {
       const d = await loaded(player, ctx);
       if (!d) return miss(`I couldn't load ${nameOf(player)}.`);
@@ -512,7 +530,7 @@ export const STATS_MAX_INTENTS = [
       const say = phrase(ctx, "stats.max", {
         name: await nameFor(d, ctx), what, span, spanP, said, title: gameTitle(g), titleS: `${g.at === "@" ? "at" : "vs"} ${g.oppRank ? `#${g.oppRank} ` : ""}${shortTeam(g.opp || g.oppAbbr)}`, when: gameWhen(g), whenP: datePhrase(g.date) || gameWhen(g), result: gameResult(g), resultP: resultPhrase(g),
       });
-      return { say, ...card(d, { sub: `${facts(d)} · ${what}, ${span}` }), rows, tone: "answer" };
+      return { say, ...card(d, { sub: `${facts(d)} · ${what}, ${span}` }), rows, lastGame: gameOf(d, g), tone: "answer" };
     },
   },
 ];
@@ -557,3 +575,4 @@ export const TEAM_INTENTS = [
     },
   },
 ];
+

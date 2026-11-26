@@ -21,11 +21,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { useAuth } from "../context/AuthContext";
+import { useIsAdmin } from "../utils/prospectYears";
 import { respond, choose, confirm, more, newState, intentsFor, remember } from "../utils/voice/engine";
 import { applyPronunciations } from "../utils/voice/pronounce";
+import { forSpeech } from "../utils/voice/spoken";
 import { makeVoiceData } from "../utils/voice/data";
 import { logEntry, deviceOf } from "../utils/voice/log";
-import { listen, speak, hush, canListen, canSpeak, wakeListen, unlockSpeech, speechUnlocked, isIOS, speakTest, englishVoices, preferredVoiceName, setPreferredVoice } from "../utils/voice/speech";
+import { listen, speak, hush, canListen, canSpeak, wakeListen, unlockSpeech, speechUnlocked, isIOS, speakTest, iosOtherBrowser, englishVoices, preferredVoiceName, setPreferredVoice } from "../utils/voice/speech";
 import { Orb, Stage } from "../components/voice/VoiceStage";
 
 // This page visit, for the conversation log (one sitting reads as one conversation).
@@ -57,7 +59,9 @@ export default function Voice() {
   const [brief, setBrief] = useState(() => load(BRIEF_KEY, false));
   const memory = useRef({}); // which wordings were just used (never the same one twice in a row)
   const base = useMemo(() => makeVoiceData({ user: uid ? { uid } : null }), [uid]);
-  const voiceData = useMemo(() => ({ ...base, vary: true, brief, memory: memory.current }), [base, brief]);
+  // An admin on /voice can still run the admin commands ("morning readout").
+  const { isAdmin } = useIsAdmin();
+  const voiceData = useMemo(() => ({ ...base, vary: true, brief, memory: memory.current, isAdmin: !!isAdmin }), [base, brief, isAdmin]);
   const [showMissed, setShowMissed] = useState(false);
   const [state, setState] = useState(() => ({ ...newState(mode), aliases: load(ALIAS_KEY, {}), ...load(LAST_KEY, {}) }));
   // The answer a pending question (yes / no, "which one?", "next") belongs to.
@@ -187,7 +191,7 @@ export default function Voice() {
     if (talk) {
       // After a spoken question, give iOS a moment to move the audio off the mic.
       const afterMic = meta.source === "voice" || meta.source === "wake" ? 350 : 0;
-      setTimeout(() => speak(applyPronunciations(out.reply.speak || out.reply.say, voiceData.pronMap()), {
+      setTimeout(() => speak(applyPronunciations(forSpeech(out.reply.speak || out.reply.say), voiceData.pronMap()), {
         start: () => setSpeaking(true), end: () => setSpeaking(false), word: () => setBeat((b) => b + 1),
         // Swallowed (iOS before a tap has unlocked speech): offer "Tap to hear" on this answer.
         report: (r) => { speechReport(r); if (r.phase === "never" || r.phase === "error") setLog((l) => l.map((x) => (x.id === id ? { ...x, silent: true } : x))); },
@@ -234,6 +238,11 @@ export default function Voice() {
 
   const startListening = () => {
     if (listening) { stopRef.current?.(); return; }
+    if (iosOtherBrowser()) {
+      setLog((l) => [{ id: Date.now(), said: "", reply: { say: "On the iPad, the microphone only works in Safari. Open we-draft.com/voice/admin in Safari, or type your question below.", tone: "miss" } }, ...l]);
+      inputRef.current?.focus();
+      return;
+    }
     // Only stop the voice if it's actually talking: touching speech as the mic
     // starts can cut the mic off on iOS.
     if (canSpeak() && (window.speechSynthesis.speaking || window.speechSynthesis.pending)) hush();
@@ -359,7 +368,7 @@ export default function Voice() {
             {listening || awake ? (interim || "Listening…") : busy ? "One second…" : speaking ? (now?.said ? `“${now.said}”` : "") : now?.said ? `“${now.said}”` : wakeOn ? "Say “Hey We-Draft”" : canListen() ? "Tap the logo and ask" : "Type a question below"}
           </div>
           {now?.silent && talk && (
-            <button type="button" onClick={() => { speakTest(applyPronunciations(now.reply.speak || now.reply.say, voiceData.pronMap()), speechReport); setLog((l) => l.map((x) => (x.id === now.id ? { ...x, silent: false } : x))); }}
+            <button type="button" onClick={() => { speakTest(applyPronunciations(forSpeech(now.reply.speak || now.reply.say), voiceData.pronMap()), speechReport); setLog((l) => l.map((x) => (x.id === now.id ? { ...x, silent: false } : x))); }}
               style={{ ...ghost, borderColor: C.gold, color: C.gold, fontSize: 15, padding: "8px 16px" }}>🔊 Tap to hear</button>
           )}
           {wakeNote && <div style={{ fontSize: 13, fontWeight: 700, color: C.gold, textAlign: "center", maxWidth: 560 }}>{wakeNote}</div>}

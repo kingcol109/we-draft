@@ -6,7 +6,8 @@
 // Hands-free (a wake word, "Hey We-Draft") is the next layer on top of this.
 
 // Words unchanged this long = done talking (Safari's own pause is 1.5–3 s).
-const QUIET_MS = 900;
+// Doubled (user, 2026-11-25: "it stops listening way too fast").
+const QUIET_MS = 1800;
 export const canListen = () => typeof window !== "undefined" && !!(window.SpeechRecognition || window.webkitSpeechRecognition);
 export const canSpeak = () => typeof window !== "undefined" && "speechSynthesis" in window;
 
@@ -33,6 +34,8 @@ export function listen(on) {
   let retry = 0;
   let heard = false;
   let t0 = 0;
+  // iOS only lets the mic start from a tap — a retry from a timer just flickers.
+  const retries = isIOS() ? 0 : RETRIES;
   const begin = () => {
     rec = new SR();
     rec.lang = "en-US";
@@ -43,6 +46,7 @@ export function listen(on) {
     rec.onstart = () => on.report?.({ phase: "start", retry, ms: 0 });
     rec.onresult = onResult;
     rec.onerror = (e) => {
+      if (done && e.error === "aborted") return; // our own stop after the question was heard
       on.report?.({ phase: "error", error: e.error, retry, ms: Date.now() - t0, heard });
       // A cut-off ("aborted" / "no-speech" right away) gets retried in onend; the rest are real.
       if (e.error === "not-allowed" || e.error === "service-not-allowed" || e.error === "audio-capture") { stopped = true; on.error?.(e.error); }
@@ -50,7 +54,7 @@ export function listen(on) {
     rec.onend = () => {
       if (done || stopped) { on.end?.(); return; }
       const ms = Date.now() - t0;
-      if (!heard && ms < CUT_OFF_MS && retry < RETRIES) {
+      if (!heard && ms < CUT_OFF_MS && retry < retries) {
         retry += 1;
         on.report?.({ phase: "cut-off", retry, ms });
         setTimeout(() => { if (!stopped && !done) { try { begin(); } catch { on.end?.(); } } }, 250);
@@ -163,6 +167,8 @@ export function speak(text, on = {}) {
 }
 export const hush = () => { if (canSpeak()) window.speechSynthesis.cancel(); };
 
+/** Chrome / Firefox / Edge on an iPad or iPhone: their mic cuts off right away (log 2026-11-25: "aborted" in ms) — only Safari listens. */
+export const iosOtherBrowser = () => typeof navigator !== "undefined" && /CriOS|FxiOS|EdgiOS/.test(navigator.userAgent);
 /** iPad / iPhone (an iPad's Safari says "Macintosh"; a touch screen gives it away). Every iOS browser is Safari underneath. */
 export const isIOS = () => typeof navigator !== "undefined" && (/iPad|iPhone|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && (navigator.maxTouchPoints || 0) > 1));
 

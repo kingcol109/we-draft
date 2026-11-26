@@ -168,7 +168,13 @@ export const WATCH_INTENTS = [
     mode: "general",
     title: "Who's worth watching on a team",
     examples: ["I'm watching Louisiana Tech's offense, is there anybody else on their offense or Charlotte's defense I should watch", "who should I watch on Ohio State's defense", "anybody worth watching on Charlotte"],
-    patterns: [/^(?<q>.*\b(?:watch|watching|worth|anybody|anyone|somebody|someone|players?|guys|prospects|names)\b.*\b(?:offense|defense|offensive|defensive|on [a-z].*)$)/],
+    patterns: [
+      /^(?<q>.*\b(?:watch|watching|worth|anybody|anyone|somebody|someone|players?|guys|prospects|names)\b.*\b(?:offense|defense|offensive|defensive|on [a-z].*)$)/,
+      // "I'm watching Virginia (football), who should I watch" / "who should I watch in the Virginia game"
+      /^(?<q>(?:i'm|im|i am|we're|were|we are) (?:watching|going to watch|gonna watch|about to watch|tuning into|tuned into|at|checking out) .+?) (?:who|which players?|what players?|anybody|anyone|any prospects|any players) (?:should|do|can|to|worth)\b.*$/,
+      /^(?:who|which players?|what players?|which prospects|what prospects) should (?:i|we) (?:watch|look for|keep an eye on|key on|pay attention to|focus on|look at) (?:in|during|for) (?<q>(?:the )?.+?)(?: game| football| today| tonight| this week)*$/,
+      /^(?<q>(?:the )?.+?) (?:football|game)(?: today| tonight)?,? (?:who|which players?) should (?:i|we) (?:watch|look for|keep an eye on)$/,
+    ],
     // Not the site's own board ("top 5 players on We-Draft", "number one on We-Draft").
     accept: (s) => !/\bmy (?:board|watch ?list|notes)\b/.test(s.q) && !/^(?:add|put|suggest|recommend)\b/.test(s.q) && !/\bwe ?draft\b|\btop (?:\d+|two|three|five|ten) (?:players|prospects)\b|\bnumber one\b/.test(s.q),
     run: async ({ q: said }, ctx) => {

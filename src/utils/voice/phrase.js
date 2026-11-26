@@ -30,11 +30,15 @@ export function phrase(ctx, key, vars = {}) {
 
 /** One of some ready-made wordings (the first when not varying), never the last one used for `key`. */
 export function choose(ctx, key, options0) {
-  const options = (options0 || []).filter(Boolean);
+  let options = (options0 || []).filter(Boolean);
   if (!options.length) return "";
   if (!ctx?.vary || options.length === 1) return options[0];
   const mem = memOf(ctx);
   const last = mem?.said?.[key];
+  // Said out loud, "Braden Atkinson: 3,169 passing yards, 2026." reads like a box score
+  // (user, 2026-11-25): the wordings that talk come first when there are any.
+  const talking = options.filter((o) => !/^[^.!?]{1,80}:\s/.test(o));
+  if (talking.length) options = talking;
   const fresh = options.filter((o) => o !== last);
   const pool = fresh.length ? fresh : options;
   const out = pool[Math.floor((ctx.random || Math.random)() * pool.length)];
@@ -69,6 +73,7 @@ export const resultPhrase = (g) => (!g?.score ? "" : g.result === "W" ? `a ${g.s
 /** A stat line's span, as said: "in 2025", "in his career", "across 2025 and 2026", "against Ohio State" */
 export function whenPhrase(r) {
   if (!r) return "";
+  if (r.kind === "at") return `at ${r.school}`;
   if (r.kind === "vs") return `against ${r.opps.map(shortTeam).join(" and ")}${r.games?.length > 1 ? ` (${r.games.length} games)` : ""}`;
   if (r.kind === "career") return "in his career";
   if (r.years?.length > 1) return `across ${r.years.slice(0, -1).join(", ")} and ${r.years[r.years.length - 1]}`;
