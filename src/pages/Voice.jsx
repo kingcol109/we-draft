@@ -25,7 +25,7 @@ import { respond, choose, confirm, more, newState, intentsFor, remember } from "
 import { applyPronunciations } from "../utils/voice/pronounce";
 import { makeVoiceData } from "../utils/voice/data";
 import { logEntry, deviceOf } from "../utils/voice/log";
-import { listen, speak, hush, canListen, canSpeak, wakeListen, unlockSpeech, speakTest } from "../utils/voice/speech";
+import { listen, speak, hush, canListen, canSpeak, wakeListen, unlockSpeech, speakTest, englishVoices, preferredVoiceName, setPreferredVoice } from "../utils/voice/speech";
 import { Orb, Stage } from "../components/voice/VoiceStage";
 
 // This page visit, for the conversation log (one sitting reads as one conversation).
@@ -44,6 +44,8 @@ const WAKE_KEY = "wd.voice.wake";
 const LIVE_REFRESH_MS = 30000;
 // The longest an answer may take before the page gives up on it.
 const ANSWER_LIMIT_MS = 15000;
+// "Microsoft Aria Online (Natural) - English (United States)" → "Aria (Natural)".
+const voiceLabel = (v) => String(v?.name || "").replace(/^(?:Microsoft|Google|Apple)\s+/i, "").replace(/\s+Online/i, "").replace(/\s*-\s*English.*$/i, "").trim() || v?.name || "";
 const load = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } };
 const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private window */ } };
 const TONE = { answer: C.ink, done: C.good, ask: C.gold, miss: C.bad };
@@ -68,6 +70,16 @@ export default function Voice() {
   const busyRef = useRef(false);
   busyRef.current = busy;
   const [talk, setTalk] = useState(() => load(SPEAK_KEY, true));
+  // The voice picker: this device's English voices and the one picked (remembered here).
+  const [voices, setVoices] = useState([]);
+  const [voiceName, setVoiceName] = useState(() => preferredVoiceName());
+  useEffect(() => { englishVoices().then(setVoices).catch(() => {}); }, []);
+  const pickVoice = (name) => {
+    setPreferredVoice(name);
+    setVoiceName(name);
+    const v = voices.find((x) => x.name === name);
+    speakTest(`This is ${v ? voiceLabel(v) : "the automatic voice"}.`);
+  };
   // The logo pulses while it talks, a beat on each word.
   const [speaking, setSpeaking] = useState(false);
   const [beat, setBeat] = useState(0);
@@ -305,6 +317,17 @@ export default function Voice() {
         <button type="button" onClick={() => setBrief((x) => !x)} title="Brief: just the answer. Full: the answer plus what's notable and tips." style={{ ...ghost, color: brief ? C.gold : C.ink }}>{brief ? "Brief" : "Full"}</button>
         {canSpeak() && (
           <button type="button" onClick={() => { if (!talk) speakTest("Voice is on.", speechReport); setTalk((x) => !x); }} title="Turn the voice on or off (turning it on says “Voice is on.”)" style={{ ...ghost, color: talk ? C.ink : C.soft }}>{talk ? "🔊 Speaking" : "🔇 Muted"}</button>
+        )}
+        {/* Which voice — this device's English voices, the natural-sounding ones (★) first. */}
+        {canSpeak() && voices.length > 1 && (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+            <select value={voiceName} onChange={(e) => pickVoice(e.target.value)} title="The voice it answers in (remembered on this device)" aria-label="Voice"
+              style={{ ...ghost, maxWidth: 220, padding: "6px 10px", background: C.panel, appearance: "auto" }}>
+              <option value="">Voice: automatic</option>
+              {voices.map((v) => <option key={v.name} value={v.name}>{v.natural ? "★ " : ""}{voiceLabel(v)}</option>)}
+            </select>
+            <button type="button" onClick={() => speakTest(`This is ${voiceName ? voiceLabel(voices.find((v) => v.name === voiceName) || { name: voiceName }) : "the automatic voice"}. How's Kromah playing?`, speechReport)} title="Hear this voice" aria-label="Hear this voice" style={{ ...ghost, padding: "6px 10px" }}>▶</button>
+          </span>
         )}
       </header>
 

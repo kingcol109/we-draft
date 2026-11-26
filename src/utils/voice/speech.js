@@ -54,13 +54,25 @@ export function listen(on) {
  * on: { start(), end(), word() } — the page's logo pulses while it talks,
  * a beat on each word (word() isn't fired by every voice; start / end are).
  */
+// ── Which voice (user, 2026-11-25: a voice picker) — chosen per device, remembered ──
+const VOICE_KEY = "wd.voice.voiceName";
+export const preferredVoiceName = () => { try { return localStorage.getItem(VOICE_KEY) || ""; } catch { return ""; } };
+export function setPreferredVoice(name) { try { if (name) localStorage.setItem(VOICE_KEY, name); else localStorage.removeItem(VOICE_KEY); } catch { /* private window */ } }
+// The better-sounding ones, listed first: Edge's "Natural" voices, Google's, Apple's Siri / Premium / Enhanced.
+const NATURAL = /natural|neural|online|premium|enhanced|siri|google/i;
+// The voice to use: the one picked on this device, else a US English one (on the device first).
+function chooseVoice(vs) {
+  const want = preferredVoiceName();
+  return (want && vs.find((v) => v.name === want)) || vs.find((v) => /^en[-_]US$/i.test(v.lang) && v.localService) || vs.find((v) => /^en[-_]US$/i.test(v.lang)) || vs.find((v) => /^en/i.test(v.lang)) || null;
+}
+
 // The device's voices load in the background (iOS especially); speaking before
 // they're in can fail silently. → an English voice, waiting up to 1.5 s for the list.
 function voiceReady() {
   const synth = window.speechSynthesis;
   const pick = () => {
     const vs = synth.getVoices() || [];
-    return { voices: vs.length, voice: vs.find((v) => /^en[-_]US$/i.test(v.lang) && v.localService) || vs.find((v) => /^en[-_]US$/i.test(v.lang)) || vs.find((v) => /^en/i.test(v.lang)) || null };
+    return { voices: vs.length, voice: chooseVoice(vs) };
   };
   const now = pick();
   if (now.voices) return Promise.resolve(now);
@@ -68,6 +80,15 @@ function voiceReady() {
     const t = setTimeout(() => done(pick()), 1500);
     synth.addEventListener?.("voiceschanged", () => { clearTimeout(t); done(pick()); }, { once: true });
   });
+}
+
+/** The browser's English voices for the picker, natural-sounding first: [{ name, lang, natural, local }]. */
+export function englishVoices() {
+  if (!canSpeak()) return Promise.resolve([]);
+  return voiceReady().then(() => (window.speechSynthesis.getVoices() || [])
+    .filter((v) => /^en/i.test(v.lang))
+    .map((v) => ({ name: v.name, lang: v.lang, natural: NATURAL.test(v.name), local: !!v.localService }))
+    .sort((a, b) => (b.natural - a.natural) || (/en[-_]US/i.test(b.lang) - /en[-_]US/i.test(a.lang)) || a.name.localeCompare(b.name)));
 }
 
 /**
@@ -127,7 +148,9 @@ export function speakTest(text = "Voice is on.", report = null) {
   const u = new SpeechSynthesisUtterance(text);
   u.lang = "en-US";
   u.volume = 1;
-  const info = { test: true, voices: (synth.getVoices() || []).length, standalone: typeof navigator !== "undefined" && !!navigator.standalone };
+  const voice = chooseVoice(synth.getVoices() || []);
+  if (voice) u.voice = voice;
+  const info = { test: true, voices: (synth.getVoices() || []).length, voiceName: voice ? voice.name : null, standalone: typeof navigator !== "undefined" && !!navigator.standalone };
   let started = false;
   u.onstart = () => { started = true; report?.({ ...info, phase: "start" }); };
   u.onerror = (e) => report?.({ ...info, phase: "error", error: e?.error || "unknown" });
