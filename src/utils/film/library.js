@@ -35,7 +35,23 @@ async function kv(mode, fn) {
   });
 }
 export const savedRoot = () => kv("readonly", (s) => s.get("root")).catch(() => null);
-const saveRoot = (h) => kv("readwrite", (s) => s.put(h, "root")).catch(() => {});
+// (user, 2026-11-26: "is there no way for this to save?") The folder is kept in
+// IndexedDB, which Chrome treats as "best effort" and can drop — so ask for
+// persistent storage, and leave a small marker in localStorage: if the marker
+// is there but the folder isn't, Chrome cleared the folder (storage eviction);
+// if neither is, the whole site's data was wiped (or it's another address).
+const MARK = "wd.film.rootSaved";
+const saveRoot = (h) => {
+  try { localStorage.setItem(MARK, JSON.stringify({ name: h?.name || "", at: Date.now(), origin: window.location.origin })); } catch { /* private window */ }
+  navigator.storage?.persist?.().catch(() => {});
+  return kv("readwrite", (s) => s.put(h, "root")).catch(() => {});
+};
+/** Why there's no saved folder: null (never saved here) | { name, at, cleared: "folder" } (the marker survived, the folder didn't). */
+export function lostRoot() {
+  try { const m = JSON.parse(localStorage.getItem(MARK) || "null"); return m ? { ...m, cleared: "folder" } : null; } catch { return null; }
+}
+/** Is this site's storage protected from eviction? → true / false / null (unknown). */
+export const storagePersisted = () => (navigator.storage?.persisted ? navigator.storage.persisted().catch(() => null) : Promise.resolve(null));
 
 // Pick the root folder (and remember it).
 export async function pickRoot() {

@@ -24,6 +24,12 @@
 //   fsBar       what to show along the bottom in full screen (the parent's controls)
 //   overlay     shown over the top-left of the film (in full screen too) — e.g. live voice feedback
 //   center      shown in the middle of the film — voice updates and questions (user, 2026-11-25)
+//   fitHeight   normal view: the film's most height (CSS, e.g. "calc(100vh - 290px)")
+//               — on a wide screen it sits centered in black, as big as fits, and
+//               the bars beside it carry `sides` (user, 2026-11-26).
+//   sides       { left, right } — shown in the black bars beside the film in
+//               full screen (user, 2026-11-26: pinned players' numbers). Never
+//               shrinks the film: they only use space the 16:9 film leaves empty.
 //   liveWash    hold the mouse on the film: drag pans, scroll zooms — the wash
 //               is set right there (user, 2026-11-25); onWashHold(true / false)
 //               tells the parent when the hold starts / ends (it keys the wash)
@@ -109,7 +115,7 @@ export function drawMark(ctx, kind, px, py, s, color) {
   ctx.restore();
 }
 
-export default function FilmPlayer({ file, range = null, spots = [], mode = "original", washKeys = [], editWash = true, markTool = null, onMark, onMarkSize, onTime, fsBar = null, overlay = null, center = null, gate = null, stageRef = null, autoPlay = false, quickMarks = false, onQuickMark, onMarkMove, liveWash = false, wheelWash = false, onWashHold, onWashEdit, onEnd, apiRef, style }) {
+export default function FilmPlayer({ file, range = null, spots = [], mode = "original", washKeys = [], editWash = true, markTool = null, onMark, onMarkSize, onTime, fsBar = null, overlay = null, center = null, sides = null, fitHeight = null, gate = null, stageRef = null, autoPlay = false, quickMarks = false, onQuickMark, onMarkMove, liveWash = false, wheelWash = false, onWashHold, onWashEdit, onEnd, apiRef, style }) {
   const wrapRef = useRef(null);
   const canvasRef = useRef(null);
   const videoRef = useRef(null);
@@ -391,16 +397,22 @@ export default function FilmPlayer({ file, range = null, spots = [], mode = "ori
   }, []);
 
   return (
-    <div ref={wrapRef} className="wd-fs-video" style={{ position: "relative", ...(stage ? { width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", background: "#000", containerType: "size" } : {}), ...(full ? { background: "#000", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", width: "100vw", height: "100vh" } : {}), ...style }}>
+    <div ref={wrapRef} className="wd-fs-video" style={{ position: "relative", ...(fitHeight && !stage && !full ? { display: "flex", justifyContent: "center", background: "#000", borderRadius: 10, containerType: "inline-size" } : {}), ...(stage ? { width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", background: "#000", containerType: "size" } : {}), ...(full ? { background: "#000", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", width: "100vw", height: "100vh" } : {}), ...style }}>
       <canvas ref={canvasRef} width={CW} height={CH} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onWheel={onWheel} onClick={onClick}
         style={{ display: "block", borderRadius: full || stage ? 0 : 10, background: "#0b1426", cursor: markTool ? "crosshair" : (mode === "wash" && editWash) || liveWash ? "grab" : "default", touchAction: "none",
           ...(full ? { width: `min(100vw, calc((100vh - ${fsBar ? 64 : 0}px) * 16 / 9))`, aspectRatio: "16 / 9" }
             : stage ? { width: "min(100cqw, calc(100cqh * 16 / 9))", aspectRatio: "16 / 9" }
-              : { width: "100%", aspectRatio: "16 / 9" }) }} />
+              : fitHeight ? { width: `min(100%, calc(${fitHeight} * 16 / 9))`, aspectRatio: "16 / 9" }
+                : { width: "100%", aspectRatio: "16 / 9" }) }} />
       <video ref={videoRef} src={url || undefined} muted playsInline preload="auto" style={{ display: "none" }}
         onLoadedMetadata={(e) => { e.currentTarget.playbackRate = 1; setRateState(1); if (range) e.currentTarget.currentTime = range.in; if (live.current.autoPlay) e.currentTarget.play().catch(() => {}); }} />
       <button type="button" onClick={toggleFull} title={full || stage ? "Exit full screen (F / Esc)" : "Full screen (F)"}
         style={{ position: "absolute", top: 8, right: 8, border: "none", borderRadius: 6, background: "rgba(0,0,0,0.55)", color: "#fff", fontSize: 16, fontWeight: 900, padding: "4px 9px", cursor: "pointer" }}>{full || stage ? "✕" : "⛶"}</button>
+      {sides && (stage || full || fitHeight) && ["left", "right"].map((edge) => sides[edge] ? (
+        <div key={edge} style={{ position: "absolute", [edge]: 0, top: 0, bottom: full && fsBar ? 64 : 0, zIndex: 2, overflow: "hidden", pointerEvents: "none",
+          width: stage ? "calc((100cqw - min(100cqw, 100cqh * 16 / 9)) / 2)" : full ? `calc((100vw - min(100vw, (100vh - ${fsBar ? 64 : 0}px) * 16 / 9)) / 2)` : `calc((100cqw - min(100cqw, ${fitHeight} * 16 / 9)) / 2)`,
+          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10 }}>{sides[edge]}</div>
+      ) : null)}
       {overlay && <div style={{ position: "absolute", top: 10, left: 10, maxWidth: "70%", pointerEvents: "none", zIndex: 2 }}>{overlay}</div>}
       {center && <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", pointerEvents: "none", zIndex: 3 }}><div style={{ maxWidth: "80%", pointerEvents: "auto" }}>{center}</div></div>}
       {full && fsBar && <div style={{ width: "100%", minHeight: 64, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, flexWrap: "wrap", padding: "8px 12px", boxSizing: "border-box", background: "#0b1220", colorScheme: "dark" }}>{fsBar}</div>}

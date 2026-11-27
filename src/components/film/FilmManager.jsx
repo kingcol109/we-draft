@@ -26,10 +26,10 @@ import { createPortal } from "react-dom";
 import FilmPlayer, { MARK_SIZES } from "./FilmPlayer";
 import Timeline from "./Timeline";
 import ScrubRow, { useFastMotion } from "./Scrub";
-import { answerAsk, loadAliases, parseVoice, teach } from "../../utils/film/voice";
+import { answerAsk, forget, learnPhrase, loadAliases, nameScore, norm, parseVoice, teach } from "../../utils/film/voice";
 import useSpeech from "./useSpeech";
-import { gameFile, gameIdOf, pathUnder, pickFilmFile, saveFileHandle, parseGameName, pickRoot, rootAccess, savedRoot, scanGames, seasonOf } from "../../utils/film/library";
-import { addGames, cutPlay, deletePlay, editTag, updatePlay, filmPeople, importPlay, LABEL_COLORS, LABELS, listGames, person, traitsFor, playsForGame, playsForGames, playsForPlayer, roster, saveGame, tagPlayer, untagPlayer } from "../../utils/film/data";
+import { gameFile, gameIdOf, pathUnder, pickFilmFile, saveFileHandle, parseGameName, pickRoot, rootAccess, savedRoot, scanGames, seasonOf, lostRoot, storagePersisted } from "../../utils/film/library";
+import { addGames, cutPlay, deletePlay, editTag, updatePlay, filmPeople, importPlay, LABEL_COLORS, LABELS, listGames, person, traitsFor, playsForGame, playsForGames, playsForPlayer, roster, forSide, saveGame, tagPlayer, untagPlayer } from "../../utils/film/data";
 import { legacyCuts, sameCut } from "../../utils/film/legacy";
 import { parsePrproj, prprojText } from "../../utils/studio/prproj";
 import { getSiteSnapshot } from "../../utils/siteSnapshots";
@@ -70,6 +70,14 @@ const FS_CSS = `
 .wd-film-stage:fullscreen.wd-fs-cut .wd-fs-main { grid-template-columns: minmax(0, 1fr) !important; grid-template-rows: minmax(0, 1fr) auto !important; }
 .wd-film-stage:fullscreen.wd-fs-cut .wd-fs-video { grid-row: 1 !important; }
 .wd-film-stage:fullscreen.wd-fs-cut .wd-fs-dock { grid-row: 2 !important; }
+/* Wide screens, normal view (user, 2026-11-26: "a lot more space horizontally"):
+   the side panel sits beside the film instead of under it. */
+@media (min-width: 1400px) {
+  .wd-film-stage:not(:fullscreen) .wd-fs-main { grid-template-columns: minmax(0, 1fr) 400px !important; column-gap: 16px !important; align-items: start; }
+  .wd-film-stage:not(:fullscreen) .wd-fs-main > * { grid-column: 1; }
+  .wd-film-stage:not(:fullscreen) .wd-fs-main > .wd-fs-right,
+  .wd-film-stage:not(:fullscreen) .wd-fs-main > .wd-fs-side { grid-column: 2; grid-row: 1 / span 8; position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; }
+}
 `;
 // A tab's full-screen stage: dark, scrolls on its own, the film sticks.
 const stageStyle = { background: "#0b1220", color: "#e8edf5", colorScheme: "dark", boxSizing: "border-box" };
@@ -109,18 +117,29 @@ function GameList({ games, schedules, gameId, onPick, onConnect, onLink }) {
   // in the library that isn't on a game (that team's offense), or a file on
   // this computer (user, 2026-11-25).
   const candidatesFor = (team) => loose.filter((g) => teamKey(g.offense) === teamKey(team) && (!g.season || g.season === season));
-  const side = (g2, team, film) => film ? (
-    <button type="button" onClick={() => onPick(film.id)} title={film.file}
-      style={{ ...chip(film.id === gameId), padding: "2px 8px", fontSize: 11, borderColor: film.id === gameId ? UI_BLUE : "#3d6fa8" }}>
-      {cfbdTeam(team)} O ✓{film.plays ? ` · ${film.plays}` : ""}
-    </button>
-  ) : (
-    <button type="button" title={`Add ${cfbdTeam(team)}'s offense film`}
-      onClick={() => { if (candidatesFor(team).length) setLinking((x) => (x === `${g2.id}:${team}` ? null : `${g2.id}:${team}`)); else onLink(g2, team, season); }}
-      style={{ ...chip(false), padding: "2px 8px", fontSize: 11, borderStyle: "dashed", color: "#9fb0c8", background: "transparent" }}>
-      + {cfbdTeam(team)} O film
-    </button>
-  );
+  // Each team's line (user, 2026-11-26): name, score, and a ▶ that plays his
+  // offense film right away — or a small + to add it.
+  const side = (g2, team, film, pts) => {
+    const open = film && film.id === gameId;
+    return (
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto 64px", gap: 8, alignItems: "center" }}>
+        <span style={ellipsis({ fontSize: 13, fontWeight: 800, color: film ? "#e8edf5" : "#8494ad" })}>{cfbdTeam(team)}</span>
+        <span style={{ fontSize: 13, fontWeight: 900, color: "#c7d2e1", fontVariantNumeric: "tabular-nums" }}>{pts ?? ""}</span>
+        {film ? (
+          <button type="button" onClick={() => onPick(film.id, { play: true })} title={`Play ${cfbdTeam(team)}'s offense film${film.plays ? ` · ${film.plays} plays cut` : ""}`}
+            style={{ ...chip(open), padding: "3px 0", fontSize: 12, width: 64, borderColor: open ? UI_BLUE : "#3d6fa8" }}>
+            ▶{film.plays ? ` ${film.plays}` : ""}
+          </button>
+        ) : (
+          <button type="button" title={`Add ${cfbdTeam(team)}'s offense film`}
+            onClick={() => { if (candidatesFor(team).length) setLinking((x) => (x === `${g2.id}:${team}` ? null : `${g2.id}:${team}`)); else onLink(g2, team, season); }}
+            style={{ ...chip(false), padding: "3px 0", fontSize: 12, width: 64, borderStyle: "dashed", color: "#8494ad", background: "transparent" }}>
+            +
+          </button>
+        )}
+      </div>
+    );
+  };
   const linkBox = (g2) => {
     if (!linking || !linking.startsWith(`${g2.id}:`)) return null;
     const team = linking.slice(String(g2.id).length + 1);
@@ -179,9 +198,9 @@ function GameList({ games, schedules, gameId, onPick, onConnect, onLink }) {
             <div style={{ fontSize: 11, fontWeight: 900, color: UI_GOLD, textTransform: "uppercase", letterSpacing: 0.5, position: "sticky", top: 0, background: "#141c2b", padding: "2px 0" }}>{w.label}</div>
             {w.rows.map(({ game: g2, away, home }) => (
               <div key={g2.id} style={{ display: "grid", gap: 3, padding: "5px 6px", borderRadius: 6, background: [away?.id, home?.id].includes(gameId) ? "#1c3355" : away || home ? "#172133" : "transparent" }}>
-                <div style={{ fontSize: 12, fontWeight: 900 }}>{matchup(g2)}</div>
-                <div style={{ fontSize: 10, fontWeight: 700, color: "#8494ad" }}>{dateOf(g2.date)}{scoreLine(g2) ? ` · ${scoreLine(g2)}` : ""}</div>
-                <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>{side(g2, g2.away, away)}{side(g2, g2.home, home)}</div>
+                {side(g2, g2.away, away, g2.ap)}
+                {side(g2, g2.home, home, g2.hp)}
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#8494ad" }}>{dateOf(g2.date)}{g2.neutral ? " · neutral" : ""}</div>
                 {linkBox(g2)}
               </div>
             ))}
@@ -299,7 +318,14 @@ function RosterWindow({ game, rosters, focus, hot, onFocus, onDrop, onTag }) {
   const watchOf = (list) => list.map((p) => ({ p, why: whyOf(p) })).filter((x) => x.why.length)
     .sort((a, b) => (b.why.length - (b.p.wd ? 0.5 : 0)) - (a.why.length - (a.p.wd ? 0.5 : 0)) || (a.p.jersey ?? 999) - (b.p.jersey ?? 999)).slice(0, 12);
   const groups = [...teams.map((tm, i) => ({ team: tm, side: i === 0 ? "Offense" : "Defense", list: sorted(everyone.filter((p) => teamKey(p.team) === teamKey(tm))) })), ...(rest.length ? [{ team: "Other", side: "", list: sorted(rest) }] : [])]
-    .map((g) => { const watch = g.team === "Other" ? [] : watchOf(g.list); const w = new Set(watch.map((x) => x.p.key)); return { ...g, watch, list: g.list.filter((p) => !w.has(p.key)) }; });
+    .map((g) => {
+      // Featured players lead each team's list, in their 1–9 order (user, 2026-11-27).
+      const fIdx = (p) => focus.findIndex((f) => f.key === p.key);
+      const feat = g.list.filter((p) => fIdx(p) >= 0).sort((a, b) => fIdx(a) - fIdx(b)).map((p) => ({ p, why: whyOf(p) }));
+      const others = g.list.filter((p) => fIdx(p) < 0);
+      const watch = g.team === "Other" ? [] : watchOf(others); const w = new Set(watch.map((x) => x.p.key));
+      return { ...g, feat, watch, list: others.filter((p) => !w.has(p.key)) };
+    });
   const score = box?.teams?.length === 2 ? box.teams.map((t) => `${t.name} ${t.points ?? ""}`).join(" · ") : "";
   const jerseyOf = (key) => rosters.find((p) => p.key === key)?.jersey;
   const row = (p, why = null) => {
@@ -345,7 +371,13 @@ function RosterWindow({ game, rosters, focus, hot, onFocus, onDrop, onTag }) {
       <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(2, groups.length || 1)}, minmax(0, 1fr))`, gap: 12, alignItems: "start" }}>
         {groups.map((g) => (
           <div key={g.team} style={{ display: "grid", gap: 4 }}>
-            <div style={{ ...head, color: UI_GOLD }}>{g.team}{g.side ? ` · ${g.side}` : ""} · {g.list.length + g.watch.length}</div>
+            <div style={{ ...head, color: UI_GOLD }}>{g.team}{g.side ? ` · ${g.side}` : ""} · {g.list.length + g.watch.length + g.feat.length}</div>
+            {g.feat.filter((x) => match(x.p)).length > 0 && (
+              <div style={{ display: "grid", gap: 4, padding: 6, borderRadius: 10, border: `1px solid ${UI_BLUE}`, background: "#122038" }}>
+                <div style={{ fontSize: 11, fontWeight: 900, color: "#9cc3ff", letterSpacing: 0.5 }}>★ FEATURED</div>
+                {g.feat.filter((x) => match(x.p)).map((x) => row(x.p, x.why.length ? x.why : null))}
+              </div>
+            )}
             {g.watch.filter((x) => match(x.p)).length > 0 && (
               <div style={{ display: "grid", gap: 4, padding: 6, borderRadius: 10, border: `1px solid ${UI_GOLD}`, background: "#1d1a10" }}>
                 <div style={{ fontSize: 11, fontWeight: 900, color: UI_GOLD, letterSpacing: 0.5 }}>👀 WATCH</div>
@@ -385,8 +417,9 @@ function PersonPicker({ pool, onPick, placeholder = "Tag anyone…", exclude = [
 }
 
 // ── Cut plays ──
-function CutTab({ games, setGames, fileFor, gate, wdPeople, schools, openPlayer, schedules, onConnect, onLink, onReview }) {
+function CutTab({ games, setGames, fileFor, gate, ready, wdPeople, schools, openPlayer, schedules, onConnect, onLink, onReview }) {
   const [gameId, setGameId] = useState("");
+  const [autoStart, setAutoStart] = useState(false); // picked with ▶ — play once the film loads
   const [file, setFile] = useState(null);
   const [plays, setPlays] = useState([]);
   const [rosters, setRosters] = useState([]);
@@ -423,9 +456,17 @@ function CutTab({ games, setGames, fileFor, gate, wdPeople, schools, openPlayer,
     fileFor(game).then((f) => { setFile(f); if (!f) setMsg("Can't find this game's file — check the library folder."); }).catch((e) => setMsg(e.message));
     playsForGame(game.id).then(setPlays).catch((e) => setMsg(e.message));
   }, [gameId]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The folder just got allowed / connected, and again when its scan finishes
+  // (ready = 1 + files found; user, 2026-11-26: "I have to switch tabs before it plays"): load the open film.
+  useEffect(() => {
+    if (!ready || !game || file) return;
+    fileFor(game).then((f) => { if (f) { setFile(f); setMsg(""); } }).catch(() => {});
+  }, [ready]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!game) return;
-    Promise.all([roster(game.offense), roster(game.defense)]).then(([a, b]) => setRosters([...a, ...b]));
+    // This film is game.offense's offense: only their offensive players and the
+    // other team's defense (user, 2026-11-26: no two #50s).
+    Promise.all([roster(game.offense), roster(game.defense)]).then(([a, b]) => setRosters([...forSide(a, "offense"), ...forSide(b, "defense")]));
   }, [game?.offense, game?.defense]); // eslint-disable-line react-hooks/exhaustive-deps
   const pool = useMemo(() => { const m = new Map(); [...rosters, ...wdPeople].forEach((p) => { if (!m.has(p.key)) m.set(p.key, p); }); return [...m.values()]; }, [rosters, wdPeople]);
 
@@ -466,6 +507,7 @@ function CutTab({ games, setGames, fileFor, gate, wdPeople, schools, openPlayer,
   // this game's focus players and both rosters). Chrome's speech recognition. ──
   // The snip (razor) key: C by default; 1 / F13–F15 for macro keys, or a mouse
   // side button. With 1, tagging focus players moves to Shift+1–9.
+  const [showKeys, setShowKeys] = useState(null); // "keys" | "snip" | null — the tucked-away panels
   const [snipKey, setSnipKey] = useState(() => { try { return localStorage.getItem("wd.film.snipKey") || "c"; } catch { return "c"; } });
   useEffect(() => { try { localStorage.setItem("wd.film.snipKey", snipKey); } catch { /* private window */ } }, [snipKey]);
   const razorRef = useRef(null);
@@ -508,10 +550,17 @@ function CutTab({ games, setGames, fileFor, gate, wdPeople, schools, openPlayer,
   // Words it couldn't place (or a tie): "Did you mean …?" — answered out loud
   // (user, 2026-11-25: never "pick below"), and it learns.
   const [asks, setAsks] = useState([]); // [{ id, phrase, how, options: [key] }]
+  // "Say his name" (user, 2026-11-26): after you click-tag someone while the
+  // mic is on (voice didn't get him), the next thing said is learned as his name.
+  const [learn, setLearn] = useState(null); // { key, name, until } | null
+  const learnRef = useRef(null);
+  learnRef.current = learn && learn.until > Date.now() ? learn : null;
   const [flash, setFlash] = useState({}); // key → until (ms) — a chip just added by voice
   const [, tick] = useState(0);
   useEffect(() => { const i = setInterval(() => tick((n) => n + 1), 500); return () => clearInterval(i); }, []);
   const nameOf = (key) => (voiceLive.current.gamePeople.find((p) => p.key === key) || voiceLive.current.focus.find((p) => p.key === key) || voiceLive.current.hot?.players?.[key])?.name || key;
+  // "#50 · Cincinnati" — so a pop-up shows it got the right man (user, 2026-11-26).
+  const tagLine = (key) => { const p = personOf(key); const j = p ? jerseyOf(key) : null; return [j != null ? `#${j}` : "", p?.team ? cfbdTeam(p.team) || p.team : ""].filter(Boolean).join(" · "); };
   const note = (text) => setFeed((fd) => [{ id: `${Date.now()}-n`, kind: "note", text, at: Date.now() }, ...fd].slice(0, 8));
   const [aliases, setAliases] = useState(loadAliases);
   // The last player named — "Kromah…" then "great" (two phrases) still goes to him.
@@ -528,6 +577,8 @@ function CutTab({ games, setGames, fileFor, gate, wdPeople, schools, openPlayer,
   const voiceLive = useRef({});
   voiceLive.current = { hot, pool, focus, aliases, traitLists, asks, gamePeople };
   const personOf = (key) => voiceLive.current.gamePeople.find((p) => p.key === key) || voiceLive.current.focus.find((p) => p.key === key) || voiceLive.current.hot?.players?.[key] || null;
+  // His number: the roster's (pinned entries don't carry one).
+  const jerseyOf = (key) => { const r = rosters.find((x) => x.key === key) || focus.find((x) => x.key === key); return r?.jersey ?? null; };
   // Tag / untag several at once on the hot play (one state update — no lost tags).
   // A label or trait for someone not on the play yet puts him on it.
   const applyVoice = async (addKeys0, removeKeys, heardList = [], labels = {}, traitsBy = {}) => {
@@ -537,7 +588,7 @@ function CutTab({ games, setGames, fileFor, gate, wdPeople, schools, openPlayer,
     const phraseOf = (key) => heardList.find((h) => h.key === key && !["label", "trait"].includes(h.how))?.phrase || "";
     const extraOf = (key) => [labels[key], (traitsBy[key] || []).join(", ")].filter(Boolean).join(" · ");
     const report = (kind, key) => {
-      setFeed((fd) => [{ id: `${Date.now()}-${key}-${kind}`, kind, key, name: nameOf(key), phrase: phraseOf(key), extra: kind === "remove" ? "" : extraOf(key), at: Date.now() }, ...fd].slice(0, 8));
+      setFeed((fd) => [{ id: `${Date.now()}-${key}-${kind}`, kind, key, name: nameOf(key), tagline: tagLine(key), phrase: phraseOf(key), extra: kind === "remove" ? "" : extraOf(key), at: Date.now() }, ...fd].slice(0, 8));
       if (kind === "add" || kind === "set") setFlash((fl) => ({ ...fl, [key]: Date.now() + 2500 }));
     };
     const reported = new Set();
@@ -563,7 +614,21 @@ function CutTab({ games, setGames, fileFor, gate, wdPeople, schools, openPlayer,
     voiceLive.current.hot = next;
     setHot(next);
     setPlays((ps) => ps.map((x) => (x.id === next.id ? next : x)));
+    if (addKeys.length || removeKeys.length) micDone();
   };
+  // Got the names (user, 2026-11-26): the mic shuts off ~3 s after the last
+  // add — unless you're still talking, it asked a question, or wants his name.
+  const idleOff = useRef(null);
+  const micDone = () => {
+    clearTimeout(idleOff.current);
+    idleOff.current = setTimeout(() => {
+      const L = voiceLive.current;
+      if (learnRef.current || L.asks?.some((x) => Date.now() - (x.at || 0) < 12000)) { micDone(); return; }
+      setMic(false); setInterim(""); setHearing([]);
+      note("🎙 Mic off — V to talk again");
+    }, 3000);
+  };
+  useEffect(() => () => clearTimeout(idleOff.current), []);
   // Who's in the running: the featured players first, then the two rosters, and anyone already on the play.
   const peopleNow = () => {
     const L = voiceLive.current;
@@ -580,20 +645,61 @@ function CutTab({ games, setGames, fileFor, gate, wdPeople, schools, openPlayer,
   };
   const heardFinal = (text) => {
     const L = voiceLive.current;
-    // A question waiting: is this its answer? ("Patrick", "the second one", "number 12", "skip")
-    const ask = L.asks[0];
-    if (ask) {
-      const ans = answerAsk(text, ask.options, peopleNow());
-      if (ans === "skip") { setAsks((a) => a.filter((x) => x.id !== ask.id)); note(`Skipped “${ask.phrase}”`); return; }
-      if (ans) { teachHeard(ask.phrase, ans); return; }
+    const said = norm(text);
+    // Pin / unpin by voice (user, 2026-11-26): "pin Kromah", "pin number 50
+    // Cincinnati", "unpin 22" — works with or without a hot play.
+    const pinM = /^(?:(un ?pin|unpinned|stop watching|unwatch)|(pin|pinned|pin up))\s+(.+)$/.exec(said);
+    if (pinM) {
+      setLearn(null);
+      const rest = pinM[3];
+      const pool0 = pinM[1] ? L.focus : peopleNow();
+      const out = parseVoice(/^\d/.test(rest) ? `number ${rest}` : rest, pool0, L.aliases, {});
+      const key = out.add[0];
+      if (!key) { const h = out.heard[0]; note(h?.options?.length > 1 ? `“${rest}” — more than one fits. Add the team or number.` : `“${rest}” — no one in this game`); return; }
+      const p = personOf(key) || pool0.find((x) => x.key === key);
+      if (pinM[1]) { dropFocus(key); note(`Unpinned ${p?.name || key}`); return; }
+      if (!L.focus.some((f) => f.key === key)) addFocus(p);
+      const num = jerseyOf(key);
+      note(`📌 Pinned ${num != null ? `#${num} ` : ""}${p?.name || key}`);
+      // Picked out by number: show his name and listen for how it's said.
+      if (out.heard.some((h) => h.key === key && h.how === "number")) setLearn({ key, name: p?.name || key, jersey: num, until: Date.now() + 10000 });
+      return;
     }
+    // Waiting for "say his name": what's said now is how he sounds. Anything
+    // that isn't a name (a label, a number, "skip") goes on as usual.
+    const lr = learnRef.current;
+    if (lr) {
+      setLearn(null);
+      if (/^(?:skip|never ?mind|cancel|no|nope)(?: it)?$/.test(said)) { note("Okay — skipped"); return; }
+      const phrase = learnPhrase(text);
+      if (phrase && !/\d/.test(phrase)) {
+        const p = personOf(lr.key) || { key: lr.key, name: lr.name };
+        if (nameScore(phrase, { ...p, aliases: Object.keys(L.aliases).filter((k) => L.aliases[k] === lr.key) }) >= 0.97) { note(`I already know “${phrase}” = ${lr.name}`); return; }
+        setAliases(teach(phrase, lr.key));
+        note(`Learned: “${phrase}” = ${lr.name}`);
+        return;
+      }
+    }
+    // A question waiting: is this its answer? ("Patrick", "the second one", "number 12", "skip")
+    // One question at a time, and only for 12 seconds; anything that isn't
+    // an answer drops it and is heard as a new command (user, 2026-11-26).
+    const ask = L.asks.find((x) => Date.now() - (x.at || 0) < 12000);
+    if (ask) {
+      const ans = answerAsk(text, ask.options, peopleNow(), true);
+      if (ans === "skip") { setAsks([]); note(`Skipped “${ask.phrase}”`); return; }
+      if (ans?.key) { teachHeard(ask.phrase, ans.key, ans.by === "name"); return; }
+    }
+    if (L.asks.length) setAsks([]);
     if (!L.hot) return;
     const out = parseVoice(text, peopleNow(), L.aliases, voiceOpts());
     lastNamed.current = out.last;
+    // Tagged by number ("#50 Cincinnati"): show his name and listen for how it's said.
+    const byNum = [...out.heard].reverse().find((h) => h.key && h.how === "number" && out.add.includes(h.key));
+    if (byNum) { const p = personOf(byNum.key); setLearn({ key: byNum.key, name: p?.name || byNum.key, jersey: jerseyOf(byNum.key), until: Date.now() + 10000 }); }
     setHeard((h) => [...h, ...out.heard].slice(-12));
     setHearing([]);
     const open = out.heard.filter((h) => !h.key && h.options?.length);
-    if (open.length) setAsks((a) => [...a, ...open.map((h, k) => ({ id: `${Date.now()}-${k}`, phrase: h.phrase, how: h.how, options: h.options.slice(0, 3) }))].slice(-4));
+    if (open.length) { const h = open[open.length - 1]; setAsks([{ id: `${Date.now()}`, at: Date.now(), phrase: h.phrase, how: h.how, options: h.options.slice(0, 3) }]); }
     if (out.add.length || out.remove.length || Object.keys(out.labels).length || Object.keys(out.traits).length) applyVoice(out.add, out.remove, out.heard, out.labels, out.traits);
     else if (!open.length) {
       const lost = out.heard.find((h) => !h.key);
@@ -602,11 +708,12 @@ function CutTab({ games, setGames, fileFor, gate, wdPeople, schools, openPlayer,
   };
   const heardInterim = (live) => {
     setInterim(live);
+    if (live && idleOff.current) micDone(); // still talking: hold off
     // While you talk: who those words would tag.
     if (live && voiceLive.current.hot) {
       const pre = parseVoice(live, peopleNow(), voiceLive.current.aliases, voiceOpts());
       const keys = [...new Set([...pre.add, ...Object.keys(pre.labels), ...Object.keys(pre.traits)])];
-      setHearing(keys.map((k) => [nameOf(k), pre.labels[k], ...(pre.traits[k] || [])].filter(Boolean).join(" · ")));
+      setHearing(keys.map((k) => [`${nameOf(k)}${tagLine(k) ? ` (${tagLine(k)})` : ""}`, pre.labels[k], ...(pre.traits[k] || [])].filter(Boolean).join(" · ")));
     } else setHearing([]);
   };
   // The mic (user, 2026-11-25): live once a play goes hot (when "Mic on hot
@@ -614,12 +721,15 @@ function CutTab({ games, setGames, fileFor, gate, wdPeople, schools, openPlayer,
   // it on or off whenever. While live it keeps hearing (useSpeech restarts it).
   const [mic, setMic] = useState(false);
   useEffect(() => { setMic(!!hot?.id && voiceOn); }, [hot?.id]); // eslint-disable-line react-hooks/exhaustive-deps
-  const { listening } = useSpeech(mic && !!game, { onFinal: heardFinal, onInterim: heardInterim, onBlocked: (m) => { setMsg(m); setMic(false); } });
+  const toggleMic = () => { if (!hot) { setMsg("The mic runs only on a hot play — cut one (Z) or make one hot first."); return; } setMic((x) => !x); };
+  // The mic only ever runs while a play is hot (user, 2026-11-26) — V / the button arm it for the hot play.
+  const { listening } = useSpeech(mic && !!hot && !!game, { onFinal: heardFinal, onInterim: heardInterim, onBlocked: (m) => { setMsg(m); setMic(false); } });
   // A new hot play: a fresh slate (the mic stays on).
-  useEffect(() => { setFeed([]); setAsks([]); setHeard([]); lastNamed.current = null; }, [hot?.id]);
+  useEffect(() => { setFeed([]); setAsks([]); setHeard([]); setLearn(null); lastNamed.current = null; }, [hot?.id]);
   // A heard word it didn't place: who it was — tag him, and learn the word (not a jersey number).
-  const teachHeard = (phrase, key) => {
-    if (!phrase.startsWith("#")) setAliases(teach(phrase, key));
+  // learn: false when it was answered by "first" / a number — that says who, not how his name sounds.
+  const teachHeard = (phrase, key, learn = true) => {
+    if (learn && !phrase.startsWith("#")) setAliases(teach(phrase, key));
     setHeard((h) => h.map((x) => (x.phrase === phrase && !x.key ? { ...x, key, how: phrase.startsWith("#") ? "picked" : "taught" } : x)));
     setAsks((a) => a.filter((x) => x.phrase !== phrase));
     lastNamed.current = key;
@@ -630,15 +740,19 @@ function CutTab({ games, setGames, fileFor, gate, wdPeople, schools, openPlayer,
   const qHold = useRef(null);
   const wipe = () => {
     setHot(null); setInPt(null); qHold.current = null;
-    setFeed([]); setAsks([]); setHeard([]); setHearing([]); setInterim(""); lastNamed.current = null;
+    setFeed([]); setAsks([]); setHeard([]); setHearing([]); setInterim(""); setLearn(null); lastNamed.current = null;
     setArmed(null); setEndPrompt(false);
     setMsg("Wiped — your saved plays are untouched. Start fresh.");
   };
-  // Hot (Z): the play under the playhead (else the last one before it) goes hot; Z again: done with it.
+  // Hot (the 🔥 button): the play under the playhead (else the last one before it) goes hot; Z again: done with it.
+  // (user, 2026-11-26: "Z isn't working") — a different play under the playhead
+  // goes hot even while one is hot; it only turns hot OFF on the hot play itself
+  // (or with no play here).
   const hotHere = () => {
-    if (hot) { setHot(null); setMsg("Done with that play — Z makes the one here hot again."); return; }
     const now = api.current?.time() ?? t;
-    const p = plays.find((x) => now >= x.in - 0.1 && now <= x.out + 0.1) || [...plays].sort((x, y) => y.in - x.in).find((x) => x.in <= now) || null;
+    const under = plays.find((x) => now >= x.in - 0.1 && now <= x.out + 0.1) || null;
+    if (hot && (!under || under.id === hot.id)) { setHot(null); setMsg("Done with that play — 🔥 Hot on a play makes it hot."); return; }
+    const p = under || [...plays].sort((x, y) => y.in - x.in).find((x) => x.in <= now) || null;
     if (p) { setHot(p); setMsg(`Hot: ${clock(p.in)}–${clock(p.out)}`); } else setMsg("No play here yet — cut one first.");
   };
   // The end of the game (user, 2026-11-25): "Start tagging?" — each player
@@ -652,7 +766,7 @@ function CutTab({ games, setGames, fileFor, gate, wdPeople, schools, openPlayer,
 
   const nudgeHot = (edge, d) => hot && trimPlay(hot, { in: hot.in + (edge === "in" ? d : 0), out: hot.out + (edge === "out" ? d : 0) });
   const hotEdgeHere = (edge) => hot && api.current && trimPlay(hot, { in: edge === "in" ? api.current.time() : hot.in, out: edge === "out" ? api.current.time() : hot.out });
-  const toggleTag = async (p) => {
+  const toggleTag = async (p, ask = true) => {
     if (!hot) return;
     const on = hot.playerIds.includes(p.key);
     try {
@@ -661,6 +775,8 @@ function CutTab({ games, setGames, fileFor, gate, wdPeople, schools, openPlayer,
       if (on) delete next.players[p.key]; else next.players[p.key] = { ...person(p), label: "" };
       setHot(next);
       setPlays((ps) => ps.map((x) => (x.id === next.id ? next : x)));
+      // Clicked on while the mic is live: voice missed him — ask to hear his name.
+      if (!on && ask && listening && p.name) setLearn({ key: p.key, name: p.name, until: Date.now() + 10000 });
     } catch (e) { setMsg(`Couldn't tag: ${e.message}`); }
   };
   // Delete: click ✕ twice (a browser confirm box knocked Chrome out of full screen).
@@ -696,7 +812,7 @@ function CutTab({ games, setGames, fileFor, gate, wdPeople, schools, openPlayer,
       const digit = (/^(Digit|Numpad)([1-9])$/.exec(e.code) || [])[2];
       if (digit) {
         e.preventDefault();
-        if (e.shiftKey) { if (hot) { const p = focus[Number(digit) - 1]; if (p) toggleTag(p); } return; }
+        if (e.shiftKey) { if (hot) { const p = focus[Number(digit) - 1]; if (p) toggleTag(p, false); } return; }
         if (digit === "1") razor(); else if (digit === "4") a.toggle();
         return;
       }
@@ -704,7 +820,8 @@ function CutTab({ games, setGames, fileFor, gate, wdPeople, schools, openPlayer,
       if (snipKey.startsWith("code:") ? e.code === snipKey.slice(5) : snipKey !== "c" && !/^[1-9]$/.test(snipKey) && !snipKey.startsWith("mouse") && !snipKey.startsWith("btn:") && k === snipKey) { e.preventDefault(); razor(); return; }
       // Q (user, 2026-11-25): press = the play starts, let go = it ends (a paused
       // film plays while it's held). A quick tap works like the razor.
-      if (k === "q" || k === "Q") {
+      // Z = Q exactly (user, 2026-11-26: "Z replaces Q — snip plays and make them hot").
+      if (/^[qQzZ]$/.test(k)) {
         e.preventDefault();
         if (e.repeat) return;
         if (inPt == null) {
@@ -712,15 +829,14 @@ function CutTab({ games, setGames, fileFor, gate, wdPeople, schools, openPlayer,
           qHold.current = { at: performance.now(), paused: a.paused() };
           setInPt(tm);
           if (a.paused()) a.play();
-          setMsg(`Play starts at ${clock(tm)} — let go of Q to end it (or tap Q again).`);
+          setMsg(`Play starts at ${clock(tm)} — let go of Z to end it (or tap Z again).`);
         } else { qHold.current = null; cut(a.time()); }
         return;
       }
       if (k === " ") { e.preventDefault(); a.toggle(); } else if (k === "j" || k === "J") a.nudge(-3);
       else if ((k === "c" || k === "C") && snipKey === "c") razor();
-      else if (k === "v" || k === "V") setMic((x) => !x);
+      else if (k === "v" || k === "V") toggleMic();
       else if (k === "x" || k === "X") wipe();
-      else if (k === "z" || k === "Z") hotHere();
       else if (k === "[") hotEdgeHere("in"); else if (k === "]") hotEdgeHere("out");
       else if (k === "k" || k === "K") { a.pause(); a.setRate(1); } else if (k === "l" || k === "L") { if (a.paused()) { a.setRate(1); a.play(); } else a.setRate(a.rate() >= 4 ? 1 : a.rate() * 2); }
       // ←/→ and A/D: hold = fast motion · ↑/↓ and W/S: 5s ahead / back.
@@ -732,14 +848,14 @@ function CutTab({ games, setGames, fileFor, gate, wdPeople, schools, openPlayer,
         const now = performance.now();
         const tp = taps.current;
         taps.current = tp && tp.dir === dir && now - tp.at < 320 ? { dir, at: now, n: tp.n + 1 } : { dir, at: now, n: 1 };
-        if (taps.current.n === 2 || taps.current.n === 3) a.nudge(5 * dir);
+        if (taps.current.n >= 2) a.nudge(5 * dir); // keep tapping, keep skipping (user, 2026-11-26)
         motion.start(dir);
       }
       else if (k === "ArrowUp" || k === "w" || k === "W") { e.preventDefault(); a.nudge(5); } else if (k === "ArrowDown" || k === "s" || k === "S") { e.preventDefault(); a.nudge(-5); }
       else if (k === ",") a.step(-1); else if (k === ".") a.step(1);
       else if (k === "i" || k === "I") { setInPt(a.time()); setMsg(`Start at ${clock(a.time())} — O to cut.`); }
       else if (k === "o" || k === "O") cut(a.time());
-      else if (/^[1-9]$/.test(k) && hot) { const p = focus[Number(k) - 1]; if (p) toggleTag(p); }
+      else if (/^[1-9]$/.test(k) && hot) { const p = focus[Number(k) - 1]; if (p) toggleTag(p, false); }
       else if ((k === "Delete" || k === "Backspace") && hot) { e.preventDefault(); remove(hot); }
       else if (k === "Escape") { setHot(null); setInPt(null); }
     };
@@ -751,7 +867,7 @@ function CutTab({ games, setGames, fileFor, gate, wdPeople, schools, openPlayer,
     const up = (e) => {
       if (e.key === "ArrowLeft" || e.key === "ArrowRight" || /^[aAdD]$/.test(e.key)) motion.end();
       // Q let go after a hold: the play ends here.
-      if ((e.key === "q" || e.key === "Q") && qHold.current) {
+      if (/^[qQzZ]$/.test(e.key) && qHold.current) {
         const h = qHold.current;
         qHold.current = null;
         if (performance.now() - h.at >= 350 && api.current) { cut(api.current.time()); if (h.paused) api.current.pause(); }
@@ -761,52 +877,56 @@ function CutTab({ games, setGames, fileFor, gate, wdPeople, schools, openPlayer,
     return () => window.removeEventListener("keyup", up);
   });
 
+  // Pinned players beside the film in full screen (user, 2026-11-26): this
+  // film's offense on the left, the defense on the right — big numbers; lit
+  // when he's on the hot play. Shift+N tags him.
+  const pinnedSide = (side) => {
+    const list = focus.map((p, i) => ({ p, i })).filter(({ p }) => (teamKey(p.team) === teamKey(game?.defense) ? "defense" : "offense") === side);
+    if (!list.length) return null;
+    return (
+      <>
+        <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: 1, color: "#8494ad", fontFamily: "Arial, sans-serif" }}>{side === "offense" ? "OFFENSE" : "DEFENSE"}</div>
+        {list.map(({ p, i }) => {
+          const on = !!hot?.playerIds?.includes(p.key);
+          const num = jerseyOf(p.key);
+          const last = String(p.name || "").split(" ").slice(1).join(" ") || p.name;
+          return (
+            <div key={p.key} style={{ display: "grid", justifyItems: "center", gap: 2, padding: "6px 4px", width: "88%", maxWidth: 140, borderRadius: 10, fontFamily: "Arial, sans-serif",
+              background: on ? "rgba(21,128,61,0.35)" : "rgba(255,255,255,0.04)", border: `2px solid ${on ? "#4ade80" : "rgba(255,255,255,0.1)"}` }}>
+              <div style={{ fontSize: "clamp(22px, 3.2vw, 46px)", fontWeight: 900, lineHeight: 1, color: on ? "#4ade80" : "#fff", fontVariantNumeric: "tabular-nums" }}>{num != null ? num : "–"}</div>
+              <div style={{ fontSize: 11, fontWeight: 800, color: "#c7d2e1", textAlign: "center", lineHeight: 1.1, overflowWrap: "anywhere" }}>{last}</div>
+              <div style={{ fontSize: 10, fontWeight: 800, color: "#8494ad" }}>{p.pos ? `${p.pos} · ` : ""}⇧{i + 1}</div>
+            </div>
+          );
+        })}
+      </>
+    );
+  };
+
   // The games this film could be (its teams, its season) — to fix a match.
   const choices = game ? (schedules[seasonFor(game)] || []).filter((x) => [teamKey(game.offense), teamKey(game.defense)].some((k) => k && (teamKey(x.home) === k || teamKey(x.away) === k))) : [];
   const other = game?.cfbdGameId ? games.find((g) => g.id !== game.id && g.cfbdGameId === game.cfbdGameId) : null;
 
   return (
-    <div ref={stageRef} className="wd-film-stage wd-fs-cut" style={{ ...stageStyle, display: "grid", gridTemplateColumns: "340px minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
-      <GameList games={games} schedules={schedules} gameId={gameId} onPick={setGameId} onConnect={onConnect} onLink={async (...a) => { const id = await onLink(...a); if (id) setGameId(id); }} />
+    <div ref={stageRef} className="wd-film-stage wd-fs-cut" style={{ ...stageStyle, display: "grid", gridTemplateColumns: "300px minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
+      <GameList games={games} schedules={schedules} gameId={gameId} onPick={(id, o) => { setAutoStart(!!o?.play); setGameId(id); if (o?.play && id === gameId) api.current?.play?.(); }} onConnect={onConnect} onLink={async (...a) => { const id = await onLink(...a); if (id) setGameId(id); }} />
 
       {!game ? <div style={{ ...box, color: "#8494ad", fontWeight: 700, padding: 40, textAlign: "center" }}>Pick a game on the left.</div> : (
         <div className="wd-fs-main" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 10, minWidth: 0 }}>
-          <div className="wd-fs-hide" style={box}>
-            <div style={{ fontSize: 16, fontWeight: 900 }}>{gameTitle(game)}</div>
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", fontSize: 12, fontWeight: 700, color: "#8494ad" }}>
-              <span>{game.file}</span>
-              {scoreLine(game) && <span>· {scoreLine(game)}</span>}
-              {other ? <button type="button" style={mini} onClick={() => setGameId(other.id)}>Other side: {cfbdTeam(other.offense)} offense →</button> : game.cfbdGameId ? <span>· no {cfbdTeam(game.defense)} offense film yet</span> : null}
-            </div>
-            <select value={game.cfbdGameId || ""} onChange={(e) => { const x = choices.find((y) => String(y.id) === e.target.value); if (x) onConnect(game, x); }} style={{ ...field, fontSize: 12 }}>
-              <option value="">{game.cfbdGameId ? "" : "Not on a game — pick it…"}</option>
-              {choices.map((x) => <option key={x.id} value={x.id}>{weekLabel(x)} · {dateOf(x.date)} · {matchup(x)}</option>)}
-            </select>
+          {/* The game's name line — details and pinned players live in the right panel. */}
+          <div className="wd-fs-hide" style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", minWidth: 0 }}>
+            <div style={ellipsis({ fontSize: 18, fontWeight: 900 })} title={game.file}>{gameTitle(game)}</div>
+            {scoreLine(game) && <span style={{ fontSize: 13, fontWeight: 800, color: "#9fb0c8" }}>{scoreLine(game)}</span>}
+            {other ? <button type="button" style={mini} onClick={() => setGameId(other.id)}>Other side: {cfbdTeam(other.offense)} offense →</button> : game.cfbdGameId ? <span style={{ fontSize: 12, fontWeight: 700, color: "#8494ad" }}>no {cfbdTeam(game.defense)} offense film yet</span> : null}
           </div>
-          <div className="wd-fs-hide" style={{ ...box, gridTemplateColumns: "1fr 1fr 110px", alignItems: "end" }}>
-            <label style={{ fontSize: 11, fontWeight: 800 }}>Offense<input list="film-teams" defaultValue={game.offense} key={`o${game.id}`} onBlur={(e) => e.target.value !== game.offense && editGame({ offense: e.target.value.trim() })} style={{ ...field, width: "100%" }} /></label>
-            <label style={{ fontSize: 11, fontWeight: 800 }}>Defense<input list="film-teams" defaultValue={game.defense} key={`d${game.id}`} onBlur={(e) => e.target.value !== game.defense && editGame({ defense: e.target.value.trim() })} style={{ ...field, width: "100%" }} /></label>
-            <label style={{ fontSize: 11, fontWeight: 800 }}>Season<input defaultValue={game.season} key={`s${game.id}`} onBlur={(e) => e.target.value !== game.season && editGame({ season: e.target.value.trim() })} style={{ ...field, width: "100%" }} /></label>
-            <datalist id="film-teams">{schools.map((s) => <option key={s} value={s} />)}</datalist>
-          </div>
-          <div className="wd-fs-hide" style={box}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-              <div style={head}>Focus players (Shift+1–9 on a hot play)</div>
-              <button type="button" style={btn(!!popWin)} onClick={togglePop} title="Both rosters with numbers and this game's stats in their own window — feature players and tag the hot play there">{popWin ? "Close rosters window" : "⧉ Rosters window"}</button>
-            </div>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {focus.map((p, i) => <span key={p.key} style={{ ...chip(false), display: "inline-flex", gap: 6 }}><b>{i + 1}</b>{p.name} <span style={{ color: "#8494ad" }}>{p.pos}</span><button type="button" onClick={() => dropFocus(p.key)} style={{ border: "none", background: "none", cursor: "pointer", color: "#ff7a6b", padding: 0 }}>✕</button></span>)}
-              {!focus.length && <span style={{ fontSize: 12, color: "#8494ad", fontWeight: 700 }}>Add the players you&apos;re watching this game for.</span>}
-            </div>
-            <PersonPicker pool={pool} onPick={addFocus} exclude={focus.map((f) => f.key)} placeholder={rosters.length ? `Add from the ${game.offense} / ${game.defense} rosters…` : "Add a player… (set the teams to load their rosters)"} />
-          </div>
-
           {popWin && (
             <Popout win={popWin} title={`Rosters · ${gameTitle(game)}`} onClosed={() => setPopWin(null)}>
               <RosterWindow game={game} rosters={rosters} focus={focus} hot={hot} onFocus={addFocus} onDrop={dropFocus} onTag={toggleTag} />
             </Popout>
           )}
-          <FilmPlayer file={file} gate={gate} stageRef={stageRef} apiRef={api} onTime={(x) => setT(x)} spots={[]}
+          <FilmPlayer file={file} gate={gate} stageRef={stageRef} apiRef={api} onTime={(x) => setT(x)} spots={[]} autoPlay={autoStart}
+            fitHeight="calc(100vh - 280px)"
+            sides={focus.length ? { left: pinnedSide("offense"), right: pinnedSide("defense") } : null}
             overlay={listening ? (
               <div style={{ display: "grid", gap: 4, padding: "6px 10px", borderRadius: 10, background: "rgba(8,12,22,0.78)", border: "2px solid #ff6b5b", fontFamily: "Arial, sans-serif" }}>
                 <div style={{ fontSize: 13, fontWeight: 900, color: "#ff6b5b" }}>● Listening</div>
@@ -823,18 +943,24 @@ function CutTab({ games, setGames, fileFor, gate, wdPeople, schools, openPlayer,
                   <button type="button" style={btn(false)} onClick={() => setEndPrompt(false)}>Later (Esc)</button>
                 </div>
               </div>
+            ) : learnRef.current ? (
+              <div style={{ display: "grid", gap: 6, justifyItems: "center", padding: "14px 22px", borderRadius: 14, background: "rgba(8,12,22,0.86)", border: "2px solid #60a5fa", textAlign: "center", fontFamily: "Arial, sans-serif", pointerEvents: "none" }}>
+                <div style={{ fontSize: 24, fontWeight: 900, color: "#93c5fd" }}>{learnRef.current.jersey != null ? `#${learnRef.current.jersey} ` : ""}{learnRef.current.name}</div>
+                <div style={{ fontSize: 18, fontWeight: 900, color: "#e8edf5" }}>🎙 Say his name</div>
+                <div style={{ fontSize: 13, fontWeight: 800, color: "#9fb0c8" }}>So I know him next time — or “skip”</div>
+              </div>
             ) : (asks.length > 0 || feed.some((x) => Date.now() - x.at < 3000)) ? (
               <div style={{ display: "grid", gap: 6, justifyItems: "center", padding: "14px 22px", borderRadius: 14, background: "rgba(8,12,22,0.86)", border: `2px solid ${asks.length ? "#fbbf24" : "#4ade80"}`, textAlign: "center", fontFamily: "Arial, sans-serif", pointerEvents: "none" }}>
                 {feed.filter((x) => Date.now() - x.at < 3000).slice(0, 3).map((x) => (
                   <div key={x.id} style={{ fontSize: x.kind === "note" ? 18 : 26, fontWeight: 900, color: x.kind === "note" ? "#f6c66b" : x.kind === "remove" ? "#ff8a80" : x.kind === "already" ? "#9fb0c8" : "#4ade80" }}>
-                    {x.kind === "note" ? x.text : <>{x.kind === "remove" ? "✕ " : "✓ "}{x.name}{x.kind === "already" ? " (already on)" : x.kind === "remove" ? " removed" : ""}{x.extra && <span style={{ color: "#fbbf24" }}> · {x.extra}</span>}</>}
+                    {x.kind === "note" ? x.text : <>{x.kind === "remove" ? "✕ " : "✓ "}{x.name}{x.kind === "already" ? " (already on)" : x.kind === "remove" ? " removed" : ""}{x.extra && <span style={{ color: "#fbbf24" }}> · {x.extra}</span>}{x.tagline && <div style={{ fontSize: 16, fontWeight: 800, color: "#c7d2e1" }}>{x.tagline}</div>}</>}
                   </div>
                 ))}
                 {asks[0] && (
                   <div style={{ display: "grid", gap: 4 }}>
                     <div style={{ fontSize: 22, fontWeight: 900, color: "#fbbf24" }}>Who&apos;s “{asks[0].phrase}”?</div>
                     <div style={{ fontSize: 17, fontWeight: 800, color: "#e8edf5" }}>
-                      {asks[0].options.map((key, i) => { const p = personOf(key) || {}; return `${["First", "Second", "Third"][i]}: ${p.name || key}${p.jersey != null ? ` #${p.jersey}` : ""}`; }).join(" · ")}
+                      {asks[0].options.map((key, i) => { const p = personOf(key) || {}; return `${["First", "Second", "Third"][i]}: ${p.name || key} (${tagLine(key)})`; }).join(" · ")}
                     </div>
                     <div style={{ fontSize: 12, fontWeight: 800, color: "#9fb0c8" }}>Say the name, “first” / “second”, his number — or “skip”</div>
                   </div>
@@ -852,16 +978,28 @@ function CutTab({ games, setGames, fileFor, gate, wdPeople, schools, openPlayer,
             )} />
           <div className="wd-fs-dock" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 10 }}>
           <ScrubRow apiRef={api} min={0} max={dur || Math.max(t, 1)} t={t} motion={motion} ticks={plays.map((p) => ({ id: p.id, in: p.in, out: p.out, hot: p.id === hot?.id }))}
-            onClicks={(dir, n) => { if (n === 2 || n === 3) api.current?.nudge(5 * dir); }} prevTitle="Hold: play backwards fast · double-click: back 5s · triple: 10s" nextTitle="Hold: fast forward · double-click: ahead 5s · triple: 10s" label={`${clock(t)} / ${clock(dur)}`} />
+            onClicks={(dir, n) => { if (n >= 2) api.current?.nudge(5 * dir); }} prevTitle="Hold: play backwards fast · double-click: back 5s · triple: 10s" nextTitle="Hold: fast forward · double-click: ahead 5s · triple: 10s" label={`${clock(t)} / ${clock(dur)}`} />
           <Timeline apiRef={api} plays={plays} hotId={hot?.id} pendingIn={inPt} onTrim={trimPlay} onSelect={(p) => setHot(p)} />
-          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <button type="button" style={btn(true)} onClick={() => api.current?.toggle()}>▶ / ❚❚</button>
-            <button type="button" onClick={razor} style={{ ...btn(inPt != null), ...(inPt != null ? { background: UI_GOLD, borderColor: UI_GOLD, color: "#1d1405" } : {}), width: 300, ...ellipsis(), textAlign: "left" }}>
-              ✂ {inPt != null ? `Snip the end · started ${clock(inPt)}` : "Razor · start a play"} <span style={{ opacity: 0.7 }}>({snipName(snipKey)})</span>
+            <span style={{ fontSize: 14, fontWeight: 900, fontVariantNumeric: "tabular-nums", minWidth: 70 }}>{clock(t)}</span>
+            <span style={{ width: 1, height: 22, background: "#263247" }} />
+            <button type="button" onClick={razor} style={{ ...btn(inPt != null), ...(inPt != null ? { background: UI_GOLD, borderColor: UI_GOLD, color: "#1d1405" } : {}), width: 250, ...ellipsis(), textAlign: "left" }}>
+              ✂ {inPt != null ? `Snip the end · from ${clock(inPt)}` : "Razor · start a play"} <span style={{ opacity: 0.7 }}>(Z)</span>
             </button>
-            <button type="button" style={{ ...mini, visibility: inPt != null ? "visible" : "hidden" }} onClick={() => { setInPt(null); setMsg(""); }}>Cancel</button>
-            <label style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 11, fontWeight: 800, color: "#8494ad" }}>Snip key
-              <select value={["c", "1", "F13", "F14", "F15", "mouse4", "mouse5"].includes(snipKey) ? snipKey : "custom"} onChange={(e) => { if (e.target.value !== "custom") setSnipKey(e.target.value); e.target.blur(); }} style={{ ...field, padding: "3px 6px", fontSize: 11 }}>
+            {inPt != null && <button type="button" style={mini} onClick={() => { setInPt(null); setMsg(""); }}>Cancel</button>}
+            <button type="button" style={btn(!!hot)} onClick={hotHere} title="The play here goes hot — again: done with it">🔥 Hot</button>
+            <button type="button" style={btn(false)} onClick={wipe} title="Clear the hot play, a started cut, and what voice heard — saved plays stay">Wipe (X)</button>
+            <span style={{ width: 1, height: 22, background: "#263247" }} />
+            <button type="button" style={{ ...btn(mic), ...(listening ? { background: "#b42318", borderColor: "#ff6b5b" } : {}) }} onClick={toggleMic} title="The mic runs only while a play is hot — names, labels, traits go on it (V)">🎙 {mic && hot ? (listening ? "● Live" : "On") : hot ? "Mic off" : "Mic · waits for a hot play"} (V)</button>
+            <label style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 12, fontWeight: 800, color: "#8494ad", cursor: "pointer" }} title="The mic goes live by itself each time a play goes hot"><input type="checkbox" checked={voiceOn} onChange={(e) => { setVoiceOn(e.target.checked); e.target.blur(); }} />Auto mic on hot plays</label>
+            <span style={{ flex: 1 }} />
+            <button type="button" style={btn(showKeys === "keys")} onClick={(e) => { e.currentTarget.blur(); setShowKeys((x) => (x === "keys" ? null : "keys")); }}>⌨ Keys</button>
+            <button type="button" style={btn(showKeys === "snip")} onClick={(e) => { e.currentTarget.blur(); setShowKeys((x) => (x === "snip" ? null : "snip")); }} title="Which key or mouse button snips">⚙ Snip key: {snipName(snipKey)}</button>
+          </div>
+          {showKeys === "snip" && (
+            <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, fontWeight: 800, color: "#9fb0c8", padding: "8px 10px", borderRadius: 8, background: "#141c2b", border: "1px solid #263247" }}>Snip key (besides Z / Q / 1)
+              <select value={["c", "1", "F13", "F14", "F15", "mouse4", "mouse5"].includes(snipKey) ? snipKey : "custom"} onChange={(e) => { if (e.target.value !== "custom") setSnipKey(e.target.value); e.target.blur(); }} style={{ ...field, padding: "3px 6px", fontSize: 12 }}>
                 {!["c", "1", "F13", "F14", "F15", "mouse4", "mouse5"].includes(snipKey) && <option value="custom">{snipName(snipKey)}</option>}
                 <option value="c">C (and Ctrl+K)</option>
                 <option value="1">1 (focus → Shift+1–9)</option>
@@ -873,24 +1011,73 @@ function CutTab({ games, setGames, fileFor, gate, wdPeople, schools, openPlayer,
               </select>
               <button type="button" style={{ ...mini, ...(learning ? { background: UI_GOLD, borderColor: UI_GOLD, color: "#1d1405" } : {}) }} onClick={(e) => { e.currentTarget.blur(); setLearning((x) => !x); }}>{learning ? "Press the key / button now… (Esc)" : "Set by pressing it"}</button>
             </label>
-            <button type="button" style={{ ...btn(mic), ...(listening ? { background: "#b42318", borderColor: "#ff6b5b" } : {}) }} onClick={() => setMic((x) => !x)} title="Turn the mic on or off whenever — names, labels, traits go on the hot play (V)">🎙 Mic {mic ? (listening ? "● live" : "on") : "off"} (V)</button>
-            <label style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 11, fontWeight: 800, color: "#8494ad", cursor: "pointer" }} title="The mic goes live by itself each time a play goes hot"><input type="checkbox" checked={voiceOn} onChange={(e) => { setVoiceOn(e.target.checked); e.target.blur(); }} />Mic on hot plays</label>
-            <button type="button" style={btn(!!hot)} onClick={hotHere} title="The play here goes hot — again: done with it">🔥 Hot (Z)</button>
-            <button type="button" style={btn(false)} onClick={wipe} title="Clear the hot play, a started cut, and what voice heard — saved plays stay">Wipe (X)</button>
-            <span style={{ fontSize: 13, fontWeight: 900, fontVariantNumeric: "tabular-nums" }}>{clock(t)}</span>
-            <span style={{ flex: 1 }} />
-            <span style={{ fontSize: 11, fontWeight: 700, color: "#8494ad" }}>1 razor · Q hold = cut while held (tap = razor) · Z hot · X wipe · 4 or Space play · hold ←/→ or A/D fast motion (double tap 5s, triple 10s) · ↑/↓ or W/S 5s · , . frame{snipKey !== "1" ? ` · ${snipName(snipKey)} razor` : ""} · [ ] hot play starts / ends here · Shift+1–9 tag · V mic on / off · Delete twice: delete the hot play · F full screen · Esc</span>
-          </div>
+          )}
+          {showKeys === "keys" && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: "4px 16px", padding: "8px 12px", borderRadius: 8, background: "#141c2b", border: "1px solid #263247", fontSize: 12, fontWeight: 700, color: "#9fb0c8" }}>
+              {[["Z / Q hold", "cut while held — it goes hot (tap = razor)"], ["1", "razor"], [snipName(snipKey), "razor"], ["X", "wipe"], ["4 / Space", "play / pause"], ["hold ←/→ or A/D", "fast motion (double tap 5s, triple 10s)"], ["↑/↓ or W/S", "5s ahead / back"], [", .", "a frame"], ["[ ]", "hot play starts / ends here"], ["Shift+1–9", "tag a pinned player"], ["V", "mic on / off"], ["Delete twice", "delete the hot play"], ["F", "full screen"], ["Esc", "let go of the hot play"]].map(([k, v]) => (
+                <div key={k + v}><b style={{ color: "#e8edf5" }}>{k}</b> · {v}</div>
+              ))}
+            </div>
+          )}
           <div style={ellipsis({ fontSize: 13, fontWeight: 800, height: 18, lineHeight: "18px" })} title={msg}>{msg || "\u00a0"}</div>
           </div>
-          <div className="wd-fs-hide" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 10 }}>
+          <div className="wd-fs-hide wd-fs-right" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 10, alignContent: "start" }}>
+          {/* Pinned players: offense / defense, their numbers. */}
+          <div style={box}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+              <div style={head}>📌 Pinned · {focus.length}</div>
+              <button type="button" style={mini} onClick={togglePop} title="Both rosters with numbers and this game's stats in their own window — pin players and tag the hot play there">{popWin ? "Close rosters" : "⧉ Rosters window"}</button>
+            </div>
+            {["offense", "defense"].map((side) => {
+              const rows = focus.map((p, i) => ({ p, i })).filter(({ p }) => (teamKey(p.team) === teamKey(game.defense) ? "defense" : "offense") === side);
+              if (!rows.length) return null;
+              return (
+                <div key={side} style={{ display: "grid", gap: 3 }}>
+                  <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: 1, color: "#8494ad" }}>{side === "offense" ? `${cfbdTeam(game.offense) || ""} OFFENSE` : `${cfbdTeam(game.defense) || ""} DEFENSE`}</div>
+                  {rows.map(({ p, i }) => {
+                    const on = !!hot?.playerIds?.includes(p.key);
+                    const num = jerseyOf(p.key);
+                    return (
+                      <div key={p.key} style={{ display: "grid", gridTemplateColumns: "42px minmax(0, 1fr) auto auto", gap: 8, alignItems: "center", padding: "4px 8px", borderRadius: 8, background: on ? "rgba(21,128,61,0.25)" : "#172133", border: `1px solid ${on ? "#4ade80" : "transparent"}` }}>
+                        <span style={{ fontSize: 20, fontWeight: 900, color: on ? "#4ade80" : "#fff", fontVariantNumeric: "tabular-nums", textAlign: "center" }}>{num != null ? num : "–"}</span>
+                        <button type="button" onClick={() => (hot ? toggleTag(p) : null)} disabled={!hot} title={hot ? (on ? "Untag from the hot play" : "Tag on the hot play") : ""} style={{ ...ellipsis({ fontSize: 13, fontWeight: 800 }), textAlign: "left", border: "none", background: "none", color: "#e8edf5", cursor: hot ? "pointer" : "default", padding: 0 }}>{p.name} <span style={{ color: "#8494ad", fontWeight: 700 }}>{p.pos}</span></button>
+                        <span style={{ fontSize: 11, fontWeight: 800, color: "#8494ad" }}>⇧{i + 1}</span>
+                        <button type="button" onClick={() => dropFocus(p.key)} title="Unpin" style={{ border: "none", background: "none", cursor: "pointer", color: "#ff7a6b", padding: 0, fontWeight: 900 }}>✕</button>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+            {!focus.length && <span style={{ fontSize: 12, color: "#8494ad", fontWeight: 700 }}>Pin the players you&apos;re watching — or say “pin number 50 Cincinnati”.</span>}
+            <PersonPicker pool={pool} onPick={addFocus} exclude={focus.map((f) => f.key)} placeholder={rosters.length ? `Pin from the ${game.offense} / ${game.defense} rosters…` : "Pin a player… (set the teams to load their rosters)"} />
+          </div>
+
+          {/* What voice has learned (user, 2026-11-26) — a wrong one is deleted here. */}
+          {Object.keys(aliases).length > 0 && (
+            <details style={box}>
+              <summary style={{ ...head, cursor: "pointer" }}>🧠 Learned names · {Object.keys(aliases).length}</summary>
+              <div style={{ display: "grid", gap: 3, marginTop: 6, maxHeight: 220, overflowY: "auto" }}>
+                {Object.entries(aliases).sort((a, b) => a[0].localeCompare(b[0])).map(([ph, key]) => {
+                  const p = personOf(key) || pool.find((x) => x.key === key);
+                  return (
+                    <div key={ph} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr) auto", gap: 8, alignItems: "center", fontSize: 12, fontWeight: 800 }}>
+                      <span style={ellipsis({ color: "#f6c66b" })}>“{ph}”</span>
+                      <span style={ellipsis({ color: p ? "#e8edf5" : "#8494ad" })}>{p ? p.name : "someone not in this game"}</span>
+                      <button type="button" onClick={() => setAliases(forget(ph))} title="Forget this" style={{ border: "none", background: "none", cursor: "pointer", color: "#ff7a6b", padding: 0, fontWeight: 900 }}>✕</button>
+                    </div>
+                  );
+                })}
+              </div>
+            </details>
+          )}
 
           {hot && (
             <div style={{ ...box, borderColor: UI_GOLD, background: "#2a2312" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <div style={{ ...head, color: "#f6c66b", flex: 1 }}>🔥 Hot play · {clock(hot.in)}–{clock(hot.out)} ({(hot.out - hot.in).toFixed(1)}s)</div>
                 <button type="button" style={mini} onClick={() => api.current?.seek(hot.in)}>Replay</button>
-                <button type="button" style={mini} onClick={() => setHot(null)}>Done (Z)</button>
+                <button type="button" style={mini} onClick={() => setHot(null)}>Done</button>
               </div>
               <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
                 {[["in", "Starts"], ["out", "Ends"]].map(([edge, label]) => (
@@ -912,7 +1099,7 @@ function CutTab({ games, setGames, fileFor, gate, wdPeople, schools, openPlayer,
               {voiceOn && (
                 <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", padding: "6px 8px", borderRadius: 8, background: listening ? "#3a2a0c" : "#1b2538" }}>
                   <span style={{ fontSize: 12, fontWeight: 900, color: listening ? "#ff6b5b" : "#8494ad" }}>{listening ? `● Listening — names, then a label and traits (“Kromah great vision”)${focus.length === 1 ? ` · just “good” = ${focus[0].name}` : ""}` : mic ? "🎙 Mic starting…" : "🎙 Mic off"}</span>
-                  <button type="button" style={mini} onClick={() => setMic((x) => !x)}>{mic ? "Mic off (V)" : "Mic on (V)"}</button>
+                  <button type="button" style={mini} onClick={toggleMic}>{mic ? "Mic off (V)" : "Mic on (V)"}</button>
                   {interim && <span style={{ fontSize: 12, fontStyle: "italic", color: "#e8edf5" }}>“{interim}”</span>}
                   {hearing.map((n) => <span key={n} style={{ border: "1px dashed #9fb0c8", color: "#d7e1ef", borderRadius: 999, padding: "1px 8px", fontSize: 11, fontWeight: 800 }}>{n}?</span>)}
                   {feed.length > 0 && (
@@ -920,7 +1107,7 @@ function CutTab({ games, setGames, fileFor, gate, wdPeople, schools, openPlayer,
                       <span style={{ fontSize: 11, fontWeight: 900, color: "#8494ad" }}>VOICE ADDED</span>
                       {feed.map((x, i) => (
                         <span key={x.id} style={{ fontSize: 12, fontWeight: 900, opacity: i === 0 ? 1 : 0.7, color: x.kind === "add" || x.kind === "set" ? "#4ade80" : x.kind === "remove" ? "#ff8a80" : "#9fb0c8" }}>
-                          {x.kind === "add" || x.kind === "set" ? "✓ " : x.kind === "remove" ? "✕ " : "· "}{x.name}{x.kind === "already" ? " (already on)" : x.kind === "remove" ? " removed" : ""}{x.extra ? ` · ${x.extra}` : ""}
+                          {x.kind === "add" || x.kind === "set" ? "✓ " : x.kind === "remove" ? "✕ " : "· "}{x.name}{x.tagline ? ` (${x.tagline})` : ""}{x.kind === "already" ? " (already on)" : x.kind === "remove" ? " removed" : ""}{x.extra ? ` · ${x.extra}` : ""}
                         </span>
                       ))}
                     </div>
@@ -930,6 +1117,12 @@ function CutTab({ games, setGames, fileFor, gate, wdPeople, schools, openPlayer,
                   ) : (
                     <span key={i} style={{ ...chip(false), padding: "1px 8px", fontSize: 11, borderColor: "#b7791f", color: "#f6c66b" }}>“{h.phrase}” · {h.how}</span>
                   )))}
+                </div>
+              )}
+              {learnRef.current && (
+                <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "8px 10px", borderRadius: 8, border: "1px solid #60a5fa", background: "#0f2140" }}>
+                  <span style={{ fontSize: 13, fontWeight: 900, color: "#93c5fd", flex: 1 }}>🎙 Say {learnRef.current.name}&apos;s name so voice knows him next time</span>
+                  <button type="button" style={mini} onClick={() => setLearn(null)}>Skip</button>
                 </div>
               )}
               {asks.map((a, ai) => (
@@ -973,6 +1166,22 @@ function CutTab({ games, setGames, fileFor, gate, wdPeople, schools, openPlayer,
               </div>
             ))}
           </div>
+          <details style={box} open={!game.cfbdGameId}>
+            <summary style={{ ...head, cursor: "pointer" }}>Game details · {game.season || "?"} · {cfbdTeam(game.offense) || "?"} offense vs {cfbdTeam(game.defense) || "?"}</summary>
+            <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+              <div style={ellipsis({ fontSize: 11, fontWeight: 700, color: "#8494ad" })} title={game.file}>{game.file}</div>
+              <select value={game.cfbdGameId || ""} onChange={(e) => { const x = choices.find((y) => String(y.id) === e.target.value); if (x) onConnect(game, x); }} style={{ ...field, fontSize: 12 }}>
+                <option value="">{game.cfbdGameId ? "" : "Not on a game — pick it…"}</option>
+                {choices.map((x) => <option key={x.id} value={x.id}>{weekLabel(x)} · {dateOf(x.date)} · {matchup(x)}</option>)}
+              </select>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 80px", gap: 8 }}>
+                <label style={{ fontSize: 11, fontWeight: 800 }}>Offense<input list="film-teams" defaultValue={game.offense} key={`o${game.id}`} onBlur={(e) => e.target.value !== game.offense && editGame({ offense: e.target.value.trim() })} style={{ ...field, width: "100%" }} /></label>
+                <label style={{ fontSize: 11, fontWeight: 800 }}>Defense<input list="film-teams" defaultValue={game.defense} key={`d${game.id}`} onBlur={(e) => e.target.value !== game.defense && editGame({ defense: e.target.value.trim() })} style={{ ...field, width: "100%" }} /></label>
+                <label style={{ fontSize: 11, fontWeight: 800 }}>Season<input defaultValue={game.season} key={`s${game.id}`} onBlur={(e) => e.target.value !== game.season && editGame({ season: e.target.value.trim() })} style={{ ...field, width: "100%" }} /></label>
+              </div>
+              <datalist id="film-teams">{schools.map((s2) => <option key={s2} value={s2} />)}</datalist>
+            </div>
+          </details>
           </div>
         </div>
       )}
@@ -1016,11 +1225,14 @@ function ReviewStrip({ review, who, setWho, gamePlays }) {
   );
 }
 
-function PlayersTab({ games, fileFor, gate, wdPeople, filmPool, who, setWho, review }) {
+function PlayersTab({ games, fileFor, gate, ready, wdPeople, filmPool, who, setWho, review }) {
   const [plays, setPlays] = useState(null);
   const [labelF, setLabelF] = useState("all");
   const [circleF, setCircleF] = useState("any");
   const [gameF, setGameF] = useState("");
+  // Year chips (user, 2026-11-26): his seasons, newest first; the list runs newest game first.
+  const [yearF, setYearF] = useState("");
+  useEffect(() => { setYearF(""); }, [who?.key]);
   const [cur, setCur] = useState(null);
   const [file, setFile] = useState(null);
   // Watching: the original plays or their washed versions (a play without one shows the original).
@@ -1062,6 +1274,15 @@ function PlayersTab({ games, fileFor, gate, wdPeople, filmPool, who, setWho, rev
   }, [review?.game?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const tagOf = (p) => p?.players?.[who?.key] || {};
+  // His number (user, 2026-11-26): from his team's CFBD roster (cached per team).
+  const [whoJersey, setWhoJersey] = useState(null);
+  useEffect(() => {
+    setWhoJersey(null);
+    if (!who?.team) return;
+    roster(who.team).then((list) => { const r = list.find((x) => x.key === who.key || (who.cfbd && String(x.cfbd) === String(who.cfbd)) || (who.wd && x.wd === who.wd)); if (r?.jersey != null) setWhoJersey(r.jersey); }).catch(() => {});
+  }, [who?.key]); // eslint-disable-line react-hooks/exhaustive-deps
+  const yearOf = (p) => { const g = games.find((x) => x.id === p.gameId); return String(g ? seasonFor(g) : "") || ""; };
+  const years = [...new Set((plays || []).map(yearOf).filter(Boolean))].sort((a, b) => b.localeCompare(a));
   const list = (plays || []).filter((p) => {
     const tg = tagOf(p);
     if (labelF === "untagged" && tg.label) return false;
@@ -1071,13 +1292,20 @@ function PlayersTab({ games, fileFor, gate, wdPeople, filmPool, who, setWho, rev
     if (washF === "yes" && !tg.wash?.keys?.length) return false;
     if (washF === "no" && tg.wash?.keys?.length) return false;
     if (traitF && !(tg.traits || []).includes(traitF)) return false;
+    if (yearF && yearOf(p) !== yearF) return false;
     return !gameF || p.gameId === gameF;
-  }).sort((a, b) => { const ga = games.find((g) => g.id === a.gameId); const gb = games.find((g) => g.id === b.gameId); return String(ga?.date || ga?.season || "").localeCompare(String(gb?.date || gb?.season || "")) || a.in - b.in; });
+  }).sort((a, b) => { const ga = games.find((g) => g.id === a.gameId); const gb = games.find((g) => g.id === b.gameId); return String(gb?.date || gb?.season || "").localeCompare(String(ga?.date || ga?.season || "")) || a.in - b.in; });
   const open = async (p) => {
     setCur(p); setWashing(false); setTool(null);
     const g = games.find((x) => x.id === p.gameId) || { id: p.gameId, file: p.file };
     if (file?.name !== p.file) setFile(await fileFor(g).catch(() => null));
   };
+  // The folder just got allowed, and again when its scan finishes: load the open play's film.
+  useEffect(() => {
+    if (!ready || !cur || file) return;
+    const g = games.find((x) => x.id === cur.gameId) || { id: cur.gameId, file: cur.file };
+    fileFor(g).then((f) => f && setFile(f)).catch(() => {});
+  }, [ready]); // eslint-disable-line react-hooks/exhaustive-deps
   const curTag = tagOf(cur);
   // Shown at once, saved behind it (a mark or label shouldn't wait on the network).
   const setTag = async (patch) => {
@@ -1129,6 +1357,7 @@ function PlayersTab({ games, fileFor, gate, wdPeople, filmPool, who, setWho, rev
     <div style={{ padding: "8px 12px", borderRadius: 10, background: "rgba(8,12,22,0.85)", border: "2px solid #ff3b30", color: "#ff6b5b", fontWeight: 900, fontSize: 14, fontFamily: "Arial, sans-serif" }}>● SETTING THE WASH — drag to pan · scroll to zoom · let go to save</div>
   ) : (
     <div style={{ display: "grid", gap: 3, padding: "7px 11px", borderRadius: 10, background: "rgba(8,12,22,0.78)", border: `2px solid ${listening ? "#ff6b5b" : "#334058"}`, fontFamily: "Arial, sans-serif" }}>
+      {who && <div style={{ fontSize: 14, fontWeight: 900, color: "#fff" }}>{whoJersey != null ? `#${whoJersey} ` : ""}{who.name}{who.pos ? <span style={{ color: "#9fb0c8" }}> · {who.pos}</span> : null}</div>}
       <div style={{ fontSize: 15, fontWeight: 900, color: curTag.label ? LABEL_COLORS[curTag.label] : "#9fb0c8" }}>{curTag.label || "No label"}</div>
       <div style={{ fontSize: 12, fontWeight: 800, color: curTag.traits?.length ? "#d7e1ef" : "#8494ad" }}>{curTag.traits?.length ? curTag.traits.join(" · ") : "No traits"}</div>
       {listening && <div style={{ fontSize: 12, fontWeight: 900, color: "#ff6b5b" }}>● Listening{interim ? ` — “${interim}”` : " — say a label and traits (Q stops)"}</div>}
@@ -1193,6 +1422,21 @@ function PlayersTab({ games, fileFor, gate, wdPeople, filmPool, who, setWho, rev
     sizeSave.current = setTimeout(() => editTag(next, who.key, { spot }).catch((e) => setMsg(e.message)), 400);
   };
   const pickTool = (k) => { setWashing(false); setTool((x) => (x === k ? null : k)); };
+  // Delete from his list (user, 2026-11-26): ✕ twice. Off his list only when
+  // others are on the play; the play itself when he's the only one.
+  const [armedPlay, setArmedPlay] = useState(null);
+  const armedPlayTimer = useRef(null);
+  const dropPlay = async (p) => {
+    if (armedPlay !== p.id) { setArmedPlay(p.id); clearTimeout(armedPlayTimer.current); armedPlayTimer.current = setTimeout(() => setArmedPlay(null), 3000); return; }
+    setArmedPlay(null);
+    const others = (p.playerIds || []).filter((k) => k !== who.key);
+    try {
+      if (others.length) await untagPlayer(p, who.key); else await deletePlay(p);
+      if (cur?.id === p.id) { const i = list.findIndex((x) => x.id === p.id); const n = list[i + 1] || list[i - 1]; if (n) open(n); else setCur(null); }
+      setPlays((ps) => (ps || []).filter((x) => x.id !== p.id));
+      setMsg(others.length ? "Taken off his list — the play stays for the others on it." : "Play deleted.");
+    } catch (e) { setMsg(`Couldn't delete: ${e.message}`); }
+  };
   // The next / last play; past his last: Watch all ends, a review moves on to the next player.
   const go = (d) => {
     const i = list.findIndex((x) => x.id === cur?.id);
@@ -1228,11 +1472,12 @@ function PlayersTab({ games, fileFor, gate, wdPeople, filmPool, who, setWho, rev
     if (down) {
       if (!a || holdRef.current || !cur) return;
       const v0 = a.view();
-      const rec = { keys: [], v0, moved: false };
+      // A zoom scrolled in before the click counts: the click keys it.
+      const rec = { keys: [], v0, moved: false, pending: !!a.draft?.() };
       rec.timer = setInterval(() => {
         const v = a.view();
         if (!v) return;
-        if (!rec.moved && !sameView(v, v0)) { rec.moved = true; setWashHeld(true); }
+        if (!rec.moved && (!sameView(v, v0) || rec.pending)) { rec.moved = true; setWashHeld(true); }
         if (!rec.moved || a.paused()) return;
         const tm = Math.round(a.time() * 100) / 100;
         const last = rec.keys[rec.keys.length - 1];
@@ -1248,7 +1493,7 @@ function PlayersTab({ games, fileFor, gate, wdPeople, filmPool, who, setWho, rev
     if (!rec || !a) return;
     clearInterval(rec.timer);
     const v = a.view();
-    if (!v || (!rec.moved && sameView(v, rec.v0))) return; // just a click
+    if (!v || (!rec.moved && !rec.pending && sameView(v, rec.v0))) return; // just a click
     const tEnd = Math.round(a.time() * 100) / 100;
     if (!rec.keys.some((k) => Math.abs(k.t - tEnd) < 0.08)) rec.keys.push({ t: tEnd, x: v.x, y: v.y, z: v.z });
     const lo = Math.min(...rec.keys.map((k) => k.t)) - 0.05;
@@ -1276,10 +1521,10 @@ function PlayersTab({ games, fileFor, gate, wdPeople, filmPool, who, setWho, rev
   const editSave = useRef(null);
   // Scrolling anywhere on the film (user, 2026-11-25): straight into the wash —
   // it zooms, the washed version shows, and a keyframe is saved here.
+  // (user, 2026-11-26) Scrolling alone only zooms the view — nothing is saved;
+  // a keyframe happens only when you click (hold) while zooming / moving.
   const washEdited = () => {
     if (view !== "washed") setView("washed");
-    clearTimeout(editSave.current);
-    editSave.current = setTimeout(() => { if (api.current?.draft()) addKey(); }, 450);
   };
   useEffect(() => () => clearTimeout(editSave.current), []);
 
@@ -1300,14 +1545,16 @@ function PlayersTab({ games, fileFor, gate, wdPeople, filmPool, who, setWho, rev
         const now = performance.now();
         const tp = taps.current;
         taps.current = tp && tp.dir === dir && now - tp.at < 320 ? { dir, at: now, n: tp.n + 1 } : { dir, at: now, n: 1 };
-        if (taps.current.n === 2) { motion.end(); go(dir); } else motion.start(dir);
+        if (taps.current.n >= 2) { motion.end(); go(dir); } else motion.start(dir); // every tap after the first: another play
       }
       // ↑ / ↓: the circle / arrow bigger / smaller (user, 2026-11-25 — the wheel washes now).
       else if (k === "ArrowUp" || k === "ArrowDown") { e.preventDefault(); if (curTag.spot) sizeMark(k === "ArrowUp" ? 1.08 : 1 / 1.08); }
       else if (k === "w" || k === "W") go(1); else if (k === "s" || k === "S") go(-1);
       // Q: voice on / off (user, 2026-11-25) — say a label and traits for this clip.
       else if (k === "q" || k === "Q" || k === "m" || k === "M") { if (!e.repeat) setVoiceOn((x) => !x); }
-      else if (k === "c" || k === "C") pickTool("circle"); else if (k === "r" || k === "R") pickTool("arrow");
+      else if (k === "c" || k === "C") pickTool("circle"); else if (k === "t" || k === "T") pickTool("arrow");
+      // R: the play again from the top (user, 2026-11-26).
+      else if (k === "r" || k === "R") { if (curRange) { a?.seek(curRange.in); a?.play(); } }
       else if (k === "e" || k === "E") { setTool(null); setWashing((x) => !x); }
       else if (k === "v" || k === "V") setView((x) => (x === "washed" ? "original" : "washed"));
       else if (k === ",") a?.step(-1); else if (k === ".") a?.step(1);
@@ -1338,13 +1585,28 @@ function PlayersTab({ games, fileFor, gate, wdPeople, filmPool, who, setWho, rev
   return (
     <div ref={stageRef} className="wd-film-stage" style={{ ...stageStyle, display: "grid", gap: 12 }}>
     <ReviewStrip review={review} who={who} setWho={setWho} gamePlays={gamePlays} />
-    <div className="wd-fs-grid" style={{ display: "grid", gridTemplateColumns: "340px minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
+    <div className="wd-fs-grid" style={{ display: "grid", gridTemplateColumns: "300px minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
       <div className="wd-fs-list" style={box}>
         <div style={head}>Player</div>
         <PersonPicker pool={pool} onPick={setWho} placeholder="Find a player…" />
-        {who && <div style={{ fontSize: 15, fontWeight: 900 }}>{who.name} <span style={{ fontSize: 12, color: "#8494ad" }}>{who.pos} · {who.team}</span></div>}
+        {who && (
+          <div style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", gap: 10, alignItems: "center" }}>
+            <span style={{ fontSize: 30, fontWeight: 900, lineHeight: 1, color: UI_GOLD, fontVariantNumeric: "tabular-nums" }}>{whoJersey != null ? `#${whoJersey}` : "#–"}</span>
+            <div style={{ minWidth: 0 }}>
+              <div style={ellipsis({ fontSize: 16, fontWeight: 900 })}>{who.name}</div>
+              <div style={ellipsis({ fontSize: 12, fontWeight: 800, color: "#9fb0c8" })}>{[who.pos, cfbdTeam(who.team) || who.team].filter(Boolean).join(" · ")}</div>
+            </div>
+          </div>
+        )}
         {who && plays && (
           <>
+            {years.length > 0 && (
+              <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                {[["", "All years"], ...years.map((y) => [y, `${y} · ${plays.filter((p) => yearOf(p) === y).length}`])].map(([y, l]) => (
+                  <button key={y || "all"} type="button" style={{ ...chip(yearF === y, UI_GOLD), padding: "3px 10px", fontSize: 12, ...(yearF === y ? { color: "#1d1405" } : {}) }} onClick={() => { setYearF(y); setGameF(""); }}>{l}</button>
+                ))}
+              </div>
+            )}
             <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
               {[["all", `All ${plays.length}`], ["untagged", `No label ${counts.untagged}`], ...LABELS.map((l) => [l, `${l} ${counts[l] || 0}`])].map(([k, l]) => (
                 <button key={k} type="button" style={{ ...chip(labelF === k, LABEL_COLORS[k] || UI_BLUE), padding: "2px 8px", fontSize: 11 }} onClick={() => setLabelF(k)}>{l}</button>
@@ -1365,17 +1627,21 @@ function PlayersTab({ games, fileFor, gate, wdPeople, filmPool, who, setWho, rev
               </select>
               <select value={gameF} onChange={(e) => setGameF(e.target.value)} style={{ ...field, fontSize: 11, padding: "3px 6px", flex: 1 }}>
                 <option value="">Every game</option>
-                {[...new Set(plays.map((p) => p.gameId))].map((id) => <option key={id} value={id}>{gameName(id)}</option>)}
+                {[...new Set([...plays].filter((p) => !yearF || yearOf(p) === yearF).sort((a, b) => { const ga = games.find((g) => g.id === a.gameId); const gb = games.find((g) => g.id === b.gameId); return String(gb?.date || gb?.season || "").localeCompare(String(ga?.date || ga?.season || "")); }).map((p) => p.gameId))].map((id) => <option key={id} value={id}>{gameName(id)}</option>)}
               </select>
             </div>
             <div className="wd-fs-scroll" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 3, maxHeight: "calc(100vh - 320px)", minHeight: 240, overflowY: "auto", paddingRight: 2 }}>
               {list.map((p) => {
                 const tg = tagOf(p);
                 return (
-                  <button key={p.id} type="button" onClick={() => open(p)} title={gameName(p.gameId)} style={{ display: "grid", gap: 2, minWidth: 0, textAlign: "left", color: "#e8edf5", border: "none", borderLeft: `4px solid ${tg.label ? LABEL_COLORS[tg.label] : "#334058"}`, borderRadius: 6, padding: "6px 10px", cursor: "pointer", background: cur?.id === p.id ? "#1c3355" : "#172133", outline: cur?.id === p.id ? `1px solid ${UI_BLUE}` : "none" }}>
+                  <div key={p.id} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", alignItems: "stretch", gap: 2 }}>
+                  <button type="button" onClick={() => open(p)} title={gameName(p.gameId)} style={{ display: "grid", gap: 2, minWidth: 0, textAlign: "left", color: "#e8edf5", border: "none", borderLeft: `4px solid ${tg.label ? LABEL_COLORS[tg.label] : "#334058"}`, borderRadius: 6, padding: "6px 10px", cursor: "pointer", background: cur?.id === p.id ? "#1c3355" : "#172133", outline: cur?.id === p.id ? `1px solid ${UI_BLUE}` : "none" }}>
                     <div style={ellipsis({ fontSize: 12, fontWeight: 900 })}>{oppName(p.gameId)}</div>
                     <div style={ellipsis({ fontSize: 11, fontWeight: 700, color: "#8494ad" })}>{clock(rangeOf(p, tg).in)} · {(rangeOf(p, tg).out - rangeOf(p, tg).in).toFixed(1)}s{tg.trim ? " (his cut)" : ""} · {tg.label || "no label"}{tg.spot ? " · ◯" : ""}{tg.traits?.length ? ` · ${tg.traits.length} trait${tg.traits.length === 1 ? "" : "s"}` : ""}{tg.wash?.keys?.length ? " · washed" : ""}{tg.legacy?.animated || tg.legacy?.offFrame ? " · check mark" : ""}</div>
                   </button>
+                  <button type="button" onClick={() => dropPlay(p)} title={(p.playerIds || []).length > 1 ? "Take this play off his list (click twice) — it stays for the others on it" : "Delete this play (click twice)"}
+                    style={{ ...mini, alignSelf: "center", color: armedPlay === p.id ? "#fff" : "#ff7a6b", ...(armedPlay === p.id ? { background: "#b42318", borderColor: "#b42318" } : {}) }}>{armedPlay === p.id ? "Sure? ✕" : "✕"}</button>
+                  </div>
                 );
               })}
               {!list.length && <div style={{ fontSize: 12, color: "#8494ad", fontWeight: 700 }}>No plays match.</div>}
@@ -1386,8 +1652,8 @@ function PlayersTab({ games, fileFor, gate, wdPeople, filmPool, who, setWho, rev
       </div>
 
       {!cur ? <div style={{ ...box, color: "#8494ad", fontWeight: 700, padding: 40, textAlign: "center" }}>{who ? "Pick one of his plays on the left." : "Find a player to see his plays."}</div> : (
-        <div className="wd-fs-main" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 10, minWidth: 0, position: "sticky", top: 12 }}>
-          <FilmPlayer file={file} gate={gate} stageRef={stageRef} overlay={voiceOverlay} center={voiceCenter} autoPlay={watchAll || (!washing && !tool)} range={curRange} apiRef={api} mode={showWash ? "wash" : "original"} editWash={washing} washKeys={washKeys} onTime={(x) => setT(x)}
+        <div className="wd-fs-main" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 10, minWidth: 0 }}>
+          <FilmPlayer file={file} gate={gate} stageRef={stageRef} fitHeight="calc(100vh - 230px)" overlay={voiceOverlay} center={voiceCenter} autoPlay={watchAll || (!washing && !tool)} range={curRange} apiRef={api} mode={showWash ? "wash" : "original"} editWash={washing} washKeys={washKeys} onTime={(x) => setT(x)}
             spots={curTag.spot ? [{ ...markOf(curTag), color: UI_GOLD }] : []}
             markTool={watchAll ? null : tool} onMark={placeMark} onMarkSize={sizeMark} quickMarks={!watchAll} onQuickMark={quickMark} onMarkMove={moveMark}
             liveWash={!tool && !watchAll} wheelWash={!watchAll} onWashHold={washHold} onWashEdit={washEdited} onEnd={watchAll ? () => go(1) : undefined}
@@ -1399,7 +1665,8 @@ function PlayersTab({ games, fileFor, gate, wdPeople, filmPool, who, setWho, rev
                 <span style={{ fontSize: 13, fontWeight: 900, color: "#e8edf5", fontVariantNumeric: "tabular-nums" }}>{clock(t - cur.in)} / {clock(cur.out - cur.in)}</span>
                 {LABELS.map((l, i) => <button key={l} type="button" style={chip(curTag.label === l, LABEL_COLORS[l])} onClick={() => setTag({ label: curTag.label === l ? "" : l })}>{i + 1} · {l}</button>)}
                 <button type="button" style={btn(tool === "circle")} onClick={() => pickTool("circle")}>◯ C</button>
-                <button type="button" style={btn(tool === "arrow")} onClick={() => pickTool("arrow")}>↓ R</button>
+                <button type="button" style={btn(tool === "arrow")} onClick={() => pickTool("arrow")}>↓ T</button>
+                <button type="button" style={mini} onClick={() => { api.current?.seek(curRange.in); api.current?.play(); }}>↺ R</button>
                 <button type="button" style={btn(view === "washed")} onClick={() => setView((x) => (x === "washed" ? "original" : "washed"))}>{view === "washed" ? "Washed" : "Original"} V</button>
                 <button type="button" style={btn(washing)} onClick={() => { setTool(null); setWashing((x) => !x); }}>Wash editor E</button>
                 <button type="button" style={btn(voiceOn)} onClick={() => setVoiceOn((x) => !x)}>🎙 Q</button>
@@ -1407,9 +1674,10 @@ function PlayersTab({ games, fileFor, gate, wdPeople, filmPool, who, setWho, rev
               </>
             )} />
           <div className="wd-fs-dock" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 10 }}>
-          <ScrubRow apiRef={api} min={curRange.in} max={curRange.out} t={t} motion={motion} fine={0.5} onClicks={(dir, n) => { if (n === 2) go(dir); }} />
+          <ScrubRow apiRef={api} min={curRange.in} max={curRange.out} t={t} motion={motion} fine={0.5} onClicks={(dir, n) => { if (n >= 2) go(dir); }} />
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
             <button type="button" style={btn(true)} onClick={() => api.current?.toggle()}>▶ / ❚❚</button>
+            <button type="button" style={btn(false)} onClick={() => { api.current?.seek(curRange.in); api.current?.play(); }} title="The play again from the top (R)">↺ Restart (R)</button>
             <span style={{ fontSize: 13, fontWeight: 900, fontVariantNumeric: "tabular-nums" }}>{clock(t - curRange.in)} / {clock(curRange.out - curRange.in)}</span>
             <span style={{ flex: 1 }} />
             <span style={{ fontSize: 11, fontWeight: 800, color: "#8494ad" }}>Watch</span>
@@ -1451,7 +1719,7 @@ function PlayersTab({ games, fileFor, gate, wdPeople, filmPool, who, setWho, rev
             <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
               <span style={head}>Mark</span>
               <button type="button" style={btn(tool === "circle")} onClick={() => pickTool("circle")}>◯ Circle (C)</button>
-              <button type="button" style={btn(tool === "arrow")} onClick={() => pickTool("arrow")}>↓ Arrow (R)</button>
+              <button type="button" style={btn(tool === "arrow")} onClick={() => pickTool("arrow")}>↓ Arrow (T)</button>
               {tool ? <span style={{ fontSize: 12, fontWeight: 800, color: "#f6c66b" }}>Click {tool === "arrow" ? "where the tip goes" : "his middle"} · ↑/↓ to size · Esc when done</span> : <span style={{ fontSize: 11, fontWeight: 700, color: "#8494ad" }}>or double-click the film = circle · triple = arrow · ↑/↓ size</span>}
               {curTag.spot && <button type="button" style={mini} onClick={() => api.current?.seek(curTag.spot.t)}>Jump to it</button>}
               {curTag.spot && <button type="button" style={{ ...mini, color: "#ff7a6b" }} onClick={() => setTag({ spot: null })}>Remove</button>}
@@ -1470,7 +1738,7 @@ function PlayersTab({ games, fileFor, gate, wdPeople, filmPool, who, setWho, rev
               </div>
             </div>
             <input key={`${cur.id}-note`} defaultValue={curTag.note || ""} onBlur={(e) => e.target.value !== (curTag.note || "") && setTag({ note: e.target.value })} placeholder="Note (optional)…" style={{ ...field, width: "100%" }} />
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#8494ad" }}>Keys: 1–6 label · 0 clear · Q voice · hold A/D or ←/→ fast motion (double tap: last / next play) · W/S next / last play · ↑/↓ mark size · C circle · R arrow · scroll = zoom (wash, saves itself) · hold the click + drag = pan · E wash editor · V original / washed · F full screen · , . frame · Space play · Esc</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#8494ad" }}>Keys: 1–6 label · 0 clear · Q voice · hold A/D or ←/→ fast motion (double tap: last / next play) · W/S next / last play · ↑/↓ mark size · C circle · T arrow · R restart · scroll = zoom (a keyframe only while you hold the click) · hold the click + drag / scroll = keyframes · E wash editor · V original / washed · F full screen · , . frame · Space play · Esc</div>
           </div>
           {washing && (
             <div style={{ ...box, borderColor: UI_BLUE }}>
@@ -1590,6 +1858,7 @@ function ImportTab({ games, setGames, wdPeople, gamePaths }) {
 export default function FilmManager() {
   const [tab, setTab] = useState("cut");
   const [root, setRoot] = useState(null);
+  const [whyNoRoot, setWhyNoRoot] = useState("");
   const [access, setAccess] = useState("none");
   const [handles, setHandles] = useState({}); // gameId → file handle (from the scan)
   const [games, setGames] = useState([]);
@@ -1611,8 +1880,37 @@ export default function FilmManager() {
       .then((docs) => setSchedules(Object.fromEntries(FILM_SEASONS.map((s2, i) => [s2, docs[i]?.games || null]))));
     getSiteSnapshot("_cfbTeams").then((d) => setSchools(Object.values(d?.teams || {}).map((x) => x.School).filter(Boolean).sort())).catch(() => {});
     getSiteSnapshot("_search").then((d) => setWdPeople((d?.rows || []).map((r) => person({ name: `${r.F} ${r.L}`, pos: r.P, team: r.S, wd: r.i })))).catch(() => {});
-    savedRoot().then(async (h) => { if (h) { setRoot(h); setAccess(await rootAccess(h)); } });
+    savedRoot().then(async (h) => {
+      if (h) { setRoot(h); setAccess(await rootAccess(h)); navigator.storage?.persist?.().catch(() => {}); return; }
+      // No folder: say why (the marker in localStorage tells eviction from a wipe).
+      const lost = lostRoot();
+      const kept = await storagePersisted();
+      setWhyNoRoot(lost
+        ? `Chrome dropped the saved folder (${lost.name || "film folder"}, picked ${new Date(lost.at).toLocaleDateString()})${kept ? "" : " — storage wasn't protected yet; it is asked for now"}. Pick it once more.`
+        : `No folder saved for ${window.location.origin} — if you picked it before, this browser's site data was cleared (or that was a different address / profile).`);
+    });
   }, []);
+
+  // Chrome forgets folder permission after a reload (user, 2026-11-26: "I have
+  // to repick the folder every time"). The handle is still saved, so the FIRST
+  // click or key anywhere asks again (a click is what Chrome needs) — pick
+  // "Allow on every visit" in Chrome's prompt and it stops asking for good.
+  // ONE permission request at a time, shared (the first click and the game's
+  // own load used to ask at once — Chrome turns the second one down).
+  const asking = useRef(null);
+  const askAccess = (h) => {
+    if (!asking.current) {
+      asking.current = rootAccess(h, true).catch(() => "prompt").then((a) => { asking.current = null; setAccess(a); if (a === "granted" && !Object.keys(handles).length) scan(h); return a; });
+    }
+    return asking.current;
+  };
+  useEffect(() => {
+    if (!root || access !== "prompt") return undefined;
+    const go = () => { askAccess(root); };
+    window.addEventListener("pointerdown", go, true);
+    window.addEventListener("keydown", go, true);
+    return () => { window.removeEventListener("pointerdown", go, true); window.removeEventListener("keydown", go, true); };
+  }, [root, access]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const scan = async (h = root) => {
     if (!h) return;
@@ -1637,28 +1935,30 @@ export default function FilmManager() {
   const choose = async () => {
     try { const h = await pickRoot(); setRoot(h); setAccess("granted"); await scan(h); } catch (e) { if (e.name !== "AbortError") setMsg(e.message); }
   };
-  const allow = async () => { const a = await rootAccess(root, true); setAccess(a); if (a === "granted") await scan(root); };
+  const allow = async () => { await askAccess(root); };
   // A game's film, straight from a click on a play / game (the click is the
   // gesture Chrome needs): no folder yet -> open the folder picker; folder
   // reset to "ask" after a reload -> ask again. Never a silent "No film".
   const fileFor = async (g) => {
     let h = root;
     let a = access;
+    // The saved folder may not be read in yet (a quick first click): check it before ever showing the picker.
+    if (!h) { h = await savedRoot(); if (h) { setRoot(h); a = await rootAccess(h).catch(() => "prompt"); if (a !== "granted") a = await askAccess(h); else setAccess(a); } }
     if (!h) {
       try { h = await pickRoot(); } catch (e) { if (e.name !== "AbortError") setMsg(e.message); return null; }
       a = "granted"; setRoot(h); setAccess(a); scan(h);
     } else if (a !== "granted") {
-      a = await rootAccess(h, true).catch(() => "denied"); setAccess(a);
-      if (a === "granted" && !Object.keys(handles).length) scan(h);
+      // The saved folder: just ask Chrome again (never the folder picker).
+      a = await askAccess(h);
     }
-    if (a !== "granted") { setMsg("Chrome didn't allow the film folder — click Allow film folder."); return null; }
+    if (a !== "granted") { setMsg(a === "prompt" ? "Click anywhere to let Chrome open the film folder." : "Chrome didn't allow the film folder — click Allow film folder."); return null; }
     const f = await gameFile(h, g, handles).catch(() => null);
     if (!f) setMsg(`Can't find ${g.file || g.id} in ${g.folder || h.name} — Rescan, or check it's in the film folder.`);
     return f;
   };
   // What the film window shows when there's no film: the way to connect it.
   const gate = !root ? { label: "Connect film folder", hint: "Pick C:\\KC Holdings\\KC Entertainment — it's remembered in this browser.", go: choose }
-    : access !== "granted" ? { label: "Allow film folder", hint: `${root.name} — Chrome asks again after a reload.`, go: allow } : null;
+    : access !== "granted" ? { label: "Allow film folder", hint: `${root.name} — click anywhere; in Chrome's prompt pick “Allow on every visit” so it stops asking.`, go: allow } : null;
   const openPlayer = (p) => { setReview(null); setWho(p); setTab("players"); };
   // Finishing a game: everyone clipped in it, reviewed one by one in the Players tab.
   const [review, setReview] = useState(null);
@@ -1716,7 +2016,7 @@ export default function FilmManager() {
         <div>
           <div style={head}>Film library</div>
           <div style={{ fontSize: 13, fontWeight: 800, color: "#e8edf5" }}>
-            {!root ? "Choose the folder your film lives in (KC Entertainment) — it's remembered in this browser." : `${root.name} · ${games.length} games${access !== "granted" ? " · needs permission" : ""}`}
+            {!root ? <>Choose the folder your film lives in (KC Entertainment) — it&apos;s remembered in this browser.{whyNoRoot && <span style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#f6c66b", marginTop: 4 }}>{whyNoRoot}</span>}</> : `${root.name} · ${games.length} games${access !== "granted" ? " · needs permission" : ""}`}
           </div>
           {msg && <div style={{ fontSize: 12, fontWeight: 700, color: "#9fb0c8" }}>{msg}</div>}
         </div>
@@ -1732,8 +2032,8 @@ export default function FilmManager() {
           <button key={k} type="button" onClick={() => setTab(k)} style={{ border: "none", background: "none", padding: "8px 16px", marginBottom: -2, cursor: "pointer", fontWeight: 900, fontSize: 13, color: tab === k ? "#6fb1ff" : "#8494ad", borderBottom: `3px solid ${tab === k ? UI_BLUE : "transparent"}` }}>{l}</button>
         ))}
       </div>
-      {tab === "cut" && <CutTab games={games} setGames={setGames} fileFor={fileFor} gate={gate} wdPeople={wdPeople} schools={schools} openPlayer={openPlayer} schedules={schedules} onConnect={connect} onLink={linkFilm} onReview={startReview} />}
-      {tab === "players" && <PlayersTab games={games} fileFor={fileFor} gate={gate} wdPeople={wdPeople} filmPool={filmPool} who={who} setWho={setWho} review={review} />}
+      {tab === "cut" && <CutTab games={games} setGames={setGames} fileFor={fileFor} gate={gate} ready={access === "granted" ? 1 + Object.keys(handles).length : 0} wdPeople={wdPeople} schools={schools} openPlayer={openPlayer} schedules={schedules} onConnect={connect} onLink={linkFilm} onReview={startReview} />}
+      {tab === "players" && <PlayersTab games={games} fileFor={fileFor} gate={gate} ready={access === "granted" ? 1 + Object.keys(handles).length : 0} wdPeople={wdPeople} filmPool={filmPool} who={who} setWho={setWho} review={review} />}
       {tab === "import" && <ImportTab games={games} setGames={setGames} wdPeople={wdPeople} gamePaths={new Set(Object.keys(handles))} />}
     </div>
   );

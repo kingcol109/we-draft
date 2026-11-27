@@ -1,4 +1,5 @@
-import { answerAsk, parseVoice, soundKey } from "./voice";
+import { answerAsk, learnPhrase, nameScore, parseVoice, soundKey } from "./voice";
+import { forSide, sideOf } from "./data";
 
 const P = (key, name, team, jersey, focus = false) => ({ key, name, team, jersey, focus });
 const people = [
@@ -146,5 +147,71 @@ describe("voice: names stop at a label; spoken answers (2026-11-25)", () => {
     expect(answerAsk("skip it", opts, people)).toBe("skip");
     expect(answerAsk("yes", ["po"], people)).toBe("po");
     expect(answerAsk("great vision", opts, people)).toBe(null);
+  });
+});
+
+// "Say his name" after a click-tag (user, 2026-11-26).
+describe("learning a name", () => {
+  test("lead-ins and filler drop out; too long is no name", () => {
+    expect(learnPhrase("Chroma")).toBe("chroma");
+    expect(learnPhrase("his name is Ooze Mon Chroma")).toBe("ooze mon chroma");
+    expect(learnPhrase("that's Crow Ma")).toBe("crow ma");
+    expect(learnPhrase("um")).toBe(null);
+    expect(learnPhrase("he made a really nice cut on that one")).toBe(null);
+  });
+  test("a taught word works next time, and sound-alikes of it too", () => {
+    const aliases = { "crow ma": "k" };
+    expect(parseVoice("crow ma", people, aliases).add).toEqual(["k"]);
+    expect(parseVoice("crowma", people, aliases).add).toEqual(["k"]);
+  });
+  test("nameScore says when it already knows the name", () => {
+    expect(nameScore("kromah", people[0])).toBeGreaterThanOrEqual(0.97);
+    expect(nameScore("zzz", people[0])).toBeLessThan(0.5);
+  });
+});
+
+// One side of the ball per team (user, 2026-11-26): no two #50s.
+describe("rosters by side", () => {
+  test("offense keeps offense + specialists, defense keeps defense, ATH/unknown stay", () => {
+    expect(sideOf("OT")).toBe("offense");
+    expect(sideOf("EDGE")).toBe("defense");
+    expect(sideOf("ATH")).toBe(null);
+    const r = [{ key: 1, pos: "C" }, { key: 2, pos: "DT" }, { key: 3, pos: "ATH" }, { key: 4, pos: "P" }, { key: 5, pos: "" }];
+    expect(forSide(r, "offense").map((p) => p.key)).toEqual([1, 3, 4, 5]);
+    expect(forSide(r, "defense").map((p) => p.key)).toEqual([2, 3, 5]);
+  });
+});
+
+// "pin 50 cincinnati" resolves through parseVoice as "number 50 cincinnati" (user, 2026-11-26).
+describe("number + team", () => {
+  test("the team word picks the one wearing it", () => {
+    const ppl = [P("a", "Jake Ohio", "Cincinnati", 50), P("b", "Sam Other", "Houston", 50)];
+    const out = parseVoice("number 50 cincinnati", ppl, {});
+    expect(out.add).toEqual(["a"]);
+    expect(out.heard[0].how).toBe("number");
+    expect(parseVoice("fifty cincinnati", ppl, {}).add).toEqual(["a"]);
+  });
+});
+
+// One name said → one player (user, 2026-11-26: "Evan Tengesdahl neutral" also added Makhi Boone).
+describe("one name, one player", () => {
+  const ppl = [P("evan", "Evan Tengesdahl", "Cincinnati", 50, true), P("boone", "Makhi Boone", "West Virginia", 26), P("cas", "Carsten Casady", "West Virginia", 79)];
+  test("a misheard tail is the rest of his name, not a second player — and asks nothing", () => {
+    for (const said of ["evan ten guess doll neutral", "evan tangles dollar neutral", "evan ten boon neutral", "Evan Tang is all neutral"]) {
+      const out = parseVoice(said, ppl, {});
+      expect(out.add).toEqual(["evan"]);
+      expect(out.labels).toEqual({ evan: "Neutral" });
+      expect(out.heard.filter((h) => !h.key && h.options?.length)).toEqual([]);
+    }
+  });
+  test("two real names still tag two", () => {
+    expect(parseVoice("Tengesdahl and Boone", ppl, {}).add).toEqual(["evan", "boone"]);
+  });
+  test("a question isn't answered by a sentence that names someone else, or by 'to' / 'one'", () => {
+    expect(answerAsk("evan tengesdahl neutral", ["boone", "cas"], ppl)).toBe(null);
+    expect(answerAsk("go back to him one more time", ["boone", "cas"], ppl)).toBe(null);
+    expect(answerAsk("the second one", ["boone", "cas"], ppl)).toBe("cas");
+    expect(answerAsk("boone", ["boone", "cas"], ppl, true)).toEqual({ key: "boone", by: "name" });
+    expect(answerAsk("first", ["boone", "cas"], ppl, true)).toEqual({ key: "boone", by: "order" });
   });
 });

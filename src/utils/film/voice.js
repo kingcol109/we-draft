@@ -71,7 +71,9 @@ function scorePerson(phrase, p) {
   const k = keysOf(p);
   const joined = phrase.replace(/ /g, "");
   let best = 0;
-  [[k.full, 1], [k.last, 0.97], [k.lastJoined, 0.97], [k.first, 0.8]].forEach(([key, weight]) => {
+  // Words the user taught for him (aliases) count like his last name — and
+  // sound-alikes of them too, so "chroma" also catches "kroma" next time.
+  [[k.full, 1], [k.last, 0.97], [k.lastJoined, 0.97], [k.first, 0.8], ...(p.aliases || []).map((a) => [a, 0.97])].forEach(([key, weight]) => {
     if (!key) return;
     const kj = key.replace(/ /g, "");
     if (joined === kj) best = Math.max(best, weight);
@@ -152,12 +154,16 @@ export function parseVoice(text, people, aliases = {}, opts = {}) {
   const traits = {};
   let current = opts.current || null; // the last player named (labels / traits go to him)
   const tokens = wordsToNumbers(norm(text).split(" ").filter(Boolean));
+  people = withAliases(people, aliases);
   const add = [];
   const remove = [];
   const heard = [];
   const teamOf = (w) => people.find((p) => p.team && norm(p.team).split(" ").includes(w))?.team || null;
   let removing = false;
   const used = new Set();
+  let nameEnd = -1; // the token right after the last name taken
+  let lastTaken = null;
+  const absorbed = new Set(); // words taken as the rest of a misheard name
   const take = (key, phrase, how) => {
     heard.push({ phrase, key, how });
     if (!key) return;
@@ -194,7 +200,7 @@ export function parseVoice(text, people, aliases = {}, opts = {}) {
     }
     // A trait of the player being talked about — unless the words name a player better.
     const who = removing ? null : whose();
-    const free = i === 0 || used.has(i - 1) || FILLER.has(tokens[i - 1]) || LABEL_WORDS.some(([w]) => w.split(" ").pop() === tokens[i - 1]);
+    const free = i === 0 || (used.has(i - 1) && !absorbed.has(i - 1)) || FILLER.has(tokens[i - 1]) || LABEL_WORDS.some(([w]) => w.split(" ").pop() === tokens[i - 1]);
     const tr = who ? traitAt(tokens, i, traitsOf(who), free) : null;
     // A name: the longest run of words (up to 3) that names someone well —
     // the players being watched (focus) first; the rosters only if none of
@@ -216,7 +222,7 @@ export function parseVoice(text, people, aliases = {}, opts = {}) {
         // Two (or more) fit as well: a tie to ask about — unless a longer phrase did better.
         else if (a && a.s >= 0.8 && !tie) tie = { n, phrase, options: scored.filter((x) => a.s - x.s < 0.06).map((x) => x.p.key).slice(0, 6) };
       }
-      if (best) { delete best.s; tie = null; }
+      if (best) { best.weak = best.s < 0.9; delete best.s; tie = null; }
       return best;
     };
     let tie = null;
@@ -228,42 +234,98 @@ export function parseVoice(text, people, aliases = {}, opts = {}) {
       for (let j = i; j < i + tr.n; j += 1) used.add(j);
       traits[who] = [...new Set([...(traits[who] || []), tr.value])];
       heard.push({ phrase: tokens.slice(i, i + tr.n).join(" "), key: who, how: "trait", value: tr.value });
+    } else if (found && nameEnd === i && found.weak && lastTaken) {
+      // Right after a name, a loose sound-alike is the rest of THAT name being
+      // misheard ("evan … ten guess doll"), not a second player (user,
+      // 2026-11-26: one name said, two players added).
+      for (let j = i; j < i + found.n; j += 1) { used.add(j); absorbed.add(j); }
+      nameEnd = i + found.n;
+      heard.push({ phrase: found.phrase, key: lastTaken, how: "rest of the name" });
     } else if (found) {
       for (let j = i; j < i + found.n; j += 1) used.add(j);
       take(found.key, found.phrase, found.how);
+      lastTaken = removing ? null : found.key;
+      nameEnd = i + found.n;
     } else if (tie) {
       for (let j = i; j < i + tie.n; j += 1) used.add(j);
       heard.push({ phrase: tie.phrase, key: null, how: "which one?", options: tie.options });
+    } else if (nameEnd === i && lastTaken) {
+      // A word right after a name that names no one: more of that name, misheard.
+      used.add(i);
+      absorbed.add(i);
+      nameEnd = i + 1;
+      heard.push({ phrase: t, key: lastTaken, how: "rest of the name" });
     } else if (t.length >= 3) heard.push({ phrase: t, key: null, how: "no match", options: suggest(t, people, 3, 0.62) });
+  }
+  // Somebody was named: stray words aren't questions — no "who's that?" guesses
+  // for them (that's how a second, wrong player got added).
+  if (add.length || remove.length || Object.keys(labels).length || Object.keys(traits).length) {
+    heard.forEach((h) => { if (!h.key && h.how === "no match") { h.how = "ignored"; delete h.options; } });
   }
   return { add: [...new Set(add)], remove: [...new Set(remove)], labels, traits, heard, last: current };
 }
 
+// Each person gets the phrases taught for him (p.aliases) — scored like a name.
+function withAliases(people, aliases) {
+  const by = {};
+  Object.entries(aliases || {}).forEach(([ph, key]) => { (by[key] = by[key] || []).push(ph); });
+  return Object.keys(by).length ? people.map((p) => (by[p.key] ? { ...p, aliases: [...(p.aliases || []), ...by[p.key]] } : p)) : people;
+}
+
+// "Say his name" (user, 2026-11-26): after a click-tag, what was said → the
+// phrase to learn. Lead-ins ("his name is", "that's", "it's") and filler are
+// dropped; null when nothing's left or it's too long to be a name (> 3 words).
+// (norm turns "that's" into "that s".)
+const LEAD = /^(?:(?:his|the) name(?: s| is)?|that(?: s| is| was)?|it(?: s| is| was)|this is|he(?: s| is)|say)\s+/;
+export function learnPhrase(text) {
+  let t = norm(text).replace(/\s+/g, " ");
+  for (let i = 0; i < 2; i += 1) t = t.replace(LEAD, "");
+  const words = t.split(" ").filter((w) => w && !FILLER.has(w) && !LABEL_TOKENS.has(w));
+  return words.length && words.length <= 3 ? words.join(" ") : null;
+}
+/** How well a phrase already names this person (0–1) — 0.97+ means it knows it already (an exact last name). */
+export const nameScore = (phrase, p) => scorePerson(norm(phrase), p);
+
 // Corrections the user taught it (this browser): heard phrase → player key.
 const ALIAS_KEY = "wd.film.voiceAliases";
 export const loadAliases = () => { try { return JSON.parse(localStorage.getItem(ALIAS_KEY) || "{}"); } catch { return {}; } };
-export const teach = (phrase, key) => { const a = { ...loadAliases(), [norm(phrase)]: key }; try { localStorage.setItem(ALIAS_KEY, JSON.stringify(a)); } catch { /* private window */ } return a; };
+// Only real name-like words are learned (never "and", a label, a number).
+export const teachable = (phrase) => { const w = norm(phrase).split(" ").filter(Boolean); return w.length > 0 && w.length <= 3 && !/\d/.test(phrase) && w.some((x) => x.length >= 3 && !FILLER.has(x) && !LABEL_TOKENS.has(x)); };
+export const teach = (phrase, key) => { if (!teachable(phrase)) return loadAliases(); const a = { ...loadAliases(), [norm(phrase)]: key }; try { localStorage.setItem(ALIAS_KEY, JSON.stringify(a)); } catch { /* private window */ } return a; };
+/** Forget a learned word (the Learned names list). */
+export const forget = (phrase) => { const a = { ...loadAliases() }; delete a[phrase]; try { localStorage.setItem(ALIAS_KEY, JSON.stringify(a)); } catch { /* private window */ } return a; };
 
 // Answering "Did you mean …?" out loud (user, 2026-11-25: never "pick below").
-// options: [key] (asked in this order). → a key, "skip", or null (not an answer).
-const ORDINAL = { first: 0, one: 0, "1": 0, "1st": 0, second: 1, two: 1, to: 1, too: 1, "2": 1, "2nd": 1, third: 2, three: 2, "3": 2, "3rd": 2 };
-export function answerAsk(text, options, people) {
+// options: [key] (asked in this order). → a key, "skip", or null (not an answer
+// — then it's a new command). Strict (user, 2026-11-26): "first / second /
+// third" only as a short answer ("the second one"), never "to" / "one" inside a
+// sentence; a name only when it names THAT choice better than anyone else in
+// the game. detail: → { key, by: "name" | "number" | "order" | "yes" }.
+const ORDINAL = { first: 0, "1st": 0, second: 1, "2nd": 1, third: 2, "3rd": 2 };
+const ORDINAL_SHORT = { one: 0, "1": 0, two: 1, "2": 1, three: 2, "3": 2 };
+export function answerAsk(text, options, people, detail = false) {
+  const out = (key, by) => (detail && key && key !== "skip" ? { key, by } : key);
   const tokens = norm(text).split(" ").filter(Boolean);
   if (!tokens.length) return null;
   if (tokens.some((w) => ["skip", "nobody", "none", "neither", "cancel"].includes(w)) || /\b(never mind|no one|nevermind)\b/.test(norm(text))) return "skip";
-  if (options.length === 1 && tokens.some((w) => ["yes", "yeah", "yep", "yup", "correct", "right", "sure"].includes(w))) return options[0];
-  if (tokens.length === 1 && ["no", "nope"].includes(tokens[0])) return "skip";
-  const ord = tokens.map((w) => ORDINAL[w]).find((x) => x != null);
-  // A name (or part of one) of one of the choices.
+  if (tokens.length <= 2 && ["no", "nope"].includes(tokens[0])) return "skip";
+  if (options.length === 1 && tokens.length <= 3 && tokens.some((w) => ["yes", "yeah", "yep", "yup", "correct", "right", "sure"].includes(w))) return out(options[0], "yes");
   const choices = options.map((k) => people.find((p) => p.key === k)).filter(Boolean);
+  // A name: the best phrase for a choice — and nobody outside the choices fits it better.
   const phrases = [];
   for (let i = 0; i < tokens.length; i += 1) for (let n = 1; n <= 3 && i + n <= tokens.length; n += 1) phrases.push(tokens.slice(i, i + n).join(" "));
-  const best = phrases.flatMap((ph) => choices.map((p) => ({ key: p.key, s: scorePerson(ph, p) })))
-    .filter((x) => x.s >= 0.75).sort((a, b) => b.s - a.s)[0] || null;
-  if (best) return best.key;
-  // A jersey number.
-  const num = wordsToNumbers(["number", ...tokens]).find((w) => /^\d{1,2}$/.test(w));
-  if (num) { const p = choices.find((x) => String(x.jersey) === num); if (p) return p.key; }
-  if (ord != null && options[ord]) return options[ord];
+  const best = phrases.flatMap((ph) => choices.map((p) => ({ key: p.key, ph, s: scorePerson(ph, p) })))
+    .filter((x) => x.s >= 0.8).sort((a, b) => b.s - a.s)[0] || null;
+  if (best) {
+    const rival = people.filter((p) => !options.includes(p.key)).some((p) => scorePerson(best.ph, p) > best.s + 0.02);
+    return rival ? null : out(best.key, "name");
+  }
+  // A short answer only from here on ("number 12", "the second one", "two").
+  if (tokens.length > 4) return null;
+  const num = wordsToNumbers(["number", ...tokens.filter((w) => w !== "number")]).find((w) => /^\d{1,2}$/.test(w));
+  if (num) { const p = choices.find((x) => String(x.jersey) === num); if (p) return out(p.key, "number"); }
+  let ord = tokens.map((w) => ORDINAL[w]).find((x) => x != null);
+  if (ord == null && tokens.length <= 2) ord = tokens.map((w) => ORDINAL_SHORT[w]).find((x) => x != null);
+  if (ord != null && options[ord]) return out(options[ord], "order");
   return null;
 }

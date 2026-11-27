@@ -157,6 +157,19 @@ export function traitsFor(pos) {
   return traitCache[key];
 }
 
+// ── Which side of the ball a position plays (user, 2026-11-26) ──
+// Each film is one team's offense, so voice / roster lists only need that
+// team's offense and the other team's defense — no two #50s. Specialists ride
+// with the offense; ATH and unknown positions stay on both sides.
+const OFF_POS = /^(QB|RB|HB|TB|FB|WR|TE|OL|OT|OG|G|T|C|IOL|K|PK|P|LS)$/;
+const DEF_POS = /^(DL|DT|DE|NT|EDGE|LB|ILB|OLB|MLB|WLB|SLB|CB|S|FS|SS|DB|NB|STAR)$/;
+export function sideOf(pos) {
+  const x = String(pos || "").toUpperCase().trim();
+  return OFF_POS.test(x) ? "offense" : DEF_POS.test(x) ? "defense" : null;
+}
+/** A roster cut to one side of the ball (unknown / ATH kept). */
+export const forSide = (list, side) => (list || []).filter((p) => { const s0 = sideOf(p.pos); return !s0 || s0 === side; });
+
 // ── Rosters (CFBD) ──
 // A team's roster from cfbdPlayers (team = CFBD's school name). Cached per team.
 const rosterCache = {};
