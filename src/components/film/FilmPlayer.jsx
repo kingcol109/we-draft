@@ -37,7 +37,8 @@
 //   wheelWash   the wheel always zooms the wash (Players, user 2026-11-25) —
 //               marks are sized with ↑ / ↓ there, not the wheel
 //   onEnd       () — the play reached its end (instead of looping): play-through
-//   apiRef      → { seek, play, pause, toggle, time, duration, paused, step, nudge, setRate, rate, view, setDraft, draft, fullscreen }
+//   apiRef      → { seek, play, pause, toggle, time, duration, paused, step, nudge, setRate, rate, view, setDraft, draft, grab, fullscreen }
+//               grab(true / false): a held key is the camera — mouse moves pan, the wheel zooms
 // In wash mode, dragging pans and the wheel zooms a draft view; the parent
 // saves it as a keyframe (api.view()). F (or ⛶) toggles full screen.
 import { useEffect, useRef, useState } from "react";
@@ -135,6 +136,10 @@ export default function FilmPlayer({ file, range = null, spots = [], mode = "ori
   }, []);
   const draftRef = useRef(null);
   const drag = useRef(null);
+  // A key held as the camera (user, 2026-11-27: hold C to keyframe the wash):
+  // while it's on, the mouse moving over the film pans — no click — and the
+  // wheel zooms. It anchors on the first move.
+  const keyGrab = useRef(null);
   const live = useRef({});
   live.current = { range, spots, mode, washKeys, onTime, markTool, onMarkSize, editWash, autoPlay, quickMarks, onEnd, wheelWash };
   const ended = useRef(false);
@@ -302,6 +307,7 @@ export default function FilmPlayer({ file, range = null, spots = [], mode = "ori
       view: () => viewNow(),
       draft: () => draftRef.current,
       setDraft: (d) => { draftRef.current = d; },
+      grab: (on) => { keyGrab.current = on ? { x: null, y: null, view: viewNow() } : null; },
       fullscreen: toggleFull,
     };
   });
@@ -348,8 +354,9 @@ export default function FilmPlayer({ file, range = null, spots = [], mode = "ori
   };
   const onMove = (e) => {
     if (markDrag.current) { const p = norm(e); markDrag.current = { ...markDrag.current, x: clamp(p.x, 0, 1), y: clamp(p.y, 0, 1) }; return; }
-    const d = drag.current;
+    const d = drag.current || keyGrab.current;
     if (!d) return;
+    if (d.x == null) { Object.assign(d, { x: e.clientX, y: e.clientY, view: viewNow() }); return; }
     const b = canvasRef.current.getBoundingClientRect();
     const z = d.view.z || 1;
     draftRef.current = { ...d.view, x: clamp(d.view.x - (e.clientX - d.x) / b.width / z, 0, 1), y: clamp(d.view.y - (e.clientY - d.y) / b.height / z, 0, 1) };
@@ -379,19 +386,20 @@ export default function FilmPlayer({ file, range = null, spots = [], mode = "ori
     }
   };
   const onWheel = (e) => {
-    const held = !!drag.current; // a click held down + scroll = zoom (the wash), never the mark's size
+    const held = !!(drag.current || keyGrab.current); // a click (or C) held down + scroll = zoom (the wash), never the mark's size
     if (!held && !wheelWash && (markTool || (quickMarks && drawn.current[0] && !(mode === "wash" && editWash)))) { onMarkSize?.(e.deltaY < 0 ? 1.1 : 1 / 1.1); return; }
     if (!held && !wheelWash && (mode !== "wash" || !editWash)) return;
     const cur = viewNow();
     draftRef.current = { ...cur, z: clamp((cur.z || 1) * (e.deltaY < 0 ? 1.1 : 1 / 1.1), 1, 5) };
     // Panning from here on starts at the new zoom.
     if (drag.current) drag.current = { x: e.clientX, y: e.clientY, view: draftRef.current };
-    if (!held) onWashEdit?.();
+    if (keyGrab.current) keyGrab.current = { x: e.clientX, y: e.clientY, view: draftRef.current };
+    if (!held || keyGrab.current) onWashEdit?.();
   };
   useEffect(() => {
     const c = canvasRef.current;
     if (!c) return undefined;
-    const block = (e) => { const L = live.current; if ((L.mode === "wash" && L.editWash) || L.wheelWash || L.markTool || drag.current || (L.quickMarks && drawn.current[0])) e.preventDefault(); };
+    const block = (e) => { const L = live.current; if ((L.mode === "wash" && L.editWash) || L.wheelWash || L.markTool || drag.current || keyGrab.current || (L.quickMarks && drawn.current[0])) e.preventDefault(); };
     c.addEventListener("wheel", block, { passive: false });
     return () => c.removeEventListener("wheel", block);
   }, []);

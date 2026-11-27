@@ -21,9 +21,10 @@
 // browser (utils/film/library.js); only metadata is saved (utils/film/data.js,
 // admin-only). The Breakdown Studio will pull a player's plays from here.
 // Dark themed (user, 2026-11-25).
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import FilmPlayer, { MARK_SIZES } from "./FilmPlayer";
+import FilmPlayerCard, { BOX_CATS, colsOf } from "./FilmPlayerCard";
 import Timeline from "./Timeline";
 import ScrubRow, { useFastMotion } from "./Scrub";
 import { answerAsk, forget, learnPhrase, loadAliases, nameScore, norm, parseVoice, teach } from "../../utils/film/voice";
@@ -45,6 +46,8 @@ const mini = { ...btn(false), padding: "2px 8px", fontSize: 11 };
 const field = { minWidth: 0, border: "1px solid #334058", borderRadius: 8, padding: "6px 9px", fontSize: 13, boxSizing: "border-box", background: "#0f1726", color: "#e8edf5", colorScheme: "dark" };
 const head = { fontSize: 12, fontWeight: 900, textTransform: "uppercase", letterSpacing: 0.5, color: "#9fb0c8" };
 const box = { display: "grid", gridTemplateColumns: "minmax(0, 1fr)", minWidth: 0, gap: 8, padding: 12, border: "1px solid #263247", borderRadius: 10, background: "#141c2b" };
+// The panel style under another name, for where `box` is a game's box score.
+const panelBox = box;
 const chip = (on, color = UI_BLUE) => ({ border: `1px solid ${on ? color : "#334058"}`, background: on ? color : "#1b2538", color: on ? "#fff" : "#e8edf5", borderRadius: 999, padding: "3px 10px", fontSize: 12, fontWeight: 800, cursor: "pointer" });
 const ellipsis = (x = {}) => ({ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0, ...x });
 // Full screen (user, 2026-11-25: "should feel like full screen, not a zoom on
@@ -288,6 +291,10 @@ const boxNameKey = (n) => String(n || "").toLowerCase().replace(/[^a-z]/g, "");
 function RosterWindow({ game, rosters, focus, hot, onFocus, onDrop, onTag }) {
   const [q, setQ] = useState("");
   const [box, setBox] = useState(undefined);
+  // A name opens his card (user, 2026-11-27 — like the transfer portal's); the
+  // window shows the rosters or the game's full box score.
+  const [card, setCard] = useState(null);
+  const [view, setView] = useState("rosters");
   const [order, setOrder] = useState(() => { try { return localStorage.getItem("wd.film.rosterOrder") || "number"; } catch { return "number"; } });
   useEffect(() => { try { localStorage.setItem("wd.film.rosterOrder", order); } catch { /* private window */ } }, [order]);
   useEffect(() => { setBox(undefined); loadBox(game.cfbdGameId).then(setBox); }, [game.cfbdGameId]);
@@ -326,8 +333,21 @@ function RosterWindow({ game, rosters, focus, hot, onFocus, onDrop, onTag }) {
       const watch = g.team === "Other" ? [] : watchOf(others); const w = new Set(watch.map((x) => x.p.key));
       return { ...g, feat, watch, list: others.filter((p) => !w.has(p.key)) };
     });
-  const score = box?.teams?.length === 2 ? box.teams.map((t) => `${t.name} ${t.points ?? ""}`).join(" · ") : "";
   const jerseyOf = (key) => rosters.find((p) => p.key === key)?.jersey;
+  // A box score line -> his person (every box player is in `everyone`: rosters + extra).
+  const personOfBox = useMemo(() => {
+    const byId = new Map(everyone.filter((p) => p.cfbd).map((p) => [String(p.cfbd), p]));
+    const byName = new Map(everyone.map((p) => [`${teamKey(p.team)}|${boxNameKey(p.name)}`, p]));
+    return (pl, teamName) => byId.get(String(pl.id)) || byName.get(`${teamKey(teamName)}|${boxNameKey(pl.name)}`) || null;
+  }, [everyone]);
+  const nameBtn = (p, label, style = {}) => (
+    <button type="button" onClick={() => setCard(p)} title="Player card"
+      style={{ ...ellipsis({ fontSize: 14, fontWeight: 800 }), background: "none", border: "none", padding: 0, margin: 0, color: "inherit", cursor: "pointer", fontFamily: "inherit", textAlign: "left", textDecoration: "none", ...style }}
+      onMouseEnter={(ev) => { ev.currentTarget.style.textDecoration = "underline"; }} onMouseLeave={(ev) => { ev.currentTarget.style.textDecoration = "none"; }}>{label}</button>
+  );
+  // The final: away first, home second (neutral: as CFBD lists them); the winner bright.
+  const final = box?.teams?.length === 2 ? [...box.teams].sort((a, b) => (a.side === "home") - (b.side === "home")) : null;
+  const maxPts = final ? Math.max(...final.map((t) => Number(t.points) || 0)) : 0;
   const row = (p, why = null) => {
     const fi = focus.findIndex((f) => f.key === p.key);
     const onHot = hot?.playerIds?.includes(p.key);
@@ -337,7 +357,7 @@ function RosterWindow({ game, rosters, focus, hot, onFocus, onDrop, onTag }) {
       <div key={p.key} style={{ display: "grid", gridTemplateColumns: "44px minmax(0, 1fr) auto auto", gap: 8, alignItems: "center", padding: "5px 8px", borderRadius: 8, background: fi >= 0 ? "#1c3355" : "#141c2b", border: `1px solid ${fi >= 0 ? UI_BLUE : "#263247"}`, opacity: box && !st && order === "played" ? 0.6 : 1 }}>
         <span style={{ fontSize: 18, fontWeight: 900, color: UI_GOLD, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{p.jersey != null ? `#${p.jersey}` : "—"}</span>
         <span style={{ display: "grid", minWidth: 0 }}>
-          <span style={ellipsis({ fontSize: 14, fontWeight: 800 })}>{p.name} <span style={{ fontSize: 12, color: "#8494ad" }}>{p.pos}</span></span>
+          <span style={ellipsis({ fontSize: 14, fontWeight: 800 })}>{nameBtn(p, p.name, { display: "inline" })} <span style={{ fontSize: 12, color: "#8494ad" }}>{p.pos}</span></span>
           {why && <span style={ellipsis({ fontSize: 11, fontWeight: 900, color: UI_GOLD })} title={why.join(" · ")}>👀 {why.join(" · ")}</span>}
           {line && <span style={ellipsis({ fontSize: 11, fontWeight: 800, color: "#7fd1a0" })} title={line}>{line}</span>}
         </span>
@@ -352,10 +372,25 @@ function RosterWindow({ game, rosters, focus, hot, onFocus, onDrop, onTag }) {
     <div style={{ display: "grid", gap: 12, padding: 16 }}>
       <div style={{ display: "grid", gap: 2 }}>
         <div style={{ fontSize: 18, fontWeight: 900 }}>{gameTitle(game)}</div>
-        <div style={{ fontSize: 12, fontWeight: 800, color: "#9fb0c8" }}>{box === undefined ? "Loading the box score…" : box ? `Box score${score ? ` · ${score}` : ""} — stat lines under each player` : game.cfbdGameId ? "No box score saved for this game yet." : "Put this film on a game to see its box score."}</div>
+        {final ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 4 }}>
+            {final.map((t, i) => (
+              <Fragment key={t.name}>
+                {i === 1 && <span style={{ fontSize: 14, fontWeight: 900, color: "#8494ad" }}>{final[1].side === "home" ? "@" : "vs"}</span>}
+                <span style={{ display: "inline-flex", alignItems: "baseline", gap: 8, padding: "4px 10px", borderRadius: 8, background: "#141c2b", border: "1px solid #263247" }}>
+                  <span style={{ fontSize: 14, fontWeight: 900, color: Number(t.points) === maxPts ? "#fff" : "#9fb0c8" }}>{t.name}</span>
+                  <span style={{ fontSize: 24, fontWeight: 900, color: Number(t.points) === maxPts ? UI_GOLD : "#9fb0c8", fontVariantNumeric: "tabular-nums" }}>{t.points ?? "—"}</span>
+                </span>
+              </Fragment>
+            ))}
+            <span style={{ fontSize: 11, fontWeight: 900, color: "#8494ad", letterSpacing: 0.5 }}>FINAL</span>
+          </div>
+        ) : (
+          <div style={{ fontSize: 12, fontWeight: 800, color: "#9fb0c8" }}>{box === undefined ? "Loading the box score…" : game.cfbdGameId ? "No box score saved for this game yet." : "Put this film on a game to see its box score."}</div>
+        )}
         <div style={{ fontSize: 12, fontWeight: 800, color: hot ? "#4ade80" : "#8494ad" }}>{hot ? `Hot play ${clock(hot.in)}–${clock(hot.out)} · ${hot.playerIds?.length || 0} tagged` : "No hot play — cut one in the main window."}</div>
       </div>
-      <div style={box}>
+      <div style={panelBox}>
         <div style={head}>Featured · Shift+1–9 on a hot play</div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {focus.map((p, i) => <span key={p.key} style={{ ...chip(false), display: "inline-flex", gap: 6 }}><b style={{ color: UI_GOLD }}>{i + 1}</b>{jerseyOf(p.key) != null ? `#${jerseyOf(p.key)} ` : ""}{p.name}<button type="button" onClick={() => onDrop(p.key)} style={{ border: "none", background: "none", cursor: "pointer", color: "#ff7a6b", padding: 0 }}>✕</button></span>)}
@@ -363,12 +398,49 @@ function RosterWindow({ game, rosters, focus, hot, onFocus, onDrop, onTag }) {
         </div>
       </div>
       <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        <button type="button" style={chip(view === "rosters", UI_GOLD)} onClick={() => setView("rosters")}>Rosters</button>
+        <button type="button" style={{ ...chip(view === "box", UI_GOLD), opacity: box ? 1 : 0.45 }} disabled={!box} onClick={() => setView("box")} title={box ? "Every stat from the game" : "No box score for this game"}>📊 Box score</button>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a number or name…" style={{ ...field, fontSize: 15, padding: "8px 12px", flex: 1 }} />
-        <button type="button" style={chip(order === "number")} onClick={() => setOrder("number")}>By number</button>
-        <button type="button" style={chip(order === "played")} onClick={() => setOrder("played")}>Played first</button>
+        {view === "rosters" && <button type="button" style={chip(order === "number")} onClick={() => setOrder("number")}>By number</button>}
+        {view === "rosters" && <button type="button" style={chip(order === "played")} onClick={() => setOrder("played")}>Played first</button>}
       </div>
-      {!rosters.length && <div style={{ fontSize: 13, color: "#8494ad", fontWeight: 700 }}>Loading the rosters… (set the game&apos;s teams if this stays empty)</div>}
-      <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(2, groups.length || 1)}, minmax(0, 1fr))`, gap: 12, alignItems: "start" }}>
+      {view === "box" && box && (
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(2, box.teams.length || 1)}, minmax(0, 1fr))`, gap: 12, alignItems: "start" }}>
+          {(final || box.teams).map((t) => (
+            <div key={t.name} style={{ display: "grid", gap: 10, minWidth: 0 }}>
+              <div style={{ ...head, color: UI_GOLD }}>{t.name} · {t.points ?? "—"}</div>
+              {BOX_CATS.map(([k, label, base, sortBy]) => {
+                const lines = t.players.filter((pl) => pl.stats?.[k]).map((pl) => ({ pl, p: personOfBox(pl, t.name), x: pl.stats[k] }))
+                  .filter(({ pl, p }) => !s || match(p || { name: pl.name, pos: "", jersey: null }))
+                  .sort((a, b) => (Number(b.x[sortBy]) || 0) - (Number(a.x[sortBy]) || 0));
+                if (!lines.length) return null;
+                const cols = colsOf(base, lines.map((l) => l.x));
+                return (
+                  <div key={k} style={{ ...panelBox, padding: 8, overflowX: "auto" }}>
+                    <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12, fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>
+                      <thead><tr>
+                        <th style={{ textAlign: "left", padding: "2px 6px 4px 0", fontSize: 11, fontWeight: 900, color: UI_GOLD, whiteSpace: "nowrap" }}>{label}</th>
+                        {cols.map((c) => <th key={c} style={{ textAlign: "right", padding: "2px 6px 4px", fontSize: 10, fontWeight: 900, color: "#8494ad", whiteSpace: "nowrap" }}>{c}</th>)}
+                      </tr></thead>
+                      <tbody>{lines.map(({ pl, p, x }) => (
+                        <tr key={pl.id || pl.name} style={{ borderTop: "1px solid #263247" }}>
+                          <td style={{ padding: "4px 6px 4px 0", maxWidth: 170 }}>
+                            <span style={{ color: UI_GOLD, marginRight: 6 }}>{p?.jersey != null ? `#${p.jersey}` : ""}</span>
+                            {p ? nameBtn(p, pl.name, { fontSize: 12, display: "inline" }) : pl.name}
+                          </td>
+                          {cols.map((c) => <td key={c} style={{ textAlign: "right", padding: "4px 6px", color: "#e8edf5", whiteSpace: "nowrap" }}>{x[c] ?? "—"}</td>)}
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      )}
+      {view === "rosters" && !rosters.length && <div style={{ fontSize: 13, color: "#8494ad", fontWeight: 700 }}>Loading the rosters… (set the game&apos;s teams if this stays empty)</div>}
+      {view === "rosters" && <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(2, groups.length || 1)}, minmax(0, 1fr))`, gap: 12, alignItems: "start" }}>
         {groups.map((g) => (
           <div key={g.team} style={{ display: "grid", gap: 4 }}>
             <div style={{ ...head, color: UI_GOLD }}>{g.team}{g.side ? ` · ${g.side}` : ""} · {g.list.length + g.watch.length + g.feat.length}</div>
@@ -387,7 +459,8 @@ function RosterWindow({ game, rosters, focus, hot, onFocus, onDrop, onTag }) {
             {g.list.filter(match).map((p) => row(p))}
           </div>
         ))}
-      </div>
+      </div>}
+      {card && <FilmPlayerCard p={card} jersey={card.jersey ?? jerseyOf(card.key)} stats={statsOf(card)?.stats} onClose={() => setCard(null)} />}
     </div>
   );
 }
@@ -1323,7 +1396,7 @@ function PlayersTab({ games, fileFor, gate, ready, wdPeople, filmPool, who, setW
   const [voiceOn, setVoiceOn] = useState(() => { try { return localStorage.getItem("wd.film.voicePlayers") === "on"; } catch { return false; } });
   useEffect(() => { try { localStorage.setItem("wd.film.voicePlayers", voiceOn ? "on" : "off"); } catch { /* private window */ } }, [voiceOn]);
   const [interim, setInterim] = useState("");
-  const [washHeld, setWashHeld] = useState(false); // the mouse held on the film, setting the wash
+  const [washHeld, setWashHeld] = useState(false); // C held: keying the wash
   const [said, setSaid] = useState(null); // { text, who, at } — the last thing put on a clip
   const vLive = useRef({});
   vLive.current = { setTag, cur, curTag, who, traitList: [...traits.position, ...traits.generic], voiceOn };
@@ -1354,7 +1427,7 @@ function PlayersTab({ games, fileFor, gate, ready, wdPeople, filmPool, who, setW
   useEffect(() => { if (!said) return undefined; const id = setTimeout(() => setSaid((x) => (x === said ? { ...x } : x)), 3100); return () => clearTimeout(id); }, [said]);
   // On the film, always: what this play is tagged with — or that it has none.
   const voiceOverlay = watchAll ? null : washHeld ? (
-    <div style={{ padding: "8px 12px", borderRadius: 10, background: "rgba(8,12,22,0.85)", border: "2px solid #ff3b30", color: "#ff6b5b", fontWeight: 900, fontSize: 14, fontFamily: "Arial, sans-serif" }}>● SETTING THE WASH — drag to pan · scroll to zoom · let go to save</div>
+    <div style={{ padding: "8px 12px", borderRadius: 10, background: "rgba(8,12,22,0.85)", border: "2px solid #ff3b30", color: "#ff6b5b", fontWeight: 900, fontSize: 14, fontFamily: "Arial, sans-serif" }}>● KEYING THE WASH — move the mouse to pan · scroll to zoom · let go of C to save</div>
   ) : (
     <div style={{ display: "grid", gap: 3, padding: "7px 11px", borderRadius: 10, background: "rgba(8,12,22,0.78)", border: `2px solid ${listening ? "#ff6b5b" : "#334058"}`, fontFamily: "Arial, sans-serif" }}>
       {who && <div style={{ fontSize: 14, fontWeight: 900, color: "#fff" }}>{whoJersey != null ? `#${whoJersey} ` : ""}{who.name}{who.pos ? <span style={{ color: "#9fb0c8" }}> · {who.pos}</span> : null}</div>}
@@ -1375,9 +1448,12 @@ function PlayersTab({ games, fileFor, gate, ready, wdPeople, filmPool, who, setW
   const motion = useFastMotion(api, 2);
   const taps = useRef(null); // A/D/←/→ — a double tap is the last / next play
   useEffect(() => {
-    const up = (e) => { if (e.key === "ArrowLeft" || e.key === "ArrowRight" || /^[aAdD]$/.test(e.key)) motion.end(); };
+    const up = (e) => {
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight" || /^[aAdD]$/.test(e.key)) motion.end();
+      if ((e.key === "c" || e.key === "C") && holdRef.current) { api.current?.grab?.(false); washHold(false); }
+    };
     window.addEventListener("keyup", up);
-    const lost = () => { motion.end(); if (holdRef.current) washHold(false); };
+    const lost = () => { motion.end(); if (holdRef.current) { api.current?.grab?.(false); washHold(false); } };
     window.addEventListener("blur", lost);
     return () => { window.removeEventListener("keyup", up); window.removeEventListener("blur", lost); };
   });
@@ -1460,11 +1536,13 @@ function PlayersTab({ games, fileFor, gate, ready, wdPeople, filmPool, who, setW
   useEffect(() => { const on = () => { if (!document.fullscreenElement) setWatchAll(false); }; document.addEventListener("fullscreenchange", on); return () => document.removeEventListener("fullscreenchange", on); }, []);
   // A player just picked: his first play opens.
   useEffect(() => { if (autoOpen.current && plays && who) { autoOpen.current = false; if (list.length) open(list[0]); } }, [plays]); // eslint-disable-line react-hooks/exhaustive-deps
-  // Setting the wash with the mouse (user, 2026-11-25) — no editor needed:
-  // HOLD the click on the film and drag = pan, scroll = zoom. Paused: one
-  // keyframe there. Playing: keyed as it goes (every ~0.1s it moves, every
-  // 0.5s it holds still). Let go and it's saved — in place of the old keys over
-  // that stretch — and the washed version shows. A plain click saves nothing.
+  // Setting the wash (user, 2026-11-27: "holding C actually keyframes, both the
+  // zoom and camera location") — no editor needed: HOLD C and the mouse is the
+  // camera — move = pan (no click), scroll = zoom. Paused: one keyframe there.
+  // Playing: keyed as it goes (every ~0.1s it moves, every 0.5s it holds
+  // still). Let go of C and it's saved — in place of the old keys over that
+  // stretch — and the washed version shows. A tap of C keys a framing set up
+  // beforehand (scroll / click-drag only frame it, unsaved).
   const holdRef = useRef(null);
   const sameView = (a, b) => Math.abs(a.x - b.x) <= 0.002 && Math.abs(a.y - b.y) <= 0.002 && Math.abs(a.z - b.z) <= 0.01;
   const washHold = (down) => {
@@ -1517,6 +1595,21 @@ function PlayersTab({ games, fileFor, gate, ready, wdPeople, filmPool, who, setW
     a.setDraft(null);
     vLive.current.setTag({ wash: { keys } });
   };
+  // Reset the wash (user, 2026-11-27): this play's wash for him is removed —
+  // and any framing not yet keyed — back to the full-size film. Click twice.
+  const [armedReset, setArmedReset] = useState(false);
+  const armedResetTimer = useRef(null);
+  useEffect(() => { setArmedReset(false); }, [cur?.id, who?.key]);
+  useEffect(() => () => clearTimeout(armedResetTimer.current), []);
+  const resetWash = () => {
+    if (!armedReset) { setArmedReset(true); clearTimeout(armedResetTimer.current); armedResetTimer.current = setTimeout(() => setArmedReset(false), 3000); return; }
+    clearTimeout(armedResetTimer.current);
+    setArmedReset(false);
+    api.current?.setDraft(null);
+    vLive.current.setTag({ wash: null });
+    setView("original");
+    setMsg("Wash reset — this play is back to the full-size film.");
+  };
   // The wash editor's scroll (no click held): saved a moment after the wheel stops.
   const editSave = useRef(null);
   // Scrolling anywhere on the film (user, 2026-11-25): straight into the wash —
@@ -1537,7 +1630,7 @@ function PlayersTab({ games, fileFor, gate, ready, wdPeople, filmPool, who, setW
       else if (k === "0") setTag({ label: "" });
       else if (k === "n" || k === "N") go(1); else if (k === "p" || k === "P") go(-1);
       // ←/→ and A/D (user, 2026-11-25: WASD like the arrows): hold = fast
-      // motion; a double tap = the last / next play. ↑/↓ and W/S: next / last play.
+      // motion; a double tap = the last / next play (N / P too).
       else if (k === "ArrowLeft" || k === "ArrowRight" || /^[aAdD]$/.test(k)) {
         e.preventDefault();
         if (e.repeat) return;
@@ -1548,11 +1641,13 @@ function PlayersTab({ games, fileFor, gate, ready, wdPeople, filmPool, who, setW
         if (taps.current.n >= 2) { motion.end(); go(dir); } else motion.start(dir); // every tap after the first: another play
       }
       // ↑ / ↓: the circle / arrow bigger / smaller (user, 2026-11-25 — the wheel washes now).
-      else if (k === "ArrowUp" || k === "ArrowDown") { e.preventDefault(); if (curTag.spot) sizeMark(k === "ArrowUp" ? 1.08 : 1 / 1.08); }
-      else if (k === "w" || k === "W") go(1); else if (k === "s" || k === "S") go(-1);
+      // W / S size it too (user, 2026-11-27) — they used to be next / last play.
+      else if (k === "ArrowUp" || k === "ArrowDown" || /^[wWsS]$/.test(k)) { e.preventDefault(); if (curTag.spot) sizeMark(k === "ArrowUp" || k === "w" || k === "W" ? 1.08 : 1 / 1.08); }
       // Q: voice on / off (user, 2026-11-25) — say a label and traits for this clip.
       else if (k === "q" || k === "Q" || k === "m" || k === "M") { if (!e.repeat) setVoiceOn((x) => !x); }
-      else if (k === "c" || k === "C") pickTool("circle"); else if (k === "t" || k === "T") pickTool("arrow");
+      // C held = the camera, keyframed (user, 2026-11-27); the circle tool moved to O.
+      else if (k === "c" || k === "C") { if (!e.repeat && !watchAll && !holdRef.current) { e.preventDefault(); setTool(null); a?.grab?.(true); washHold(true); if (holdRef.current) setWashHeld(true); } }
+      else if (k === "o" || k === "O") pickTool("circle"); else if (k === "t" || k === "T") pickTool("arrow");
       // R: the play again from the top (user, 2026-11-26).
       else if (k === "r" || k === "R") { if (curRange) { a?.seek(curRange.in); a?.play(); } }
       else if (k === "e" || k === "E") { setTool(null); setWashing((x) => !x); }
@@ -1656,7 +1751,7 @@ function PlayersTab({ games, fileFor, gate, ready, wdPeople, filmPool, who, setW
           <FilmPlayer file={file} gate={gate} stageRef={stageRef} fitHeight="calc(100vh - 230px)" overlay={voiceOverlay} center={voiceCenter} autoPlay={watchAll || (!washing && !tool)} range={curRange} apiRef={api} mode={showWash ? "wash" : "original"} editWash={washing} washKeys={washKeys} onTime={(x) => setT(x)}
             spots={curTag.spot ? [{ ...markOf(curTag), color: UI_GOLD }] : []}
             markTool={watchAll ? null : tool} onMark={placeMark} onMarkSize={sizeMark} quickMarks={!watchAll} onQuickMark={quickMark} onMarkMove={moveMark}
-            liveWash={!tool && !watchAll} wheelWash={!watchAll} onWashHold={washHold} onWashEdit={washEdited} onEnd={watchAll ? () => go(1) : undefined}
+            liveWash={!tool && !watchAll} wheelWash={!watchAll} onWashEdit={washEdited} onEnd={watchAll ? () => go(1) : undefined}
             fsBar={watchAll ? null : (
               <>
                 <button type="button" style={mini} onClick={() => go(-1)}>← P</button>
@@ -1664,7 +1759,7 @@ function PlayersTab({ games, fileFor, gate, ready, wdPeople, filmPool, who, setW
                 <button type="button" style={mini} onClick={() => go(1)}>N →</button>
                 <span style={{ fontSize: 13, fontWeight: 900, color: "#e8edf5", fontVariantNumeric: "tabular-nums" }}>{clock(t - cur.in)} / {clock(cur.out - cur.in)}</span>
                 {LABELS.map((l, i) => <button key={l} type="button" style={chip(curTag.label === l, LABEL_COLORS[l])} onClick={() => setTag({ label: curTag.label === l ? "" : l })}>{i + 1} · {l}</button>)}
-                <button type="button" style={btn(tool === "circle")} onClick={() => pickTool("circle")}>◯ C</button>
+                <button type="button" style={btn(tool === "circle")} onClick={() => pickTool("circle")}>◯ O</button>
                 <button type="button" style={btn(tool === "arrow")} onClick={() => pickTool("arrow")}>↓ T</button>
                 <button type="button" style={mini} onClick={() => { api.current?.seek(curRange.in); api.current?.play(); }}>↺ R</button>
                 <button type="button" style={btn(view === "washed")} onClick={() => setView((x) => (x === "washed" ? "original" : "washed"))}>{view === "washed" ? "Washed" : "Original"} V</button>
@@ -1684,6 +1779,10 @@ function PlayersTab({ games, fileFor, gate, ready, wdPeople, filmPool, who, setW
             <button type="button" style={btn(view === "original")} onClick={() => setView("original")}>Original</button>
             <button type="button" style={btn(view === "washed")} onClick={() => setView("washed")} title={washKeys.length ? "" : "No washed version yet — shows the original"}>Washed{washKeys.length ? "" : " (none yet)"}</button>
             <button type="button" style={btn(washing)} onClick={() => { setWashing((x) => !x); setTool(null); }}>Wash editor (E)</button>
+            {(washKeys.length > 0 || armedReset) && (
+              <button type="button" onClick={resetWash} title="Remove this play's wash for him — back to the full-size film (click twice)"
+                style={{ ...btn(armedReset), ...(armedReset ? { background: "#b42318", borderColor: "#b42318", color: "#fff" } : { color: "#ff7a6b" }) }}>{armedReset ? "Click again to reset" : "↺ Reset wash"}</button>
+            )}
             <button type="button" style={{ ...btn(true), background: UI_GOLD, borderColor: UI_GOLD, color: "#00264d" }} onClick={startWatch} disabled={!list.length} title="Every play in the list, back to back, full screen — just the film (Esc to stop)">▶ Watch all {list.length}</button>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", padding: "6px 10px", borderRadius: 8, background: listening ? "#3a2a0c" : "#141c2b", border: "1px solid #263247" }}>
@@ -1718,9 +1817,9 @@ function PlayersTab({ games, fileFor, gate, ready, wdPeople, filmPool, who, setW
             </div>
             <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
               <span style={head}>Mark</span>
-              <button type="button" style={btn(tool === "circle")} onClick={() => pickTool("circle")}>◯ Circle (C)</button>
+              <button type="button" style={btn(tool === "circle")} onClick={() => pickTool("circle")}>◯ Circle (O)</button>
               <button type="button" style={btn(tool === "arrow")} onClick={() => pickTool("arrow")}>↓ Arrow (T)</button>
-              {tool ? <span style={{ fontSize: 12, fontWeight: 800, color: "#f6c66b" }}>Click {tool === "arrow" ? "where the tip goes" : "his middle"} · ↑/↓ to size · Esc when done</span> : <span style={{ fontSize: 11, fontWeight: 700, color: "#8494ad" }}>or double-click the film = circle · triple = arrow · ↑/↓ size</span>}
+              {tool ? <span style={{ fontSize: 12, fontWeight: 800, color: "#f6c66b" }}>Click {tool === "arrow" ? "where the tip goes" : "his middle"} · W/S or ↑/↓ to size · Esc when done</span> : <span style={{ fontSize: 11, fontWeight: 700, color: "#8494ad" }}>or double-click the film = circle · triple = arrow · W/S or ↑/↓ size</span>}
               {curTag.spot && <button type="button" style={mini} onClick={() => api.current?.seek(curTag.spot.t)}>Jump to it</button>}
               {curTag.spot && <button type="button" style={{ ...mini, color: "#ff7a6b" }} onClick={() => setTag({ spot: null })}>Remove</button>}
               {(curTag.legacy?.animated || curTag.legacy?.offFrame) && <span style={{ fontSize: 11, fontWeight: 700, color: "#f6c66b" }}>{curTag.legacy.animated ? "The Premiere cut was animated (keyframed motion) — check the mark." : "The Premiere mark sat outside the film — check it."}</span>}
@@ -1738,12 +1837,12 @@ function PlayersTab({ games, fileFor, gate, ready, wdPeople, filmPool, who, setW
               </div>
             </div>
             <input key={`${cur.id}-note`} defaultValue={curTag.note || ""} onBlur={(e) => e.target.value !== (curTag.note || "") && setTag({ note: e.target.value })} placeholder="Note (optional)…" style={{ ...field, width: "100%" }} />
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#8494ad" }}>Keys: 1–6 label · 0 clear · Q voice · hold A/D or ←/→ fast motion (double tap: last / next play) · W/S next / last play · ↑/↓ mark size · C circle · T arrow · R restart · scroll = zoom (a keyframe only while you hold the click) · hold the click + drag / scroll = keyframes · E wash editor · V original / washed · F full screen · , . frame · Space play · Esc</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#8494ad" }}>Keys: 1–6 label · 0 clear · Q voice · hold A/D or ←/→ fast motion (double tap: last / next play) · N/P next / last play · W/S or ↑/↓ mark size · O circle · T arrow · R restart · hold C = keyframes (move the mouse = pan, scroll = zoom) · scroll / click-drag = frame it (tap C to key it) · E wash editor · V original / washed · F full screen · , . frame · Space play · Esc</div>
           </div>
           {washing && (
             <div style={{ ...box, borderColor: UI_BLUE }}>
               <div style={head}>Wash editor · a zoomed-in version of this play</div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "#9fb0c8" }}>Scroll to zoom, drag to pan — it saves itself (a keyframe where you are). While the play runs, hold the click and move: every camera move is keyframed as it goes. Between keyframes it moves smoothly. This is a washed VERSION — the play itself stays full size and is never changed. Watch it with Washed; the Studio uses it.</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#9fb0c8" }}>Scroll to zoom, drag to pan — it saves itself (a keyframe where you are). Or hold C: the mouse is the camera (move = pan, scroll = zoom) and while the play runs every camera move is keyframed as it goes; let go of C to save. Between keyframes it moves smoothly. This is a washed VERSION — the play itself stays full size and is never changed. Watch it with Washed; the Studio uses it.</div>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                 <button type="button" style={btn(true)} onClick={addKey}>+ Keyframe at {clock(t - cur.in)}</button>
                 <span style={{ fontSize: 12, fontWeight: 900, color: washHeld ? "#ff6b5b" : "#8494ad", alignSelf: "center" }}>{washHeld ? "● Keying…" : "Saves itself"}</span>
