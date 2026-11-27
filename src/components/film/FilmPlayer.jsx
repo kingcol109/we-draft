@@ -37,11 +37,16 @@
 //   wheelWash   the wheel always zooms the wash (Players, user 2026-11-25) —
 //               marks are sized with ↑ / ↓ there, not the wheel
 //   onEnd       () — the play reached its end (instead of looping): play-through
-//   apiRef      → { seek, play, pause, toggle, time, duration, paused, step, nudge, setRate, rate, view, setDraft, draft, grab, fullscreen }
+//   inkRef      ref → { strokes, cur } — the iPad's drawing (✏️ Draw), drawn over
+//               the film each frame (normalized to the frame); nothing saved
+//   hud         false: no "WASHED · 2.00×" stamp on the film (the Viewer)
+//   bare        no ⛶ button on the film (the Viewer's YouTube frame, user 2026-11-27)
+//   apiRef      → { seek, play, pause, toggle, time, duration, paused, step, nudge, setRate, rate, view, setDraft, draft, grab, fullscreen, canvas }
 //               grab(true / false): a held key is the camera — mouse moves pan, the wheel zooms
 // In wash mode, dragging pans and the wheel zooms a draft view; the parent
 // saves it as a keyframe (api.view()). F (or ⛶) toggles full screen.
 import { useEffect, useRef, useState } from "react";
+import { drawInk } from "../../utils/film/ink";
 
 const CW = 1280;
 const CH = 720;
@@ -116,7 +121,7 @@ export function drawMark(ctx, kind, px, py, s, color) {
   ctx.restore();
 }
 
-export default function FilmPlayer({ file, range = null, spots = [], mode = "original", washKeys = [], editWash = true, markTool = null, onMark, onMarkSize, onTime, fsBar = null, overlay = null, center = null, sides = null, fitHeight = null, gate = null, stageRef = null, autoPlay = false, quickMarks = false, onQuickMark, onMarkMove, liveWash = false, wheelWash = false, onWashHold, onWashEdit, onEnd, apiRef, style }) {
+export default function FilmPlayer({ file, range = null, spots = [], mode = "original", washKeys = [], editWash = true, markTool = null, onMark, onMarkSize, onTime, fsBar = null, overlay = null, center = null, sides = null, fitHeight = null, gate = null, stageRef = null, autoPlay = false, quickMarks = false, onQuickMark, onMarkMove, liveWash = false, wheelWash = false, onWashHold, onWashEdit, onEnd, apiRef, inkRef = null, bare = false, hud = true, style }) {
   const wrapRef = useRef(null);
   const canvasRef = useRef(null);
   const videoRef = useRef(null);
@@ -141,7 +146,7 @@ export default function FilmPlayer({ file, range = null, spots = [], mode = "ori
   // wheel zooms. It anchors on the first move.
   const keyGrab = useRef(null);
   const live = useRef({});
-  live.current = { range, spots, mode, washKeys, onTime, markTool, onMarkSize, editWash, autoPlay, quickMarks, onEnd, wheelWash };
+  live.current = { range, spots, mode, washKeys, onTime, markTool, onMarkSize, editWash, autoPlay, quickMarks, onEnd, wheelWash, hud };
   const ended = useRef(false);
   // Moving a mark: where the hand has it (drawn there, saved on release).
   const markDrag = useRef(null);
@@ -159,7 +164,11 @@ export default function FilmPlayer({ file, range = null, spots = [], mode = "ori
     const v = videoRef.current;
     if (v && range && v.readyState >= 1) { v.currentTime = range.in; if (autoPlay) v.play().catch(() => {}); }
   }, [range?.in, range?.out, url]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { draftRef.current = null; ended.current = false; }, [range?.in, mode]);
+  // A new play drops the unsaved framing; so does going back to the original.
+  // Into the wash keeps it (user, 2026-11-27: a zoom opens the wash editor —
+  // that first zoom must survive the switch).
+  useEffect(() => { draftRef.current = null; ended.current = false; }, [range?.in]);
+  useEffect(() => { if (mode === "original") draftRef.current = null; }, [mode]);
 
   // Full screen: the parent's whole tab when it gives a stageRef (so every
   // edit control stays on screen), else the player + the parent's bar. F toggles it.
@@ -174,6 +183,7 @@ export default function FilmPlayer({ file, range = null, spots = [], mode = "ori
       setStage(!!document.fullscreenElement && document.fullscreenElement === stageRef?.current);
     };
     document.addEventListener("fullscreenchange", on);
+    on(); // mounted while already full screen (the Viewer's view switched under it)
     const key = (e) => {
       if (["INPUT", "SELECT", "TEXTAREA"].includes(e.target.tagName)) return;
       if (e.key === "f" || e.key === "F") { e.preventDefault(); toggleFull(); }
@@ -226,7 +236,7 @@ export default function FilmPlayer({ file, range = null, spots = [], mode = "ori
             drawn.current[i] = { px, py, size, kind: s.kind || "circle" };
             if (s.label) { ctx.font = "800 22px Arial"; ctx.fillStyle = s.color || "#f6a21d"; ctx.fillText(s.label, px + size + 6, py - size); }
           });
-          if (L.mode === "wash") {
+          if (L.mode === "wash" && L.hud) {
             ctx.fillStyle = "rgba(0,0,0,0.55)";
             ctx.fillRect(0, CH - 34, 260, 34);
             ctx.fillStyle = "#f6a21d";
@@ -241,6 +251,8 @@ export default function FilmPlayer({ file, range = null, spots = [], mode = "ori
             ctx.fillText(L.markTool === "arrow" ? "ARROW · click = its tip · scroll = size" : "CIRCLE · click = its middle · scroll = size", 10, 23);
           }
         }
+        const ink = inkRef?.current;
+        if (ink && (!vw || v.readyState >= 2) && (ink.strokes?.length || ink.cur)) drawInk(ctx, ink.cur ? [...(ink.strokes || []), ink.cur] : ink.strokes, CW, CH);
         const now = performance.now();
         if (now - last > 120) { last = now; L.onTime?.(v.currentTime, !v.paused); }
       }
@@ -309,6 +321,7 @@ export default function FilmPlayer({ file, range = null, spots = [], mode = "ori
       setDraft: (d) => { draftRef.current = d; },
       grab: (on) => { keyGrab.current = on ? { x: null, y: null, view: viewNow() } : null; },
       fullscreen: toggleFull,
+      canvas: () => canvasRef.current,
     };
   });
 
@@ -414,8 +427,8 @@ export default function FilmPlayer({ file, range = null, spots = [], mode = "ori
                 : { width: "100%", aspectRatio: "16 / 9" }) }} />
       <video ref={videoRef} src={url || undefined} muted playsInline preload="auto" style={{ display: "none" }}
         onLoadedMetadata={(e) => { e.currentTarget.playbackRate = 1; setRateState(1); if (range) e.currentTarget.currentTime = range.in; if (live.current.autoPlay) e.currentTarget.play().catch(() => {}); }} />
-      <button type="button" onClick={toggleFull} title={full || stage ? "Exit full screen (F / Esc)" : "Full screen (F)"}
-        style={{ position: "absolute", top: 8, right: 8, border: "none", borderRadius: 6, background: "rgba(0,0,0,0.55)", color: "#fff", fontSize: 16, fontWeight: 900, padding: "4px 9px", cursor: "pointer" }}>{full || stage ? "✕" : "⛶"}</button>
+      {!bare && <button type="button" onClick={toggleFull} title={full || stage ? "Exit full screen (F / Esc)" : "Full screen (F)"}
+        style={{ position: "absolute", top: 8, right: 8, border: "none", borderRadius: 6, background: "rgba(0,0,0,0.55)", color: "#fff", fontSize: 16, fontWeight: 900, padding: "4px 9px", cursor: "pointer" }}>{full || stage ? "✕" : "⛶"}</button>}
       {sides && (stage || full || fitHeight) && ["left", "right"].map((edge) => sides[edge] ? (
         <div key={edge} style={{ position: "absolute", [edge]: 0, top: 0, bottom: full && fsBar ? 64 : 0, zIndex: 2, overflow: "hidden", pointerEvents: "none",
           width: stage ? "calc((100cqw - min(100cqw, 100cqh * 16 / 9)) / 2)" : full ? `calc((100vw - min(100vw, (100vh - ${fsBar ? 64 : 0}px) * 16 / 9)) / 2)` : `calc((100cqw - min(100cqw, ${fitHeight} * 16 / 9)) / 2)`,

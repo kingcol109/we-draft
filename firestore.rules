@@ -629,6 +629,11 @@ service cloud.firestore {
     match /filmPlays/{id} {
       allow read, write: if isAdmin();
     }
+    // The Viewer's iPad remote (utils/film/remote.js): its command queue
+    // (filmRemote/main/cmds) and the PC's state / playback docs. Admin-only.
+    match /filmRemote/{doc=**} {
+      allow read, write: if isAdmin();
+    }
     match /playerStats/{doc} { allow read, write: if true; }
     // ── We-Draft Live — written only by the central ingester
     // (server/live/*, admin SDK, not subject to these rules). Public

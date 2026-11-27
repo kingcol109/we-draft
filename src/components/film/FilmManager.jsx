@@ -24,7 +24,8 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import FilmPlayer, { MARK_SIZES } from "./FilmPlayer";
-import FilmPlayerCard, { BOX_CATS, colsOf } from "./FilmPlayerCard";
+import FilmPlayerCard, { BOX_CATS, colsOf, loadBox } from "./FilmPlayerCard";
+import ViewerTab from "./ViewerTab";
 import Timeline from "./Timeline";
 import ScrubRow, { useFastMotion } from "./Scrub";
 import { answerAsk, forget, learnPhrase, loadAliases, nameScore, norm, parseVoice, teach } from "../../utils/film/voice";
@@ -250,14 +251,7 @@ function Popout({ win, title, onClosed, children }) {
   return el ? createPortal(children, el) : null;
 }
 
-// ── A game's box score (compSnapshots/_filmBox_{cfbdGameId}, CFBD /games/players
-// saved by a backfill) → one short line per player. ──
-const boxCache = {};
-const loadBox = (gid) => {
-  if (!gid) return Promise.resolve(null);
-  if (!boxCache[gid]) boxCache[gid] = getDoc(doc(db, "compSnapshots", `_filmBox_${gid}`)).then((d) => (d.exists() ? d.data() : null)).catch(() => null);
-  return boxCache[gid];
-};
+// ── A game's box score (loadBox — FilmPlayerCard.jsx) → one short line per player. ──
 const STAT_LINES = [
   ["passing", (x) => `${x["C/ATT"] || "?"} · ${x.YDS || 0} yds${Number(x.TD) ? ` · ${x.TD} TD` : ""}${Number(x.INT) ? ` · ${x.INT} INT` : ""}`],
   ["rushing", (x) => `${x.CAR || 0} car · ${x.YDS || 0} yds${Number(x.TD) ? ` · ${x.TD} TD` : ""}`],
@@ -460,7 +454,7 @@ function RosterWindow({ game, rosters, focus, hot, onFocus, onDrop, onTag }) {
           </div>
         ))}
       </div>}
-      {card && <FilmPlayerCard p={card} jersey={card.jersey ?? jerseyOf(card.key)} stats={statsOf(card)?.stats} onClose={() => setCard(null)} />}
+      {card && <FilmPlayerCard p={card} jersey={card.jersey ?? jerseyOf(card.key)} stats={statsOf(card)?.stats} noBox={!box} onClose={() => setCard(null)} />}
     </div>
   );
 }
@@ -1616,8 +1610,10 @@ function PlayersTab({ games, fileFor, gate, ready, wdPeople, filmPool, who, setW
   // it zooms, the washed version shows, and a keyframe is saved here.
   // (user, 2026-11-26) Scrolling alone only zooms the view — nothing is saved;
   // a keyframe happens only when you click (hold) while zooming / moving.
+  // (user, 2026-11-27) Zooming opens the wash editor by itself — no E needed.
   const washEdited = () => {
     if (view !== "washed") setView("washed");
+    if (!washing && !watchAll) { setTool(null); setWashing(true); }
   };
   useEffect(() => () => clearTimeout(editSave.current), []);
 
@@ -1646,7 +1642,7 @@ function PlayersTab({ games, fileFor, gate, ready, wdPeople, filmPool, who, setW
       // Q: voice on / off (user, 2026-11-25) — say a label and traits for this clip.
       else if (k === "q" || k === "Q" || k === "m" || k === "M") { if (!e.repeat) setVoiceOn((x) => !x); }
       // C held = the camera, keyframed (user, 2026-11-27); the circle tool moved to O.
-      else if (k === "c" || k === "C") { if (!e.repeat && !watchAll && !holdRef.current) { e.preventDefault(); setTool(null); a?.grab?.(true); washHold(true); if (holdRef.current) setWashHeld(true); } }
+      else if (k === "c" || k === "C") { if (!e.repeat && !watchAll && !holdRef.current) { e.preventDefault(); setTool(null); setWashing(true); a?.grab?.(true); washHold(true); if (holdRef.current) setWashHeld(true); } }
       else if (k === "o" || k === "O") pickTool("circle"); else if (k === "t" || k === "T") pickTool("arrow");
       // R: the play again from the top (user, 2026-11-26).
       else if (k === "r" || k === "R") { if (curRange) { a?.seek(curRange.in); a?.play(); } }
@@ -2127,12 +2123,13 @@ export default function FilmManager() {
       </div>
 
       <div style={{ display: "flex", gap: 4, borderBottom: "2px solid #263247" }}>
-        {[["cut", "Cut plays"], ["players", "Players"], ["import", "Import from Premiere"]].map(([k, l]) => (
+        {[["cut", "Cut plays"], ["players", "Players"], ["viewer", "Viewer"], ["import", "Import from Premiere"]].map(([k, l]) => (
           <button key={k} type="button" onClick={() => setTab(k)} style={{ border: "none", background: "none", padding: "8px 16px", marginBottom: -2, cursor: "pointer", fontWeight: 900, fontSize: 13, color: tab === k ? "#6fb1ff" : "#8494ad", borderBottom: `3px solid ${tab === k ? UI_BLUE : "transparent"}` }}>{l}</button>
         ))}
       </div>
       {tab === "cut" && <CutTab games={games} setGames={setGames} fileFor={fileFor} gate={gate} ready={access === "granted" ? 1 + Object.keys(handles).length : 0} wdPeople={wdPeople} schools={schools} openPlayer={openPlayer} schedules={schedules} onConnect={connect} onLink={linkFilm} onReview={startReview} />}
       {tab === "players" && <PlayersTab games={games} fileFor={fileFor} gate={gate} ready={access === "granted" ? 1 + Object.keys(handles).length : 0} wdPeople={wdPeople} filmPool={filmPool} who={who} setWho={setWho} review={review} />}
+      {tab === "viewer" && <ViewerTab games={games} fileFor={fileFor} gate={gate} ready={access === "granted" ? 1 + Object.keys(handles).length : 0} filmPool={filmPool} />}
       {tab === "import" && <ImportTab games={games} setGames={setGames} wdPeople={wdPeople} gamePaths={new Set(Object.keys(handles))} />}
     </div>
   );

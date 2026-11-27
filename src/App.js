@@ -136,6 +136,8 @@ const EarlyLook = lazy(() => import("./pages/EarlyLook"));
 // /map, /map/draft, /map/{team} — interactive 3D maps (deck.gl; utils/mapData.js).
 const MapPage = lazy(() => import("./pages/MapPage"));
 const VoicePage = lazy(() => import("./pages/Voice"));
+// /film/remote — the Film Manager Viewer's iPad remote (admin-only, no navbar).
+const FilmRemote = lazy(() => import("./pages/FilmRemote"));
 
 // Articles
 const ArticlePage = lazy(() => import("./pages/ArticlePage"));
@@ -209,6 +211,7 @@ function App() {
           <Routes>
             {/* Standalone — no navbar, no padding */}
             <Route path="/draft-tracker" element={<DraftTracker />} />
+            <Route path="/film/remote" element={<AdminRoute><FilmRemote /></AdminRoute>} />
             {/* /live/* — /live itself plus We-Pick's own paths (/live/we-pick…,
                 see utils/wePickRoutes.js), one route so moving between them
                 never remounts the page. */}
