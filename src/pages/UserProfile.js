@@ -102,7 +102,7 @@ export default function UserProfile() {
   // write correctly to Firestore but the rest of the app would keep
   // showing the old name until a full reload — the app has no other way
   // to know its own cached profile just changed.
-  const { user, logout, saveProfile: syncAuthProfile } = useAuth();
+  const { user, authReady, login, logout, saveProfile: syncAuthProfile } = useAuth();
   const [username, setUsername] = useState("");
   const [displayedUsername, setDisplayedUsername] = useState("");
   const [verified, setVerified] = useState(false);
@@ -190,8 +190,9 @@ export default function UserProfile() {
   useEffect(() => {
     const fetchProfile = async () => {
       if (!user) return;
-      const snap = await getDoc(doc(db, "users", user.uid));
-      if (snap.exists()) {
+      // A failed read still drops the spinner (the hub works off user.uid).
+      const snap = await getDoc(doc(db, "users", user.uid)).catch(() => null);
+      if (snap?.exists()) {
         const data = snap.data();
         setUsername(data.username || "");
         setDisplayedUsername(data.username || "");
@@ -288,7 +289,22 @@ export default function UserProfile() {
     } catch { setIssueMsg("Error submitting report. Try again."); }
   };
 
-  if (!user) return <p style={{ textAlign: "center", color: "red", marginTop: "40px" }}>Please sign in first.</p>;
+  // Wait for Firebase to restore the session (a refresh, or a direct visit to
+  // /profile) before deciding they're signed out.
+  if (!authReady) return <LoadingSpinner label="Loading" size={48} minHeight="calc(60vh / var(--pz, 1))" />;
+  if (!user) return (
+    <div style={{ maxWidth: 420, margin: isMobile ? "32px 16px" : "60px auto", padding: isMobile ? "28px 20px" : "36px 32px", textAlign: "center", background: "#fff",
+      borderRadius: 16, border: "1px solid #e2e8f0", boxShadow: "0 10px 30px rgba(0,40,90,.10)", fontFamily: "'Arial Black', Arial, sans-serif" }}>
+      <div style={{ fontSize: 22, fontWeight: 900, color: "#0055a5", textTransform: "uppercase", letterSpacing: "0.04em" }}>Your Profile</div>
+      <p style={{ margin: "10px 0 22px", fontSize: 14, fontWeight: 700, color: "#64748b", lineHeight: 1.5, fontFamily: "Arial, sans-serif" }}>
+        Sign in to see your feed, boards, followed players and messages.
+      </p>
+      <button type="button" onClick={login} style={{ width: "100%", padding: "14px", border: "none", borderRadius: 999, background: "#0055a5", color: "#fff",
+        fontWeight: 900, fontSize: 15, letterSpacing: "0.08em", textTransform: "uppercase", cursor: "pointer", fontFamily: "inherit" }}>
+        Sign In
+      </button>
+    </div>
+  );
   if (loading) return <LoadingSpinner label="Loading" size={48} minHeight="calc(60vh / var(--pz, 1))" />;
 
   // Settings' collapsible sections (Request a Player, Report an Issue).

@@ -87,10 +87,14 @@ export const gradeIndex = (g) => { const i = GRADE_ORDER.indexOf(g); return i < 
 export const INSIGHTS_SAMPLE = 500;
 export const WEEK_MS = 7 * 86400000;
 const recorded = new Set(); // runs already recorded this session (key: team-seed)
+const isCrazy = (r) => r?.frequency === "crazy";
 export async function recordPortalResult(key, rec) {
   if (recorded.has(key)) return;
   recorded.add(key);
   countPortalSim("finished", String(rec.team || "")); // the day's counter (utils/portalSim/usage.js)
+  // Crazy runs never reach Community → Insights (user, 2026-11-22) — the
+  // usage counter above still counts them.
+  if (isCrazy(rec)) return;
   const signings = (rec.signings || []).slice(0, 80).map((p) => ({
     id: String(p.id), name: String(p.name || ""), pos: String(p.pos || ""), stars: Number(p.stars) || 0,
     from: String(p.from || ""), fromSchool: String(p.fromSchool || ""), nil: Math.round(Number(p.nil) || 0),
@@ -110,20 +114,31 @@ export async function portalTotals(since = 0) {
   // The count needs no index; the two sums do (firestore.indexes.json:
   // portalSimResults n + spent). Without them, signings / spent come back
   // null and the page adds up the runs it loaded instead.
-  const [c, sums] = await Promise.all([
+  // Crazy runs recorded before they were kept out (recordPortalResult) —
+  // a fixed handful, read directly (one equality filter, no index) and
+  // taken back out of the totals.
+  const [c, sums, crazy] = await Promise.all([
     getAggregateFromServer(q, { runs: count() }),
     getAggregateFromServer(q, { signings: sum("n"), spent: sum("spent") }).catch((e) => { console.warn("Portal insights sums:", e?.code || e); return null; }),
+    getDocs(query(base, where("frequency", "==", "crazy"))).then((s) => s.docs.map((x) => x.data())).catch(() => []),
   ]);
+  const out = crazy.filter((r) => !since || (r.createdAt?.toMillis?.() || 0) >= since);
+  const less = (k) => out.reduce((t, r) => t + (Number(r[k]) || 0), 0);
   const d = sums ? sums.data() : null;
-  return { runs: c.data().runs || 0, signings: d ? d.signings || 0 : null, spent: d ? d.spent || 0 : null };
+  return {
+    runs: Math.max(0, (c.data().runs || 0) - out.length),
+    signings: d ? Math.max(0, (d.signings || 0) - less("n")) : null,
+    spent: d ? Math.max(0, (d.spent || 0) - less("spent")) : null,
+  };
 }
-// The newest runs, for the lists.
+// The newest runs, for the lists — minus any Crazy run recorded before
+// they were kept out (recordPortalResult).
 export async function loadPortalResults({ since = 0, max = INSIGHTS_SAMPLE } = {}) {
   const base = collection(db, RESULTS);
   const q = since
     ? query(base, where("createdAt", ">=", Timestamp.fromMillis(since)), orderBy("createdAt", "desc"), limit(max))
     : query(base, orderBy("createdAt", "desc"), limit(max));
-  return (await getDocs(q)).docs.map((d) => ({ id: d.id, ...d.data() }));
+  return (await getDocs(q)).docs.map((d) => ({ id: d.id, ...d.data() })).filter((r) => !isCrazy(r));
 }
 
 // Positions as Insights groups them: OT / IOL → OL, CB / S → DB, K and P together.

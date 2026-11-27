@@ -20,7 +20,7 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
-import { doc, getDoc } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import MarginAds from "../components/MarginAds";
 import { viewportCssWidth } from "../utils/pageZoom";
@@ -28,14 +28,15 @@ import { useSchools } from "../components/DraftArchiveList";
 import { playerHref, schoolHref } from "../utils/events";
 import { FlipCard, CardBack, FLIP_CSS, teamTheme } from "../components/ScoutCard";
 import { usePortalCover, placedShots } from "../components/PortalNewsGraphic";
-import { useCareerPath } from "../components/PlayerEligibilityInfo";
+import { useCareerPath, CareerStop } from "../components/PlayerEligibilityInfo";
+import { fetchPortalTeamPage } from "../utils/portalData";
 // (PortalSimBanner — the "where should he go?" banner — is out of the list for now: user, 2026-11-19.)
 import { PortalSimRailCard, PortalBoardRailCard, PortalBoardBanner } from "../components/PortalPromo";
 import { portalTeamSlug } from "../utils/portalTeams";
 import { seasonsLeft, activePortalSeason } from "../utils/eligibility";
 import { DRAFT_EVENTS, parseDay } from "../utils/draftCalendar";
 import {
-  PORTAL_NEWS_PATH, NEWS_STATUS, NEWS_POSITIONS, NEWS_POSITION_NAMES, newsSection, newsDate, statsTitleOf, loadPortalNews,
+  PORTAL_NEWS_PATH, NEWS_STATUS, isProjected, newsStatusOf, projectedGraphicIds, getsGraphic, inPortalCount, NEWS_POSITIONS, NEWS_POSITION_NAMES, newsSection, newsDate, statsTitleOf, loadPortalNews,
   newsPosGroup, newsPosFromSlug, newsPath, eligibilityText, NEWS_SIDES, NEWS_POSITION_PLURAL, NEWS_POSITION_PERSON, portalImageUrl,
 } from "../utils/portalNews";
 
@@ -60,7 +61,10 @@ const POSITION_NAMES = {
 const nameOf = (e) => `${e.first} ${e.last}`;
 const graphicAlt = (e) => (e.status === "committed"
   ? `${nameOf(e)}, ${POSITION_NAMES[e.pos] || e.pos}, transfers from ${e.from} to ${e.to}`
+  : isProjected(e) ? `${nameOf(e)}, ${POSITION_NAMES[e.pos] || e.pos} from ${e.from}, projected to enter the transfer portal`
   : `${nameOf(e)}, ${POSITION_NAMES[e.pos] || e.pos} from ${e.from}, enters the transfer portal`);
+// "Pittsburgh, in the transfer portal" / "…, projected to enter the transfer portal".
+const whereOf = (e) => `${e.from}, ${isProjected(e) ? "projected to enter" : "in"} the transfer portal`;
 
 // Side rails beside the column when the screen fits them (as on Risers).
 const RAIL_WIDTH = 220;
@@ -110,6 +114,10 @@ export default function PortalNews({ view = "news" }) {
   const [news, setNews] = useState(undefined); // { entries, updatedAt, simulated }
   const [photos, setPhotos] = useState({}); // { [id]: playerPhotos doc | null } (missing: loading)
   const [profiles, setProfiles] = useState({}); // { [id]: players doc | null }
+  // { [id]: CFBD id } — looked up for a player whose entry has none (saved
+  // before entries carried it) and who has no ESPN id on his photos: his
+  // ESPN headshot and career path fall back on it.
+  const [cfbdIds, setCfbdIds] = useState({});
 
   useEffect(() => {
     let live = true;
@@ -118,7 +126,19 @@ export default function PortalNews({ view = "news" }) {
       setNews(n);
       const ids = [...new Set(n.entries.map((e) => e.id).filter(Boolean))];
       const read = (col, id) => getDoc(doc(db, col, id)).then((s) => [id, s.exists() ? s.data() : null]).catch(() => [id, null]);
-      Promise.all(ids.map((id) => read("playerPhotos", id))).then((p) => live && setPhotos(Object.fromEntries(p)));
+      Promise.all(ids.map((id) => read("playerPhotos", id))).then((p) => {
+        if (!live) return;
+        const ph = Object.fromEntries(p);
+        setPhotos(ph);
+        const want = n.entries.filter((e) => e.id && !e.cfbdId && !ph[e.id]?.headshot?.espnId).map((e) => e.id);
+        Promise.all(want.map((id) => getDocs(query(collection(db, "cfbdPlayers"), where("wedraftPlayerId", "==", id)))
+          .then((s) => {
+            const lines = s.docs.filter((d) => d.data().mappingStatus !== "rejected");
+            const best = lines.find((d) => d.data().mappingStatus === "verified") || lines[0];
+            return [id, best ? String(best.id) : ""];
+          }).catch(() => [id, ""])))
+          .then((pairs) => live && setCfbdIds(Object.fromEntries(pairs.filter(([, v]) => v))));
+      });
       Promise.all(ids.map((id) => read("players", id))).then((p) => live && setProfiles(Object.fromEntries(p)));
     });
     return () => { live = false; };
@@ -134,6 +154,10 @@ export default function PortalNews({ view = "news" }) {
   const entries = useMemo(() => (pos ? all.filter((e) => newsPosGroup(e.pos) === pos) : all), [all, pos]);
   const entered = useMemo(() => newsSection(entries, "entered"), [entries]);
   const committed = useMemo(() => newsSection(entries, "committed"), [entries]);
+  // The IN count leaves the projected players out (they aren't in yet).
+  const inCount = useMemo(() => inPortalCount(entered), [entered]);
+  // Which projected players get a graphic: the top 3 at each position, over the whole board.
+  const graphicIds = useMemo(() => projectedGraphicIds(all), [all]);
   const schools = useSchools(all.flatMap((e) => [e.from, e.to, ...(e.destinations || [])]));
 
   // Prerender.io: ready once the board is in (8s cap).
@@ -166,7 +190,7 @@ export default function PortalNews({ view = "news" }) {
   const description = isUpdates
     ? `The latest ${SEASON} college football transfer portal moves, newest first: who entered, who committed and where, and who withdrew, with transfer star ratings.`
     : show === "in"
-    ? `The top ${pos ? `${posPlural.toLowerCase()} (${pos}s)` : "players"} in the ${SEASON} college football transfer portal, ranked${entered.length ? `: ${listOf(entered)}` : ""}. Stats, years of eligibility, potential destinations and the We-Draft.com prediction for where each one lands.`
+    ? `The top ${pos ? `${posPlural.toLowerCase()} (${pos}s)` : "players"} in the ${SEASON} college football transfer portal, ranked${inCount ? `: ${listOf(entered.filter((e) => !isProjected(e)))}` : ""}. Stats, years of eligibility, potential destinations and the We-Draft.com prediction for where each one lands.`
     : show === "out"
     ? `The top ${pos ? `${posName.toLowerCase()} ` : ""}transfer portal moves of ${SEASON}, ranked${committed.length ? `: ${listOf(committed)}` : ""}. Where each ${pos ? posPerson.toLowerCase() : "player"} committed, his stats, his career path and what his new school is getting.`
     : pos
@@ -179,7 +203,16 @@ export default function PortalNews({ view = "news" }) {
   // once the board is published; the simulation has none.
   const served = !!news && !news.simulated;
   const version = updated ? updated.getTime() : "";
-  const hasGraphic = (e) => served && placedShots(photos[e.id]).length > 0;
+  const hasGraphic = (e) => served && getsGraphic(e, graphicIds) && placedShots(photos[e.id]).length > 0;
+  // His graphic, or the headshot view: projected past his position's top 3,
+  // or no action shot placed for him (once his photos are in) → headshot.
+  const graphicView = (e) => getsGraphic(e, graphicIds) && !(photos[e.id] !== undefined && !placedShots(photos[e.id]).length);
+  const rowOf = (e0, i) => {
+    const e = !e0.cfbdId && cfbdIds[e0.id] ? { ...e0, cfbdId: cfbdIds[e0.id] } : e0;
+    return graphicView(e)
+    ? <PlayerRow entry={e} i={i} photos={photos[e.id]} player={profiles[e.id]} schools={schools} isMobile={isMobile} served={served} version={version} />
+    : <HeadshotRow entry={e} photos={photos[e.id]} player={profiles[e.id]} schools={schools} isMobile={isMobile} />;
+  };
   const firstGraphic = ranked.find(hasGraphic) || null;
   const imageOf = (e) => portalImageUrl(e.slug, false, version, "png");
   const jsonLd = {
@@ -199,7 +232,7 @@ export default function PortalNews({ view = "news" }) {
         itemListElement: ranked.map((e, i) => ({
           "@type": "ListItem", position: i + 1, name: nameOf(e),
           ...(playerHref(e) ? { url: `${SITE}${playerHref(e)}` } : {}),
-          description: e.status === "committed" ? `${e.pos}, ${e.from} to ${e.to}` : `${e.pos}, ${e.from} — in the transfer portal`,
+          description: e.status === "committed" ? `${e.pos}, ${e.from} to ${e.to}` : `${e.pos}, ${whereOf(e)}`,
           ...(hasGraphic(e) ? { image: imageOf(e) } : {}),
         })),
       }] : []),
@@ -287,7 +320,7 @@ export default function PortalNews({ view = "news" }) {
           ) : (
             <>
               <PositionFilters pos={pos} side={show} counts={posCounts} total={all.length} isMobile={isMobile} />
-              <InOut show={show} pos={pos} inCount={entered.length} outCount={committed.length} isMobile={isMobile} />
+              <InOut show={show} pos={pos} inCount={inCount} outCount={committed.length} isMobile={isMobile} />
               {!entries.length && (
                 <div style={{ marginTop: 18, border: "2px dashed #d5dbe4", background: "#f8fafc", borderRadius: 16, padding: "28px 20px", textAlign: "center", color: "#5a6475", fontFamily: BODY, fontWeight: 700, fontSize: 15, lineHeight: 1.6 }}>
                   No {posPerson.toLowerCase()} moves on Portal News yet. Every {pos} in the portal is on the{" "}
@@ -295,10 +328,10 @@ export default function PortalNews({ view = "news" }) {
                 </div>
               )}
               {entered.length > 0 && show !== "out" && (
-                <Section status="entered" count={entered.length} isMobile={isMobile} sub="Notable names who just hit the portal, and where they could land.">
+                <Section status="entered" count={inCount} isMobile={isMobile} sub="Notable names who just hit the portal, and where they could land.">
                   {entered.map((e, i) => (
                     <li key={e.id} id={e.slug} style={{ scrollMarginTop: 90 }}>
-                      <PlayerRow entry={e} i={i} photos={photos[e.id]} player={profiles[e.id]} schools={schools} isMobile={isMobile} served={served} version={version} />
+                      {rowOf(e, i)}
                     </li>
                   ))}
                 </Section>
@@ -307,7 +340,7 @@ export default function PortalNews({ view = "news" }) {
                 <Section status="committed" count={committed.length} isMobile={isMobile} sub="The commitments that change what a team can be next season.">
                   {committed.map((e, i) => (
                     <li key={e.id} id={e.slug} style={{ scrollMarginTop: 90 }}>
-                      <PlayerRow entry={e} i={i} photos={photos[e.id]} player={profiles[e.id]} schools={schools} isMobile={isMobile} served={served} version={version} />
+                      {rowOf(e, i)}
                     </li>
                   ))}
                 </Section>
@@ -315,7 +348,7 @@ export default function PortalNews({ view = "news" }) {
               <div style={{ marginTop: isMobile ? 22 : 30 }}><PortalBoardBanner isMobile={isMobile} /></div>
             </>
           )}
-          <About isMobile={isMobile} pos={pos} side={show} posName={posName} posPlural={posPlural} posPerson={posPerson} inCount={entered.length} outCount={committed.length} />
+          <About isMobile={isMobile} pos={pos} side={show} posName={posName} posPlural={posPlural} posPerson={posPerson} inCount={inCount} outCount={committed.length} />
         </div>
       </div>
     </>
@@ -503,11 +536,13 @@ function Route({ e, schools, isMobile, big }) {
     </div>
   );
 }
+// Projected players (not in the portal yet) wear their own violet, dashed pill.
 function StatusPill({ e }) {
-  const s = NEWS_STATUS[e.status];
-  const day = newsDate(e.date);
+  const s = newsStatusOf(e);
+  const proj = isProjected(e);
+  const day = proj ? "" : newsDate(e.date); // (no "entered on" day: he hasn't)
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 12px 5px 8px", borderRadius: 999, fontFamily: BODY, fontSize: 11, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", background: s.tint, color: s.ink, border: `1px solid ${s.c1}55` }}>
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 12px 5px 8px", borderRadius: 999, fontFamily: BODY, fontSize: 11, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", background: s.tint, color: s.ink, border: proj ? `1.5px dashed ${s.c1}` : `1px solid ${s.c1}55` }}>
       <StatusIcon status={e.status} size={14} color={s.c1} />{s.short}{day && <span style={{ opacity: 0.7 }}>· {day}</span>}
     </span>
   );
@@ -614,7 +649,7 @@ function PlayerRow({ entry: e, i, photos, player, schools, isMobile, served = fa
   const heading = (
     <h3 style={{ margin: 0, fontSize: isMobile ? 26 : 40, fontWeight: 900, lineHeight: 1, color: "#1c2330", textTransform: "uppercase", letterSpacing: "-0.01em" }}>
       {playerHref(e) ? <Link to={playerHref(e)} style={{ color: "inherit", textDecoration: "none" }}>{nameOf(e)}</Link> : nameOf(e)}
-      <span style={SR_ONLY}> – {e.pos}, {e.status === "committed" ? `${e.from} to ${e.to}` : `${e.from}, in the transfer portal`}</span>
+      <span style={SR_ONLY}> – {e.pos}, {e.status === "committed" ? `${e.from} to ${e.to}` : whereOf(e)}</span>
     </h3>
   );
   if (isMobile) {
@@ -657,6 +692,105 @@ function PlayerRow({ entry: e, i, photos, player, schools, isMobile, served = fa
   );
 }
 
+// ── CFBD fallbacks (a player new to We-Draft — added from the CFB Universe —
+// has no headshot, career stops or high school of ours yet), the way the
+// Portal Sim fills them: ESPN's headshot by his CFBD id (CFBD = ESPN ids),
+// his college stops and high school from his school's portal team page
+// (compSnapshots/_portal_{slug} roster row: cp, hs, rs, rr). ──
+const espnHeadshot = (id) => (id ? `https://a.espncdn.com/i/headshots/college-football/players/full/${id}.png` : "");
+const espnIdOf = (e, photos) => String(photos?.headshot?.espnId || e.cfbdId || "");
+// → his players doc with CFBD's career filled in where ours is empty
+// (undefined while his doc loads).
+function useCfbdProfile(e, player, photos) {
+  const espnId = espnIdOf(e, photos);
+  const needs = player !== undefined && !(player?.CareerStops || []).length && !!espnId && !!e.from;
+  const [row, setRow] = useState(null);
+  useEffect(() => {
+    if (!needs) { setRow(null); return undefined; }
+    let live = true;
+    fetchPortalTeamPage(portalTeamSlug(e.from))
+      .then((d) => { if (live) setRow((d?.roster || []).find((r) => String(r.id) === espnId) || null); })
+      .catch(() => { if (live) setRow(null); });
+    return () => { live = false; };
+  }, [needs, e.from, espnId]);
+  return useMemo(() => {
+    if (player === undefined || !row) return player;
+    const cp = row.cp || [];
+    return {
+      ...(player || {}),
+      CareerStops: cp.map(([From, To, School]) => ({ School, From, To })),
+      HighSchool: player?.HighSchool || row.hs?.[0] || "", State: player?.State || row.hs?.[2] || "",
+      RecruitStars: player?.RecruitStars ?? row.rs, RecruitRank: player?.RecruitRank ?? row.rr,
+      RecruitYear: player?.RecruitYear || (cp[0]?.[0] ? String(cp[0][0]) : ""),
+    };
+  }, [player, row]);
+}
+// His career path, moved along: his new school on top once he's committed,
+// the portal while he's in it (not a projected player: he isn't).
+function useNewsCareer(e, profile, espnId) {
+  const moved = useMemo(() => (profile === undefined ? null : {
+    ...(profile || {}), id: e.id, School: e.status === "committed" ? e.to : e.from, InPortal: e.status === "entered" && !e.projected,
+  }), [profile, e.id, e.status, e.projected, e.to, e.from]);
+  const { rows } = useCareerPath(moved, espnId, null);
+  return rows.map((r, k) => (k === 0 && e.status === "committed" && r.name === e.to && !/\d/.test(r.span || "") ? { ...r, span: "Committed", current: true } : r));
+}
+
+// The headshot view — no graphic: a projected player past his position's top
+// 3 (utils/portalNews.js projectedGraphicIds), or anyone with no action shot
+// placed. His headshot (ours, else ESPN's, else his school's logo), his name,
+// note, stats and career path.
+function HeadshotRow({ entry: e, photos, player, schools, isMobile }) {
+  const committed = e.status === "committed";
+  const home = committed ? schools[e.to] : schools[e.from];
+  const t = themeOf(home);
+  const espnId = espnIdOf(e, photos);
+  const profile = useCfbdProfile(e, player, photos);
+  const career = useNewsCareer(e, profile, espnId);
+  const [espnOk, setEspnOk] = useState(true);
+  const head = photos?.headshot?.url || (espnOk ? espnHeadshot(espnId) : "");
+  const logo = home?.Logo1 || home?.LogoDark || "";
+  const size = isMobile ? 76 : 112;
+  const heading = (
+    <h3 style={{ margin: 0, fontSize: isMobile ? 22 : 30, fontWeight: 900, lineHeight: 1, color: "#1c2330", textTransform: "uppercase", letterSpacing: "-0.01em" }}>
+      {playerHref(e) ? <Link to={playerHref(e)} style={{ color: "inherit", textDecoration: "none" }}>{nameOf(e)}</Link> : nameOf(e)}
+      <span style={SR_ONLY}> – {e.pos}, {committed ? `${e.from} to ${e.to}` : whereOf(e)}</span>
+    </h3>
+  );
+  const shot = (
+    <div style={{ width: size, height: size, flexShrink: 0, borderRadius: "50%", overflow: "hidden", background: `radial-gradient(circle at 50% 38%, ${t.c1} 0%, ${t.deep} 100%)`, border: `3px solid ${t.c1}`, display: "grid", placeItems: "center" }}>
+      {head ? <img src={head} alt={`${nameOf(e)} headshot`} loading="lazy" decoding="async" onError={() => setEspnOk(false)} style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "top" }} />
+        : logo ? <img src={logo} alt="" style={{ width: "62%", height: "62%", objectFit: "contain" }} /> : null}
+    </div>
+  );
+  return (
+    <article style={isMobile
+      ? { margin: "0 -10px", background: "#fff", borderBottom: "1px solid #e2e7ef", borderLeft: `4px solid ${t.c1}`, padding: "14px 14px 16px" }
+      : { position: "relative", background: "#fff", borderRadius: 18, overflow: "hidden", border: "1px solid #e2e7ef", boxShadow: "0 6px 20px rgba(0,30,70,0.07)", padding: "16px 18px 16px 22px" }}>
+      {!isMobile && <div aria-hidden="true" style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 6, background: `linear-gradient(180deg, ${t.c1}, ${t.c2})` }} />}
+      <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 12 : 18 }}>
+        {shot}
+        <div style={{ flex: 1, minWidth: 0, display: "grid", gap: 6 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}><StatusPill e={e} /></div>
+          {heading}
+          <Bio e={e} p={player} />
+        </div>
+      </div>
+      <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
+        <Route e={e} schools={schools} isMobile={isMobile} />
+        <Note note={e.note} color={t.c1} size={isMobile ? 15 : 14} />
+        <Stats e={e} t={t} isMobile={isMobile} />
+        {career.length > 0 && (
+          <div>
+            <div style={{ fontFamily: BODY, fontSize: 10, fontWeight: 900, letterSpacing: "0.12em", textTransform: "uppercase", color: "#7a8597", marginBottom: 6 }}>Career Path</div>
+            <div>{career.map(({ key, ...x }, k) => <CareerStop key={key} {...x} to={undefined} isMobile={isMobile} last={k === career.length - 1} />)}</div>
+          </div>
+        )}
+        <Actions e={e} t={t} isMobile={isMobile} />
+      </div>
+    </article>
+  );
+}
+
 // His card: the front his graphic (a placeholder in his colors with his
 // school's logo until it's drawn), the back his profile, season and
 // career path (moved along to his new school, or the portal).
@@ -664,14 +798,11 @@ function Card({ e, i, g, t, home, player, photos, isMobile }) {
   const [loaded, setLoaded] = useState(false);
   useEffect(() => setLoaded(false), [g.src]);
   const logo = home?.LogoDark || home?.Logo1;
-  const s = NEWS_STATUS[e.status];
-  // His career path, moved along: his new school on top once he's committed,
-  // the portal while he's in it.
-  const moved = useMemo(() => (player === undefined ? null : {
-    ...(player || {}), id: e.id, School: e.status === "committed" ? e.to : e.from, InPortal: e.status === "entered",
-  }), [player, e.id, e.status, e.to, e.from]);
-  const { rows } = useCareerPath(moved, photos?.headshot?.espnId || "", null);
-  const career = rows.map((r, k) => (k === 0 && e.status === "committed" && r.name === e.to && !/\d/.test(r.span || "") ? { ...r, span: "Committed", current: true } : r));
+  const s = newsStatusOf(e);
+  // His career path (CFBD's where ours is empty), moved along.
+  const espnId = espnIdOf(e, photos);
+  const profile = useCfbdProfile(e, player, photos);
+  const career = useNewsCareer(e, profile, espnId);
   return (
     <FlipCard width={isMobile ? "100%" : 330} radius={isMobile ? 0 : 12} label={`${nameOf(e)}: flip his card`}
       frontBg={`radial-gradient(circle at 50% 38%, ${t.c1} 0%, ${t.mid} 55%, ${t.deep} 100%)`}
@@ -693,7 +824,7 @@ function Card({ e, i, g, t, home, player, photos, isMobile }) {
       )}
       back={(
         <CardBack theme={e.status === "committed" ? t : SITE_THEME} name={nameOf(e)} pos={e.pos} school={e.status === "committed" ? e.to : e.from} logo={e.status === "committed" ? logo : UNKNOWN_LOGO}
-          photo={photos?.headshot?.url || ""} logoCircle profile={player} stats={e.stats} statsTitle={statsTitleOf(e)} career={career} year={player?.Eligible || ""}
+          photo={photos?.headshot?.url || espnHeadshot(espnId)} logoCircle profile={profile} stats={e.stats} statsTitle={statsTitleOf(e)} career={career} year={player?.Eligible || ""}
           chip={<><StatusIcon status={e.status} size={11} color="#fff" />{s.label}</>} footer="We-Draft.com · Portal News" />
       )} />
   );

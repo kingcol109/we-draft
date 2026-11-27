@@ -8,7 +8,8 @@ import { useEffect } from "react";
 
 const ORANGE = "#F6A21D"; // same orange as SimPage.js
 
-const CONTROLS = [
+// (Also listed under We-Draft U's Free Play — components/weU/SimFreePlay.jsx.)
+export const CONTROLS = [
   ["Space", "Snap the ball. During a read option ride: pull it. On the speed option: pitch."],
   ["Mouse", "The QB's eyes and chest — where he looks is who he can read and throw to."],
   ["Click (hold + release)", "Throw at the cursor. A quick tap is a bullet, a long hold is lofted."],
@@ -20,7 +21,7 @@ const CONTROLS = [
   ["P", "Pause / resume. While paused, “.” steps one frame."],
   ["V", "Vision mask — see only what your player can see."],
   ["B", "Debug view — click a player to see what he perceives and why he's doing it."],
-  ["R", "Reset the play (Lab only — no do-overs in a drive)."],
+  ["R", "Reset the play (Lab and Free Play only — no do-overs in a drive)."],
 ];
 
 const PLAYS = [

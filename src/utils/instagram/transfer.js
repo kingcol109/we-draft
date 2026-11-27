@@ -10,6 +10,8 @@
 //             hazard tape runs across the top, IN THE PORTAL sits above his
 //             head, and at the foot his name, then his school's logo driving
 //             at an empty destination slot. Carousel: + his file, + "where next?".
+//   (portal, projected: true) Portal Watch — a player expected to enter, not
+//             in yet: a violet radar, PORTAL WATCH under the line (projectedCover).
 //   transfer  He's picked a school: the page is the new school's. The old
 //             school's logo fills a corner wedge, chevrons drive from it to the
 //             new logo; under him, TRANSFER on a slanted banner and his name.
@@ -71,11 +73,13 @@ const schoolOf = (s = {}, fallbackName = "") => ({
 // design: the transfer cover's ("classic" | "welcome"); stats: his season
 // [{ label, value }] and statsTitle ("2026 SEASON AT PITTSBURGH") for the
 // second slide; badgeLogo: the WD badge (the welcome cover's top right).
-export function transferInput({ kind = "portal", player = {}, from = {}, fromName = "", to = {}, toName = "", photo = null, report = null, carousel = false, kicker = "", headline = "", note = "", brandLogo = "", badgeLogo = "", address = "", design = "welcome", stats = [], statsTitle = "" }) {
+export function transferInput({ kind = "portal", player = {}, from = {}, fromName = "", to = {}, toName = "", photo = null, report = null, carousel = false, kicker = "", headline = "", note = "", brandLogo = "", badgeLogo = "", address = "", design = "welcome", stats = [], statsTitle = "", projected = false }) {
   const fp = photo?.firstPick || null;
   return {
     kind: kind === "transfer" ? "transfer" : "portal",
     design: design === "classic" ? "classic" : "welcome",
+    // A portal cover for a player not in the portal yet: the Portal Watch look (projectedCover).
+    projected: kind !== "transfer" && !!projected,
     first: player.First || "", last: player.Last || "", pos: player.Position || "", year: String(player.Eligible || ""),
     measurements: measurementsOf(player),
     from: schoolOf(from, fromName), to: schoolOf(to, toName),
@@ -209,6 +213,97 @@ function portalCover(env, input, total) {
     + tbd(env, dx, ty, tw, th);
   body += footer(env, themeOf("dark"), { logo: input.brandLogo, cta: total > 1 ? "SWIPE FOR HIS FILE" : input.address, more: total > 1 });
   return svgDoc(env, portalDefs(lit), body, VOID);
+}
+
+// ── Projected: Portal Watch ──
+// A player expected to enter the portal but not in it yet (Portal News
+// "projected" entries — utils/portalNews.js). Made to look nothing like the
+// portal cover above (user, 2026-11-25): no rings, no tape, no black — a
+// violet radar with his school's color glowing at its center, his school's
+// logo up top, and a light panel under the line: PORTAL WATCH, his name,
+// his school's card, then a dashed "THE PORTAL?" slot.
+const WATCH = { bg: "#150c33", deep: "#0a0620", violet: "#7c5cd6", lilac: "#c4b5fd", panel: "#f5f2ff", ink: "#1a1036", soft: "#6d5fa3" };
+const RADAR = { x: CX, y: 440 };
+function radar(accent) {
+  const { x, y } = RADAR;
+  let svg = `<circle cx="${x}" cy="${y}" r="560" fill="url(#watchGlow)"/>`;
+  // The sweep: a wedge fading back from its leading edge.
+  const a0 = (-112 * Math.PI) / 180;
+  const a1 = (-58 * Math.PI) / 180;
+  const R = 700;
+  svg += `<path d="M ${x} ${y} L ${r1(x + R * Math.cos(a0))} ${r1(y + R * Math.sin(a0))} A ${R} ${R} 0 0 1 ${r1(x + R * Math.cos(a1))} ${r1(y + R * Math.sin(a1))} Z" fill="url(#sweep)"/>`
+    + `<line x1="${x}" y1="${y}" x2="${r1(x + R * Math.cos(a1))}" y2="${r1(y + R * Math.sin(a1))}" stroke="${WATCH.lilac}" stroke-width="4" stroke-opacity="0.85"/>`;
+  [120, 230, 340, 450, 560].forEach((r, i) => {
+    svg += `<circle cx="${x}" cy="${y}" r="${r}" fill="none" stroke="${WATCH.lilac}" stroke-width="${i === 4 ? 3 : 2}" stroke-opacity="${r1(0.55 - i * 0.07)}"/>`;
+  });
+  // Crosshairs, and the degree ticks round the outer ring.
+  svg += `<line x1="0" y1="${y}" x2="${W}" y2="${y}" stroke="${WATCH.lilac}" stroke-opacity="0.22" stroke-width="2" stroke-dasharray="8 12"/>`
+    + `<line x1="${x}" y1="0" x2="${x}" y2="${SPLIT}" stroke="${WATCH.lilac}" stroke-opacity="0.22" stroke-width="2" stroke-dasharray="8 12"/>`;
+  for (let d = 0; d < 360; d += 10) {
+    const t = (d * Math.PI) / 180;
+    const long = d % 30 === 0;
+    const r0 = 560 - (long ? 26 : 14);
+    svg += `<line x1="${r1(x + r0 * Math.cos(t))}" y1="${r1(y + r0 * Math.sin(t))}" x2="${r1(x + 560 * Math.cos(t))}" y2="${r1(y + 560 * Math.sin(t))}" stroke="${WATCH.lilac}" stroke-opacity="${long ? 0.6 : 0.35}" stroke-width="${long ? 3 : 2}"/>`;
+  }
+  // Blips: the other names on the watch list, in his school's color.
+  [[-0.42, -0.62, 11], [0.58, -0.3, 8], [-0.7, 0.18, 7], [0.36, 0.52, 9]].forEach(([dx, dy, s]) => {
+    const bx = r1(x + dx * 560);
+    const by = r1(y + dy * 560);
+    svg += `<circle cx="${bx}" cy="${by}" r="${s * 2.6}" fill="${accent}" fill-opacity="0.25"/><circle cx="${bx}" cy="${by}" r="${s}" fill="${accent}"/>`;
+  });
+  return svg;
+}
+const watchDefs = (accent) => `<radialGradient id="watchGlow" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="${accent}" stop-opacity="0.75"/><stop offset="0.45" stop-color="${accent}" stop-opacity="0.28"/><stop offset="1" stop-color="${WATCH.bg}" stop-opacity="0"/></radialGradient>`
+  + `<linearGradient id="sweep" x1="1" y1="0" x2="0" y2="0.4"><stop offset="0" stop-color="${WATCH.lilac}" stop-opacity="0.5"/><stop offset="1" stop-color="${WATCH.lilac}" stop-opacity="0"/></linearGradient>`
+  + `<linearGradient id="watchBg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${WATCH.deep}"/><stop offset="1" stop-color="${WATCH.bg}"/></linearGradient>`
+  + shadow;
+// A light card: his school's logo and its name.
+function lightTile(env, x, y, w, h, name, logo) {
+  const lg = hasImage(env, logo) ? h - 24 : 0;
+  const tx = x + 18 + (lg ? lg + 14 : 0);
+  return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="16" fill="#ffffff" stroke="${WATCH.violet}" stroke-opacity="0.35" stroke-width="3"/>`
+    + image(env, logo, x + 12, y + 12, lg, lg)
+    + fitLine(env, tx, y + h / 2 + 21, up(name), 60, x + w - 16 - tx, WATCH.ink, { spacing: 1, min: 22 }).svg;
+}
+function projectedCover(env, input, total) {
+  const school = input.from.color && input.from.color !== "#000000" ? input.from.color : BLUE;
+  const accent = readableOn(school, WATCH.bg, 1.8) === school ? school : shade(school, 2.2);
+  const W2 = W - PAD * 2;
+  const hasShot = hasImage(env, input.photo);
+  let body = `<rect width="${W}" height="${SPLIT}" fill="url(#watchBg)"/>` + radar(accent);
+  // Up top: just his school's logo (user, 2026-11-25: no PORTAL WATCH tag).
+  if (hasImage(env, input.from.logoDark)) body += image(env, input.from.logoDark, W - PAD - 110, 40, 110, 94);
+  // Him (no photo: his school's logo at the radar's center).
+  body += hasShot ? playerShot(env, input) : image(env, input.from.logoDark, RADAR.x - 200, RADAR.y - 200, 400, 400);
+  // The line, then the light panel: PORTAL WATCH, his name, his school → the portal?
+  body += splitPanel(WATCH.panel, WATCH.violet);
+  const words = up((input.headline || "PORTAL WATCH").trim()).split(/\s+/);
+  const big = words.pop();
+  const small = words.join(" ");
+  const hs = fitSize(env, small ? `${small} ${big}` : big, 82, W2 * 0.66, 40, 3);
+  const hy = SPLIT + 92;
+  body += `<text x="${PAD}" y="${hy}" font-family="${IG_FONT}" font-size="${hs}" letter-spacing="3" fill="${WATCH.violet}">${small ? `<tspan fill="${WATCH.ink}">${esc(small)} </tspan>` : ""}${esc(big)}</text>`;
+  const info = up([input.pos, input.note].filter(Boolean).join(DOT));
+  if (info) {
+    const is = fitSize(env, info, 40, W2 * 0.3, 22, 2);
+    const iw = widthOf(env, info, is, 2) + 32;
+    body += `<rect x="${r1(W - PAD - iw)}" y="${hy - 52}" width="${r1(iw)}" height="54" rx="27" fill="${WATCH.ink}"/>`
+      + text(W - PAD - iw / 2, hy - 25 + is * 0.36, info, is, "#ffffff", { anchor: "middle", spacing: 2 });
+  }
+  body += fitLine(env, PAD - 3, hy + 120, up(`${input.first} ${input.last}`), 128, W2, WATCH.ink, { spacing: 2, min: 54 }).svg;
+  const ty = hy + 146;
+  const th = 98;
+  const gap = 106;
+  const tw = (W2 - gap) / 2;
+  body += lightTile(env, PAD, ty, tw, th, input.from.name, input.from.logo || input.from.logoDark)
+    + chevrons(PAD + tw + 18, ty + th / 2, WATCH.violet, 3, 0.9, 26);
+  const dx = PAD + tw + gap;
+  const slot = "THE PORTAL?";
+  const ss = fitSize(env, slot, th * 0.5, tw - 40, 24, 2);
+  body += `<rect x="${dx}" y="${ty}" width="${tw}" height="${th}" rx="16" fill="${WATCH.violet}" fill-opacity="0.08" stroke="${WATCH.violet}" stroke-width="4" stroke-dasharray="16 11"/>`
+    + text(dx + tw / 2, ty + th / 2 + ss * 0.35, slot, ss, WATCH.violet, { anchor: "middle", spacing: 2 });
+  body += footer(env, themeOf("dark"), { logo: input.brandLogo, cta: total > 1 ? "SWIPE FOR HIS FILE" : input.address, more: total > 1 });
+  return svgDoc(env, watchDefs(accent), body, WATCH.bg);
 }
 
 // ── His season (both posts' second slides, first thing under the header) ──
@@ -721,7 +816,7 @@ export function transferSlides(input, env) {
     return out;
   }
   const total = input.carousel ? 3 : 1;
-  const out = [{ name: "portal", svg: portalCover(env, input, total) }];
+  const out = [{ name: "portal", svg: (input.projected ? projectedCover : portalCover)(env, input, total) }];
   if (input.carousel) {
     out.push({ name: "his-file", svg: portalFile(env, input, 1, total) });
     out.push({ name: "where-next", svg: portalNext(env, input) });
@@ -757,5 +852,5 @@ export function transferCaption(input) {
 
 // Every image a post draws (for the caller to load as data URIs).
 export function transferImageUrls(input) {
-  return [...new Set([input.brandLogo, input.photo, input.from.logoDark, input.kind === "transfer" ? input.to.logoDark : "", input.badgeLogo].filter(Boolean))];
+  return [...new Set([input.brandLogo, input.photo, input.from.logoDark, input.projected ? input.from.logo : "", input.kind === "transfer" ? input.to.logoDark : "", input.badgeLogo].filter(Boolean))];
 }

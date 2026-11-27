@@ -24,6 +24,9 @@ export function expandPool(teamsDoc, chunks) {
       id, name, pos, team: team.slug, stars, elig, role: ROLE[role] || "none",
       home: hlat != null && hlng != null ? [hlat, hlng] : null, wdId: wdId || "",
       declared: String(flags || "").includes("d"), live: String(flags || "").includes("l"),
+      // No idea how many seasons he has left (no recruit year, recruiting
+      // class, class year or draft class): never sent into the portal.
+      eligUnknown: String(flags || "").includes("u"),
       likely: likely ?? null,
       // Info / Stats views: height (in), weight, recruiting stars, home state, last season.
       ht: ht || null, wt: wt || null, rStars: rStars || null, state: state || "", stats: unpackStats(stats),

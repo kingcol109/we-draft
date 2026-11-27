@@ -18,6 +18,10 @@ jest.mock("firebase/firestore", () => {
     },
     getDocs: async (ref) => {
       if (ref.path === "schools") return { docs: schools.map((s) => ({ data: () => s })) };
+      if (ref.path === "cfbRosters") return { docs: [{ id: "r1", data: () => ({ school: "Oregon", team: "Oregon", teamId: 2483, players: [
+        { id: 901, first: "Someone", last: "Else", pos: "WR" },
+        { id: 902, first: "Brand", last: "Newguy", pos: "CB", rc: 2024 },
+      ] }) }] };
       if (ref.path === "cfbdPlayers") return { docs: [{ data: () => ({ mappingStatus: "verified", seasons: { 2026: { defensive: { SACKS: 10, TFL: 16, TOT: 32 } } } }) }] };
       return { docs: [] };
     },
@@ -28,6 +32,17 @@ jest.mock("firebase/firestore", () => {
 jest.mock("./PortalNewsGraphic", () => ({
   usePortalCover: () => ({ src: "", failed: false }),
   placedShots: (ph) => (ph?.action || []).filter((a) => a?.url && a.firstPick),
+}));
+// CFB Universe adds (a new players doc) — a stand-in.
+const universeAdds = [];
+jest.mock("./CfbUniverseSearch", () => ({
+  POS_MAP: { WR: "WR", CB: "DB" },
+  recruitYearFor: (u) => (u.rc ? String(u.rc) : null),
+  eligibleFor: () => "2027",
+  addRosterPlayer: async (u, roster, opts) => {
+    universeAdds.push([u.id, opts]);
+    return { player: { id: "new1", First: u.first, Last: u.last, Position: opts.pos, School: u.school, Slug: "brand-newguy-2027-db" }, rosterPlayers: null };
+  },
 }));
 jest.mock("../utils/instagram/transfer", () => ({ TRANSFER_DESIGNS: [["classic", "Mock 1 · Classic"], ["welcome", "Mock 2 · Commitment"]] }));
 
@@ -125,6 +140,97 @@ test("click a player in the list to edit him; the editor is his", async () => {
   expect(screen.getByPlaceholderText(/Why he matters/).value).toBe("Simmons note.");
   // A row says what's still missing.
   expect(within(rowOf("Isaac Brown")).getByText(/Needs: write-up/)).toBeTruthy();
+});
+
+test("a player not in the portal comes in as Projected: in the IN list's order, labeled, cleared in bulk", async () => {
+  writes.length = 0;
+  window.confirm = () => true;
+  render(<AdminPortalNews allPlayers={four} />);
+  await addAll(["Colin Simmons"]);
+  fireEvent.change(screen.getByPlaceholderText("Search any player…"), { target: { value: "someone" } });
+  fireEvent.click((await screen.findByText(/adds as projected/)).closest("button"));
+  await waitFor(() => expect(rowNames("IN")).toEqual(["Colin Simmons", "Someone Else"]));
+  expect(within(rowOf("Someone Else")).getByText("PROJECTED")).toBeTruthy();
+  expect(within(rowOf("Colin Simmons")).queryByText("PROJECTED")).toBeNull();
+  expect(screen.getByText(/1 projected \(not in the portal yet\) · 1 actually in/)).toBeTruthy();
+  // He can go first, like anyone in the list.
+  fireEvent.click(within(rowOf("Someone Else")).getByTitle("Up one"));
+  expect(rowNames("IN")).toEqual(["Someone Else", "Colin Simmons"]);
+  fireEvent.click(screen.getByText("Save & publish"));
+  await waitFor(() => expect(writes.length).toBe(1));
+  expect(writes[0][1].entries.map((e) => [e.last, e.status, e.projected, e.order])).toEqual([["Else", "entered", true, 0], ["Simmons", "entered", false, 1]]);
+  // The real portal fills up: off they go, all at once.
+  fireEvent.click(screen.getByText("Remove 1 projected"));
+  expect(rowNames("IN")).toEqual(["Colin Simmons"]);
+  expect(screen.queryByText(/Remove \d+ projected/)).toBeNull();
+});
+
+test("a projected player who enters the portal: Mark entered", async () => {
+  const later = four.map((p) => (p.id === "p3" ? { ...p, InPortal: true, PortalOriginalSchool: "Oregon", PortalEnteredAt: new Date("2026-11-24T15:00:00Z") } : p));
+  const { rerender } = render(<AdminPortalNews allPlayers={four} />);
+  fireEvent.change(await screen.findByPlaceholderText("Search any player…"), { target: { value: "someone" } });
+  fireEvent.click((await screen.findByText(/adds as projected/)).closest("button"));
+  await waitFor(() => expect(rowNames("IN")).toEqual(["Someone Else"]));
+  expect(screen.queryByText(/Mark \d entered/)).toBeNull();
+  rerender(<AdminPortalNews allPlayers={later} />);
+  expect(within(rowOf("Someone Else")).getByText(/In the portal now/)).toBeTruthy();
+  fireEvent.click(screen.getByText("Mark 1 entered"));
+  expect(within(rowOf("Someone Else")).queryByText("PROJECTED")).toBeNull();
+  expect(screen.getByDisplayValue("2026-11-24")).toBeTruthy();
+});
+
+test("order position by position: a position's players swap among themselves, everyone else keeps his slot", async () => {
+  writes.length = 0;
+  const edges = [
+    ...four,
+    { id: "e2", First: "Edge", Last: "Two", Position: "EDGE", School: "Texas", InPortal: true, PortalEnteredAt: new Date("2026-11-16T15:00:00Z") },
+  ];
+  render(<AdminPortalNews allPlayers={edges} />);
+  await addAll(["Colin Simmons", "Isaac Brown", "Edge Two"]);
+  expect(rowNames("IN")).toEqual(["Colin Simmons", "Isaac Brown", "Edge Two"]);
+  fireEvent.click(screen.getByText("EDGE 2"));
+  expect(rowNames("IN")).toEqual(["Colin Simmons", "Edge Two"]);
+  fireEvent.click(within(rowOf("Edge Two")).getByTitle("Up one"));
+  expect(rowNames("IN")).toEqual(["Edge Two", "Colin Simmons"]);
+  fireEvent.click(screen.getByText("All"));
+  // Brown (RB) stays second.
+  expect(rowNames("IN")).toEqual(["Edge Two", "Isaac Brown", "Colin Simmons"]);
+  fireEvent.click(screen.getByText("Save & publish"));
+  await waitFor(() => expect(writes.length).toBe(1));
+  expect(writes[0][1].entries.map((e) => [e.last, e.order])).toEqual([["Two", 0], ["Brown", 1], ["Simmons", 2]]);
+});
+
+test("only the top 3 projected at a position get a graphic; projected don't count in IN", async () => {
+  const wrs = [1, 2, 3, 4].map((n) => ({ id: `w${n}`, First: "Wide", Last: `Out${n}`, Position: "WR", School: "Oregon" }));
+  render(<AdminPortalNews allPlayers={[...four, ...wrs]} />);
+  await addAll(["Colin Simmons"]);
+  for (const n of [1, 2, 3, 4]) {
+    fireEvent.change(screen.getByPlaceholderText("Search any player…"), { target: { value: `out${n}` } });
+    fireEvent.click((await screen.findByText(/adds as projected/)).closest("button"));
+    await waitFor(() => expect(rowNames("IN")).toContain(`Wide Out${n}`));
+  }
+  expect(screen.getByText(/In the Portal \(1\)/)).toBeTruthy();
+  expect(["Wide Out1", "Wide Out2", "Wide Out3", "Wide Out4"].map((n) => within(rowOf(n)).queryByText("GRAPHIC") ? "G" : "H")).toEqual(["G", "G", "G", "H"]);
+  // Move the 4th up past the 3rd: he gets the graphic, the 3rd loses it.
+  fireEvent.click(within(rowOf("Wide Out4")).getByTitle("Up one"));
+  expect(within(rowOf("Wide Out4")).getByText("GRAPHIC")).toBeTruthy();
+  expect(within(rowOf("Wide Out3")).getByText("HEADSHOT")).toBeTruthy();
+});
+
+test("CFB Universe: a roster player already on We-Draft adds as himself; a new one is added to We-Draft first", async () => {
+  const added = [];
+  render(<AdminPortalNews allPlayers={four} generateSlug={() => "x"} onPlayerAdded={(p) => added.push(p)} />);
+  fireEvent.click(await screen.findByText(/CFB Universe/));
+  fireEvent.change(screen.getByPlaceholderText("Search any player…"), { target: { value: "else" } });
+  fireEvent.click((await screen.findByText(/on We-Draft$/)).closest("button"));
+  await waitFor(() => expect(rowNames("IN")).toEqual(["Someone Else"]));
+  expect(universeAdds).toHaveLength(0);
+  fireEvent.change(screen.getByPlaceholderText("Search any player…"), { target: { value: "newguy" } });
+  fireEvent.click((await screen.findByText(/not on We-Draft yet/)).closest("button"));
+  await waitFor(() => expect(rowNames("IN")).toEqual(["Someone Else", "Brand Newguy"]));
+  expect(universeAdds[0]).toEqual([902, { pos: "DB", eligible: "2027", live: true, recruitYear: "2024" }]);
+  expect(added.map((p) => p.id)).toEqual(["new1"]);
+  expect(within(rowOf("Brand Newguy")).getByText("PROJECTED")).toBeTruthy();
 });
 
 const four = [

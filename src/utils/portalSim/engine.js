@@ -132,7 +132,13 @@ export function openNflWindow(state) {
     const d = M.nflDecision(p, state.cfg);
     // The real portal's season: only real decisions (Declared, out of
     // eligibility) — no modeled fence.
-    if (d.kind === "gone") {
+    // Crazy: some draft-bound players come back — and want out
+    // (cfg.crazyNflReturn; transferLeave sends them to the portal).
+    if (d.kind === "gone" && state.cfg.crazy && !state.live && !p.live && d.reason !== "exhausted"
+      && draw(state, `crazyBack|${p.id}`) < (state.cfg.crazyNflReturn ?? 0)) {
+      players[p.id] = { ...p, crazyBack: true };
+      log.push({ w: 0, stage: "nfl", kind: "returning", pid: p.id, team: p.team, reason: d.reason });
+    } else if (d.kind === "gone") {
       players[p.id] = { ...p, status: "declared", reason: d.reason };
       log.push({ w: 0, stage: "nfl", kind: "declared", pid: p.id, team: p.team, reason: d.reason });
     } else if (d.kind === "fence" && !state.live && !p.live) {
@@ -253,7 +259,13 @@ export function homeScores(state, p, offer = null) {
 }
 export const homeGrade = (state, p, offer = null) => M.gradeFrom(p, homeScores(state, p, offer));
 // His chance of entering the portal: the market against home (with an offer).
+// Can the sim send him into the portal? Only with at least one more season
+// to play (user, 2026-11-25) — known, not guessed (pool eligUnknown). The
+// real portal's players go in regardless.
+export const canEnterPortal = (p) => !!p.live || ((p.elig ?? 0) >= 1 && !p.eligUnknown);
+
 export const transferLeave = (state, p, offer = null) => {
+  if (!canEnterPortal(p)) return 0;
   const tier = state.teams[p.team].tier;
   const pull = M.ambition(p, state.cfg, tier) + M.benchFrustration(p, ptAt(state, p.team, p), state.cfg);
   const market = M.marketGrade(p, state.cfg, tier) + pull;
@@ -263,6 +275,9 @@ export const transferLeave = (state, p, offer = null) => {
   // marked as staying (likeliness 0 or 1) and academy players; a 2 or 3
   // still goes at least as often as his likeliness says.
   if (state.cfg.crazy) {
+    // Back from the draft (openNflWindow): he's going — only an offer to
+    // stay can keep him, and only crazyReturnKeep of the time.
+    if (p.crazyBack) return offer ? 1 - (state.cfg.crazyReturnKeep ?? 0.4) : 1;
     if (p.likely == null || p.likely <= 1) return chance;
     return Math.max(chance, M.withLikeliness(chance, p.likely, state.cfg));
   }
@@ -1057,7 +1072,7 @@ function openMarket(state) {
   const rs = cfg.reshuffle;
   const mk = cfg.market;
   Object.values(state.players).forEach((p) => {
-    if (p.status !== "roster" || state.teams[p.team]?.fcs) return;
+    if (p.status !== "roster" || state.teams[p.team]?.fcs || !canEnterPortal(p)) return;
     // 1. Pushed down by a signing.
     if (rs && signedAt.has(`${p.team}|${p.pos}`) && state.fitOpen?.[p.id] != null && (p.likely !== 0 || cfg.crazy) && !state.teams[p.team].academy) {
       const was = state.fitOpen[p.id];
@@ -1256,7 +1271,7 @@ function openRetainWindow(state) {
     // resolves with — academies included).
     const lean = transferLeave(state, p);
     if (draw(state, `enter|${p.id}`) >= lean) return;
-    players[p.id] = { ...p, status: "considering", considering: "transfer", lean, reason: M.transferReason(p, scores, state.cfg, homeTier) };
+    players[p.id] = { ...p, status: "considering", considering: "transfer", lean, reason: p.crazyBack ? "nflReturn" : M.transferReason(p, scores, state.cfg, homeTier) };
   });
   return { ...state, players, log, phase: "retain" };
 }
@@ -1293,7 +1308,7 @@ function shedRosters(state) {
     roster.forEach((p) => { count[p.pos] = (count[p.pos] || 0) + 1; });
     const keepMin = (pos) => (cfg.starters[pos] || 0) + (cfg.cpu.depth?.[pos] ?? 0) + 1;
     const order = roster
-      .filter((p) => p.pos !== "K" && p.pos !== "P" && (p.likely !== 0 || cfg.crazy))
+      .filter((p) => p.pos !== "K" && p.pos !== "P" && (p.likely !== 0 || cfg.crazy) && canEnterPortal(p))
       .map((p) => ({ p, v: effOf(p, cfg) + Math.min(p.elig || 0, 4) * 0.01 + draw(state, `shed|${p.id}`) * 0.01 }))
       .sort((a, b) => a.v - b.v);
     for (const { p } of order) {

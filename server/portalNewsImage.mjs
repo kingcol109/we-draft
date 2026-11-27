@@ -20,7 +20,7 @@ import { fileURLToPath } from "url";
 import { createRequire } from "module";
 import { featureImage, plainImage } from "./firstPickImage.mjs";
 import { transferInput, transferSlides, transferImageUrls } from "../src/utils/instagram/transfer.js";
-import { PORTAL_NEWS_DOC, PORTAL_NEWS_PATH, statsTitleOf } from "../src/utils/portalNews.js";
+import { PORTAL_NEWS_DOC, PORTAL_NEWS_PATH, statsTitleOf, isProjected, projectedGraphicIds, getsGraphic } from "../src/utils/portalNews.js";
 
 const require = createRequire(import.meta.url);
 const { renderPng, measure, pngSize } = require("./stream-manager/thumbnail");
@@ -31,8 +31,11 @@ const WD_LOGO = "wd-logo";
 // → { entry, shot } or null — his entry on the board and the shot his graphic uses.
 export async function portalNewsEntryOf(db, slug) {
   const snap = await db.collection(PORTAL_NEWS_DOC[0]).doc(PORTAL_NEWS_DOC[1]).get();
-  const entry = (snap.exists ? snap.data().entries || [] : []).find((e) => e.slug === slug);
+  const entries = snap.exists ? snap.data().entries || [] : [];
+  const entry = entries.find((e) => e.slug === slug);
   if (!entry?.id) return null;
+  // Projected past his position's top 3: no graphic (a headshot on the page).
+  if (!getsGraphic(entry, projectedGraphicIds(entries))) return null;
   const ph = await db.collection("playerPhotos").doc(entry.id).get();
   const shots = (ph.exists ? ph.data().action || [] : []).filter((a) => a?.url && a.firstPick);
   const shot = shots.find((s) => s.url === entry.shot) || shots[0] || null;
@@ -56,7 +59,7 @@ export async function portalNewsPng(db, slug, { width = 1080, format = "png" } =
     kind: entry.status === "committed" ? "transfer" : "portal", design: entry.design || "welcome",
     player: { ...player, First: player.First || entry.first, Last: player.Last || entry.last, Position: player.Position || entry.pos },
     from, fromName: entry.from, to, toName: entry.to || "",
-    photo: shot, stats: entry.stats, statsTitle: statsTitleOf(entry),
+    photo: shot, stats: entry.stats, statsTitle: statsTitleOf(entry), projected: isProjected(entry),
     brandLogo: WD_LOGO, badgeLogo: "", address: `WE-DRAFT.COM${PORTAL_NEWS_PATH.toUpperCase()}`,
   });
 

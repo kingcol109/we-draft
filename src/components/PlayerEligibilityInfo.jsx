@@ -504,11 +504,12 @@ function InfoBody({ answers, text, facts, factRows, rows, heading, player, color
                 <blockquote style={{ margin: "6px 0 0", padding: "2px 0 2px 14px", borderLeft: `4px solid ${color1}`, fontSize: isMobile ? "16px" : "19px", fontWeight: 700, fontStyle: "italic", lineHeight: 1.45, color: "#1f2937" }}>
                   “{x.a}”
                 </blockquote>
-                <div style={{ marginTop: 4, paddingLeft: 18, fontSize: isMobile ? "14px" : "15px", fontWeight: 800, color: "#5b6676" }}>
-                  — {[`${player.First || ""} ${player.Last || ""}`.trim(), monthYear(x.date)].filter(Boolean).join(", ")}
-                </div>
               </div>
             ))}
+          </div>
+          {/* One byline under the last answer — name and the newest answer's month. */}
+          <div style={{ marginTop: 6, paddingLeft: 18, fontSize: isMobile ? "14px" : "15px", fontWeight: 800, color: "#5b6676" }}>
+            — {[`${player.First || ""} ${player.Last || ""}`.trim(), monthYear(answers.map((x) => String(x.date || "")).sort().pop())].filter(Boolean).join(", ")}
           </div>
         </div>
       )}

@@ -52,6 +52,11 @@ const RECRUIT_CLASSES = Array.from({ length: 7 }, (_, i) => SEASON - 6 + i);
 // Season stat categories kept for the Stats tab (returns/fumbles dropped).
 const STAT_CATS = new Set(["passing", "rushing", "receiving", "defensive", "interceptions", "kicking", "punting"]);
 const num = (v) => { const x = Number(v); return Number.isFinite(x) ? x : v; };
+// The Defense table's position groups (its filter — components/CfbLeaders.js
+// DEF_GROUP, the same map): a We-Draft player's own Position when he's
+// linked (CFBD lumps ends and tackles into DL), else CFBD's roster position.
+const DEF_GROUPS = ["EDGE", "DL", "LB", "DB"];
+const DEF_GROUP = { EDGE: "EDGE", DE: "EDGE", OLB: "LB", DL: "DL", DT: "DL", NT: "DL", LB: "LB", ILB: "LB", MLB: "LB", DB: "DB", CB: "DB", S: "DB", FS: "DB", SS: "DB", SAF: "DB", NB: "DB" };
 
 // National leaders: FBS only — the same conferences as the CFB page's Teams
 // tab (the season stats include FCS players).
@@ -82,10 +87,12 @@ const LEADER_CATS = [
 const TABLE_POOL = 50;
 const TABLE_DEFS = {
   passing: { cats: ["passing"], by: [["passing", "YDS"], ["passing", "TD"], ["passing", "ATT"], ["passing", "COMPLETIONS"]] },
-  // qbPool: also each stat's top TABLE_POOL QBs, for the QB filter.
-  rushing: { cats: ["rushing"], by: [["rushing", "YDS"], ["rushing", "TD"], ["rushing", "CAR"]], qbPool: true },
-  receiving: { cats: ["receiving"], by: [["receiving", "YDS"], ["receiving", "REC"], ["receiving", "TD"]] },
-  defense: { cats: ["defensive", "interceptions"], by: [["defensive", "TOT"], ["defensive", "SOLO"], ["defensive", "SACKS"], ["defensive", "TFL"], ["defensive", "PD"], ["interceptions", "INT"]] },
+  // posPool: also each stat's top TABLE_POOL players at that position, for
+  // the table's position filter (Rushing: QBs; Receiving: tight ends).
+  rushing: { cats: ["rushing"], by: [["rushing", "YDS"], ["rushing", "TD"], ["rushing", "CAR"]], posPool: "QB" },
+  receiving: { cats: ["receiving"], by: [["receiving", "YDS"], ["receiving", "REC"], ["receiving", "TD"]], posPool: "TE" },
+  // groupPool: each stat's top TABLE_POOL in each position group (g on each row), for its filter.
+  defense: { cats: ["defensive", "interceptions"], by: [["defensive", "TOT"], ["defensive", "SOLO"], ["defensive", "SACKS"], ["defensive", "TFL"], ["defensive", "PD"], ["interceptions", "INT"]], groupPool: true },
   kicking: { cats: ["kicking"], by: [["kicking", "FGM"], ["kicking", "PTS"], ["kicking", "FGA"], ["kicking", "XPM"], ["kicking", "LONG"]] },
   punting: { cats: ["punting"], by: [["punting", "NO"], ["punting", "In 20"], ["punting", "LONG"]] },
 };
@@ -99,8 +106,12 @@ async function run() {
 
   const linked = await db.collection("cfbdPlayers").where("mappingStatus", "in", ["suggested", "verified"]).select("wedraftSlug", "wedraftPlayerId").get();
   const slugOf = new Map(linked.docs.map((d) => [d.id, d.data().wedraftSlug || null]));
-  const wdPlayers = await db.collection("players").select("Eligible").get();
+  const wdPlayers = await db.collection("players").select("Eligible", "Position").get();
   const eligibleOf = new Map(wdPlayers.docs.map((d) => [d.id, Number(d.data().Eligible) || null]));
+  const wdPosOf = new Map(wdPlayers.docs.map((d) => [d.id, d.data().Position || null]));
+  const wdPosition = new Map(linked.docs.map((d) => [d.id, wdPosOf.get(d.data().wedraftPlayerId) || null]));
+  // CFBD id → his Defense table group ("EDGE" / "DL" / "LB" / "DB"), or null.
+  const defGroupOf = (id, cfbdPos) => DEF_GROUP[String(wdPosition.get(id) || "").toUpperCase()] || DEF_GROUP[String(cfbdPos || "").toUpperCase()] || null;
   const wdEligible = new Map(linked.docs.map((d) => [d.id, eligibleOf.get(d.data().wedraftPlayerId) || null]));
 
   const rows = await cfbd.roster({ year: SEASON });
@@ -212,13 +223,15 @@ async function run() {
         const n = perClass.get(dc) || 0;
         if (n < TABLE_POOL) { pool.add(id); perClass.set(dc, n + 1); }
       }
-      if (def.qbPool) ranked.filter(([id]) => fbsRow(id).pos === "QB").slice(0, TABLE_POOL).forEach(([id]) => pool.add(id));
+      if (def.posPool) ranked.filter(([id]) => fbsRow(id).pos === def.posPool).slice(0, TABLE_POOL).forEach(([id]) => pool.add(id));
+      if (def.groupPool) DEF_GROUPS.forEach((g) => ranked.filter(([id]) => defGroupOf(id, fbsRow(id).pos) === g).slice(0, TABLE_POOL).forEach(([id]) => pool.add(id)));
     }
     tables[key] = [...pool].map((id) => {
       const st = statsOf.get(id);
       const s = {};
       def.cats.forEach((c) => { if (st[c]) s[c] = st[c]; });
-      return { ...fbsRow(id), s };
+      const row = fbsRow(id);
+      return def.groupPool ? { ...row, g: defGroupOf(id, row.pos), s } : { ...row, s };
     });
   }
   const byTeam = new Map();

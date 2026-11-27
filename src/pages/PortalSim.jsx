@@ -83,7 +83,7 @@ const LINE = "#1f2b42";
 const POS_TABS = ["QB", "RB", "WR", "TE", "OL", "DL", "EDGE", "LB", "DB", "K/P"];
 const ROLE_LABEL = { starter: "Starter", rotation: "Rotation", reserve: "Reserve", none: "Didn't play" };
 const GONE_LABEL = { exhausted: "Out of eligibility", declared: "Declared", grade: "First-round grade", chose: "Chose the draft" };
-const WANTS_LABEL = { level: "Wants a bigger stage", snaps: "Wants snaps", money: "Wants a bigger NIL deal", home: "Wants to be closer to home", winning: "Wants to win", development: "Wants to develop", roster: "Cut for roster space", released: "Released" };
+const WANTS_LABEL = { nflReturn: "Skipped the draft — wants out", level: "Wants a bigger stage", snaps: "Wants snaps", money: "Wants a bigger NIL deal", home: "Wants to be closer to home", winning: "Wants to win", development: "Wants to develop", roster: "Cut for roster space", released: "Released" };
 // The portal mark, in white (public/logos).
 const PORTAL_MARK = "/logos/transfer-portal-white.svg";
 const DESK_FILTERS = [["all", "All"], ["mine", "My Team"]];
@@ -262,7 +262,7 @@ export default function PortalSim({ page = null }) {
 // A setting: a label, its pill options (one segmented group — any in
 // `apart` sit a little away from it, in `apartColor`), a note under them.
 const FREQ_OPTIONS = [["less", "Less"], ["default", "Default"], ["more", "More"], ["crazy", "Crazy"]];
-const FREQ_NOTE = { less: "Fewer players hit the portal.", default: "The portal as the sim models it.", more: "More players looking to move.", crazy: "Total chaos — anyone can go, even players who'd never leave." };
+const FREQ_NOTE = { less: "Fewer players hit the portal.", default: "The portal as the sim models it.", more: "More players looking to move.", crazy: "Total chaos — anyone can go, even players who'd never leave, and some draft-bound stars skip the NFL for the portal. Crazy runs don't count toward community stats." };
 function Choice({ label, note, options, value, onChange, on = BLUE, apart = [], apartColor = "#e5484d" }) {
   const seg = (k, text, color) => (
     <button key={k} type="button" onClick={() => onChange(k)} aria-pressed={value === k} style={{

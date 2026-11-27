@@ -6,8 +6,10 @@
 // /cfb/stats shows every category's top 5 as cards, /cfb/stats/:group
 // (passing, rushing, …) that group's sortable national stat table(s)
 // (cfbLeaders/tables — read only once a group is opened — in TeamStats.js's
-// tables, filterable by draft class via ?class=2028, and Rushing by QB via
-// ?pos=qb / ?pos=noqb), and /cfb/stats/:cat (passYds, …)
+// tables, filterable by draft class via ?class=2028, Rushing by QB via
+// ?pos=qb / ?pos=noqb, Receiving by tight end via ?pos=te / ?pos=note and
+// Defense by position group via ?pos=edge / dl / lb / db),
+// and /cfb/stats/:cat (passYds, …)
 // that category's full list — all under the Player Stats heading. Team
 // Stats (/cfb/stats/team-offense, /cfb/stats/team-defense; /cfb/stats/teams
 // is Offense): every FBS team's yards and points per game, gained or
@@ -262,13 +264,38 @@ function TeamStatsView({ data, table, schoolsByName, isMobile }) {
   );
 }
 
+// Position filters on a group's table (?pos=): Rushing by QB, Receiving by
+// tight end — "qb" only / "noqb" without (the sync keeps each stat's top 50
+// at that position in the table, scripts/syncCfbdRosters.js posPool).
+const POS_FILTERS = {
+  Rushing: { table: "rushing", pos: "QB", options: [[null, "All"], ["qb", "QBs only"], ["noqb", "No QBs"]] },
+  Receiving: { table: "receiving", pos: "TE", options: [[null, "All"], ["te", "TEs only"], ["note", "No TEs"]] },
+};
+// Defense: by position group — EDGE / DL / LB / DB. Each row's g (the sync's:
+// his We-Draft position when he's linked), else his CFBD position mapped
+// (scripts/syncCfbdRosters.js DEF_GROUP — the same map).
+const DEF_GROUP = { EDGE: "EDGE", DE: "EDGE", OLB: "LB", DL: "DL", DT: "DL", NT: "DL", LB: "LB", ILB: "LB", MLB: "LB", DB: "DB", CB: "DB", S: "DB", FS: "DB", SS: "DB", SAF: "DB", NB: "DB" };
+const DEF_FILTER = { table: "defense", options: [[null, "All"], ["edge", "EDGE"], ["dl", "DL"], ["lb", "LB"], ["db", "DB"]] };
+const defGroupOf = (p) => p.g || DEF_GROUP[String(p.pos || "").toUpperCase()] || null;
+// The ?pos= value if it's one of this group's (else none).
+const filterOf = (group) => (group === "Defense" ? DEF_FILTER : POS_FILTERS[group]);
+const posFilterOf = (group, v) => (filterOf(group)?.options.some(([o]) => o && o === v) ? v : null);
+const posMatch = (group, key, v, p) => {
+  const f = filterOf(group);
+  const on = posFilterOf(group, v);
+  if (!f || key !== f.table || !on) return true;
+  if (group === "Defense") return defGroupOf(p) === on.toUpperCase();
+  return (on === f.pos.toLowerCase()) === (String(p.pos || "").toUpperCase() === f.pos);
+};
+
 export default function CfbLeaders({ schoolsByName, catKey, isMobile }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [tables, setTables] = useState(null);
   const [params, setParams] = useSearchParams();
   const draftClass = Number(params.get("class")) || null;
-  const qbFilter = ["qb", "noqb"].includes(params.get("pos")) ? params.get("pos") : null;
+  // A table's position filter (POS_FILTERS): "qb" / "noqb", "te" / "note".
+  const posParam = params.get("pos") || null;
   // One filter changed, the others kept.
   const setFilter = (key, value) => {
     const next = new URLSearchParams(params);
@@ -388,11 +415,11 @@ export default function CfbLeaders({ schoolsByName, catKey, isMobile }) {
               ))}
             </div>
           )}
-          {group === "Rushing" && (
+          {filterOf(group) && (
             <div className="cfbl-scroll" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
               <span style={{ flexShrink: 0, fontSize: "11px", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#7a8597", marginRight: "4px" }}>Position</span>
-              {[[null, "All"], ["qb", "QBs only"], ["noqb", "No QBs"]].map(([v, label]) => (
-                <button key={label} type="button" style={{ ...pill(v === qbFilter), cursor: "pointer", fontFamily: "inherit" }}
+              {filterOf(group).options.map(([v, label]) => (
+                <button key={label} type="button" style={{ ...pill(v === posFilterOf(group, posParam)), cursor: "pointer", fontFamily: "inherit" }}
                   onClick={() => setFilter("pos", v)}>
                   {label}
                 </button>
@@ -402,7 +429,7 @@ export default function CfbLeaders({ schoolsByName, catKey, isMobile }) {
           {GROUP_TABLES[group].map((key) => {
             const section = SECTIONS.find((x) => x.key === key);
             const players = (tables[key] || []).filter((p) => section.has(p.s) && (!draftClass || p.dc === draftClass)
-              && (key !== "rushing" || !qbFilter || (qbFilter === "qb") === (p.pos === "QB")));
+              && posMatch(group, key, posParam, p));
             return (
               <div key={key} style={{ border: `2px solid ${SITE_BLUE}`, borderRadius: "10px", overflow: "hidden", background: "#fff" }}>
                 {players.length ? (

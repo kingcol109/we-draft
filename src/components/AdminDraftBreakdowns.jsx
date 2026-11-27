@@ -14,7 +14,8 @@
 //
 // The show, and its frames (numbered so Premiere sorts them):
 //   00 title       a full card on an action shot — the cold open
-//   01 intro       top plays in the film window; the panel pitches subscribing
+//   01 intro       top plays, the film big and centered, the face cam
+//                  inset (no panel, no tracker); a portal's has the move
 //   02 background  no film: a card over the window — photo, hometown, high
 //                  school, recruiting, measurements, career stats, career
 //                  path; the panel has his season's four stats
@@ -54,6 +55,8 @@ import WeDraftLogo from "../assets/Logo2.png";
 import WeDraftOutline from "../assets/LogoOutlineBlue.png";
 import { fetchPortalManual } from "../utils/portalData";
 import { SILHOUETTE, BAND } from "../utils/proDayIcon";
+import BreakdownStudio from "./studio/BreakdownStudio";
+import StreamWindow from "./studio/StreamWindow";
 
 // The portal's arrows, white (for the dark thumbnail).
 const PORTAL_LOGO_WHITE = "/logos/transfer-portal-white.svg";
@@ -76,6 +79,8 @@ const W = 1920;
 const H = 1080;
 const KINGCOLD_UID = "pYSpX6IRyHdAlYpFP5NNbQ19ARI3"; // King Cold Sports — the admin's own evaluations (as AdminGo.jsx)
 const BD_DOC = doc(db, "config", "draftBreakdowns");
+// The player last opened in a breakdown tab: { id, team: { nfl } | { school } | null }.
+export const VIDEO_PLAYER_KEY = "wd.videoPlayer";
 const FONTS_CSS = "https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=Bebas+Neue&family=Montserrat:wght@900&display=block";
 const DISP = '"Bebas Neue", Impact, "Arial Narrow", sans-serif';
 const BODY = '"Barlow Condensed", "Arial Narrow", Arial, sans-serif';
@@ -85,9 +90,40 @@ const MAX_TRAITS = 5;
 const MAX_FITS = 3;
 const STAT_COUNT = 4;
 
-const VID = { x: 36, y: 150, w: 1440, h: 810 };
-const FACE = { x: 1500, y: 36, w: 384, h: 216 };
+export const VID = { x: 36, y: 150, w: 1440, h: 810 };
+export const FACE = { x: 1500, y: 36, w: 384, h: 216 };
 const PANEL = { x: 1500, y: 276, w: 384, h: 684 };
+// The intro (not a portal's) is the cold open, built for retention: the best
+// clip full screen (1080p at 100%), nothing on it but a soft vignette, the
+// face cam (1080p at ~17%) in the top-right corner with a thin gold ring, a
+// name tag that pops in and away, and the thumbnail's hook words flashed
+// first. Then the Background clip zooms out of it: the full-screen window
+// shrinks into the normal film window as the header, panel and tracker come
+// in around it (ZOOM_S), the face cam easing into its usual spot.
+export const VID_INTRO = { x: 0, y: 0, w: W, h: H };
+export const FACE_INTRO = { x: W - 36 - 320, y: 36, w: 320, h: 180 };
+export const ZOOM_S = 0.8;
+const INTRO_WIDE_S = 6;
+const introWide = (bd, seg) => seg === "intro" && !portalMode(bd);
+const lerpBox = (a, b, z) => ({ x: a.x + (b.x - a.x) * z, y: a.y + (b.y - a.y) * z, w: a.w + (b.w - a.w) * z, h: a.h + (b.h - a.h) * z });
+// The background clip's zoom-out: z (0 → 1) at the clip's time, and the
+// time left for the rest of its animation (rt, 0 → 1). null when none.
+function zoomOf(bd, view) {
+  if (portalMode(bd) || view.seg !== "background" || view.anim !== "background" || view.t == null) return null;
+  const total = animSeconds(bd, "background");
+  const sec = view.t * total;
+  return { z: ease(clamp01(sec / ZOOM_S)), rt: clamp01((sec - ZOOM_S) / (total - ZOOM_S)) };
+}
+// The film and face cam windows for a view ({ seg, anim?, t? }) — the intro's
+// own, the zoom's in-between, else the usual. hold: keep the last film frame
+// up (the intro's clip, shrinking with the zoom, until the card covers it).
+export const boxesFor = (bd, view) => {
+  const v = typeof view === "string" ? { seg: view } : view;
+  if (introWide(bd, v.seg)) return { VID: VID_INTRO, FACE: FACE_INTRO };
+  const zo = zoomOf(bd, v);
+  if (zo) return { VID: lerpBox(VID_INTRO, VID, zo.z), FACE: lerpBox(FACE_INTRO, FACE, zo.z), hold: true };
+  return { VID, FACE };
+};
 const TRACK = { x: 36, y: 980, w: 1440, h: 64 };
 const RIBBON_H = 64;
 
@@ -101,15 +137,15 @@ const SEGMENTS = [
 ];
 // A draft reaction's verdict is its Pick Grade.
 const reactionMode = (bd) => bd?.mode === "reaction";
-const segsOf = (bd) => (reactionMode(bd) ? SEGMENTS.map((s) => (s.key === "verdict" ? { key: "pickgrade", label: "PICK GRADE", chapter: "Pick Grade" } : s)) : SEGMENTS);
-const DEFAULT_TIMES = { intro: 15, background: 30, strengths: 80, weaknesses: 55, verdict: 45, pickgrade: 40, community: 15 };
+export const segsOf = (bd) => (reactionMode(bd) ? SEGMENTS.map((s) => (s.key === "verdict" ? { key: "pickgrade", label: "PICK GRADE", chapter: "Pick Grade" } : s)) : SEGMENTS);
+export const DEFAULT_TIMES = { intro: 15, background: 30, strengths: 80, weaknesses: 55, verdict: 45, pickgrade: 40, community: 15 };
 // A portal breakdown's verdict is no grade / comp / fits — it celebrates the move.
 const PORTAL_CHAPTERS = { verdict: "The Verdict" };
 const VERDICT_ITEMS = [["grade", "Draft grade"], ["comp", "Player comp"], ["fits", "Team fits"]];
 
 // ── Fonts: the stylesheet once, then each face loaded before drawing ──
 let fontsReady = null;
-function ensureFonts() {
+export function ensureFonts() {
   if (fontsReady) return fontsReady;
   fontsReady = new Promise((resolve) => {
     const load = () => Promise.all([disp(40), body(30, 800), body(30, 700), body(30, 600), '900 40px "Montserrat"'].map((f) => document.fonts.load(f))).then(resolve, resolve);
@@ -373,7 +409,14 @@ const countUp = (value, p) => {
 export const ANIM_SECONDS = { intro: 3.2, background: 2.6, list: 1.6, swap: 2.2, verdict: 1.8, reveal: 1.5, community: 3, celebrate: 4, pickgrade: 2.4 };
 // A portal background runs longer: the new school lands on the career path last.
 // A reaction's background opens on the draft moment first.
-const animSeconds = (bd, anim) => (anim === "background" && bd.mode === "portal" ? 4.6 : anim === "background" && bd.mode === "reaction" ? 6.4 : ANIM_SECONDS[anim]);
+// Everyone else's intro is the cold open (its name tag and hook), and their
+// background clip opens with the zoom out of it (ZOOM_S more).
+export const animSeconds = (bd, anim) => {
+  if (bd.mode === "portal") return anim === "background" ? 4.6 : ANIM_SECONDS[anim];
+  if (anim === "intro") return INTRO_WIDE_S;
+  if (anim === "background") return (bd.mode === "reaction" ? 6.4 : ANIM_SECONDS.background) + ZOOM_S;
+  return ANIM_SECONDS[anim];
+};
 export const ANIM_HOLD = 0.5;
 
 const fullName = (bd) => `${bd.first || ""} ${bd.last || ""}`.trim().toUpperCase();
@@ -432,8 +475,21 @@ export async function drawBreakdown(canvas, bd, view, branding) {
     else drawTitle(ctx, bd, reaction ? { ...img, logo: pickLogo || logo } : img);
     return;
   }
-  // The segment's own coming-in time (a verdict reveal leaves the rest still).
-  const tin = view.anim && view.anim !== "reveal" ? view.t : undefined;
+  if (introWide(bd, view.seg)) { drawColdOpen(ctx, bd, img, view.anim === "intro" ? view.t : undefined, reaction); return; }
+  // The background clip's zoom out of the cold open: the whole frame drawn
+  // scaled so the film window is the zoom's window, the face cam on its own.
+  const zo = zoomOf(bd, view);
+  // The segment's own coming-in time (a verdict reveal leaves the rest still);
+  // after a zoom, what's left of the clip.
+  const tin = zo ? zo.rt : view.anim && view.anim !== "reveal" ? view.t : undefined;
+  const faceBox = zo ? lerpBox(FACE_INTRO, FACE, zo.z) : FACE;
+  ctx.save();
+  if (zo && zo.z < 1) {
+    const box = lerpBox(VID_INTRO, VID, zo.z);
+    const k = box.w / VID.w;
+    ctx.translate(box.x - VID.x * k, box.y - VID.y * k);
+    ctx.scale(k, k);
+  }
 
   backdrop(ctx, 0, 0, W, H);
   // Portal: the header's logo is the new school's — in the intro's clip it
@@ -455,23 +511,109 @@ export async function drawBreakdown(canvas, bd, view, branding) {
   if (view.seg === "pickgrade") cardPickGrade(ctx, bd, img, tin);
   if (view.seg === "verdict") { if (portalOn) cardCelebrate(ctx, bd, img, tin); else cardVerdict(ctx, bd, view, img, tin); }
   if (view.seg === "community") cardCommunity(ctx, bd, img, tin);
-  frameBox(ctx, FACE, GOLD, 5, 14, true);
   drawPanel(ctx, bd, view, img, bt);
   drawTracker(ctx, view.seg, phase(tin, 0, 0.4), segsOf(bd));
   contain(ctx, wd, PANEL.x, TRACK.y, PANEL.w, TRACK.h);
+  ctx.restore();
+  frameBox(ctx, faceBox, GOLD, zo ? 4 + zo.z : 5, 14, true);
+}
+
+// The cold open (the intro, not a portal's): transparent over the full-screen
+// clip — a soft vignette pulling the eye in, the face cam's thin gold ring,
+// the hook words (a hook thumbnail's) flashed over the first ~2 s, then a
+// name tag sliding in at ~1 s and away by ~5 s. t: the clip's time (0–1 over
+// INTRO_WIDE_S); undefined is the still — just the vignette and the ring.
+function drawColdOpen(ctx, bd, { logo, pickLogo }, t, reaction) {
+  const v = ctx.createRadialGradient(W / 2, H / 2, H * 0.45, W / 2, H / 2, W * 0.62);
+  v.addColorStop(0, "rgba(0,10,30,0)");
+  v.addColorStop(1, "rgba(0,10,30,0.5)");
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, W, H);
+  // The face cam: a thin ring, a soft shadow so it sits on any footage.
+  ctx.save();
+  ctx.shadowColor = "rgba(0,10,30,0.5)";
+  ctx.shadowBlur = 24;
+  frameBox(ctx, FACE_INTRO, GOLD, 4, 14, false);
+  ctx.restore();
+  frameBox(ctx, FACE_INTRO, GOLD, 4, 14, true);
+  const sec = t == null ? Infinity : t * INTRO_WIDE_S;
+  const at = (a, b) => (t == null ? 1 : ease(clamp01((sec - a) / (b - a))));
+  // The hook: the thumbnail's words, so the click pays off at once.
+  const hook = bd.thumbMode === "hook" ? hookLines(bd.thumbHook) : [];
+  const hookP = hook.length && t != null ? Math.min(pop(sec, 0, 0.35), 1 - at(1.8, 2.2)) : 0;
+  if (hookP > 0) {
+    let sz = Math.min(190, Math.floor(620 / hook.length));
+    ctx.font = heavy(sz);
+    while (sz > 60 && hook.some((l) => ctx.measureText(l).width > 1400)) { sz -= 4; ctx.font = heavy(sz); }
+    const lh = sz * 0.96;
+    const top = H / 2 - (hook.length * lh) / 2;
+    ctx.save();
+    ctx.globalAlpha *= clamp01(hookP);
+    scaled(ctx, 0.85 + 0.15 * hookP, W / 2, H / 2, () => {
+      ctx.shadowColor = "rgba(0,10,30,0.7)";
+      ctx.shadowBlur = 40;
+      ctx.shadowOffsetY = 10;
+      ctx.fillStyle = "#ffffff";
+      ctx.textAlign = "center";
+      ctx.font = heavy(sz);
+      hook.forEach((l, i) => ctx.fillText(l, W / 2, top + sz * 0.76 + i * lh));
+      ctx.textAlign = "left";
+    });
+    ctx.restore();
+  }
+  // The name tag, lower left: in at 1 s, out by 5.2 s.
+  const p = at(1, 1.45) * (1 - (t == null ? 1 : at(4.8, 5.2)));
+  if (p <= 0) return;
+  const tl = reaction ? pickLogo || logo : logo;
+  const name = fullName(bd) || "PLAYER NAME";
+  const sub = (reaction ? [bd.pos, bd.school, pickLine(bd)] : [bd.pos, bd.school, bd.cls && `${bd.cls} DRAFT`]).filter(Boolean).join("  ·  ").toUpperCase();
+  const th = 150;
+  const tx = 56;
+  const ty = H - 56 - th;
+  ctx.font = disp(84);
+  const nw = Math.min(ctx.measureText(name).width, 900);
+  ctx.font = body(30, 800);
+  const sw = Math.min(ctx.measureText(sub).width + 4, 900);
+  const lw = tl ? 118 : 0;
+  const tw = 40 + lw + Math.max(nw, sw) + 48;
+  animIn(ctx, p, -80, 0, () => {
+    ctx.save();
+    ctx.shadowColor = "rgba(0,10,30,0.55)";
+    ctx.shadowBlur = 30;
+    ctx.shadowOffsetY = 10;
+    rr(ctx, tx, ty, tw, th, 16);
+    ctx.fillStyle = alpha(NAVY, 0.92);
+    ctx.fill();
+    ctx.restore();
+    ctx.save();
+    rr(ctx, tx, ty, tw, th, 16);
+    ctx.clip();
+    ctx.fillStyle = GOLD;
+    ctx.fillRect(tx, ty, 12, th);
+    ctx.restore();
+    if (tl) contain(ctx, tl, tx + 36, ty + 21, 108, 108);
+    const x0 = tx + 40 + lw;
+    ctx.fillStyle = "#ffffff";
+    fit(ctx, name, x0, ty + 86, 900, 84, 40);
+    ctx.fillStyle = GOLD;
+    ctx.letterSpacing = "1px";
+    fit(ctx, sub, x0 + 2, ty + 124, 900, 30, 14, "left", (sz) => body(sz, 800));
+    ctx.letterSpacing = "0px";
+  });
 }
 
 // swapTo: { logo, p } — a second logo fading in over the first (the portal's move).
-function drawHeader(ctx, bd, logo, swapTo) {
+// box: the film window the badge lines up with.
+function drawHeader(ctx, bd, logo, swapTo, box = VID) {
   if (swapTo) {
     contain(ctx, logo, 36, 24, 104, 104, 1 - swapTo.p);
     scaled(ctx, 0.7 + 0.3 * swapTo.p, 88, 76, () => contain(ctx, swapTo.logo, 36, 24, 104, 104, swapTo.p));
   } else contain(ctx, logo, 36, 24, 104, 104);
-  const x0 = logo || swapTo ? 160 : VID.x;
+  const x0 = logo || swapTo ? 160 : box.x;
   ctx.font = disp(36);
   const badge = portalMode(bd) ? "TRANSFER PORTAL BREAKDOWN" : `${bd.cls ? `${bd.cls} ` : ""}DRAFT ${reactionMode(bd) ? "REACTION" : "BREAKDOWN"}`;
   const bw = ctx.measureText(badge).width + 60;
-  const bx = VID.x + VID.w - bw;
+  const bx = box.x + box.w - bw;
   rr(ctx, bx, 50, bw, 58, 29);
   ctx.fillStyle = GOLD;
   ctx.fill();
@@ -551,15 +693,17 @@ function panelShell(ctx, title, ribbon = GOLD, ribbonInk = NAVY, fill = "#ffffff
 }
 function drawPanel(ctx, bd, view, img, t) {
   const seg = view.seg;
-  if (seg === "intro") { if (portalMode(bd)) panelMove(ctx, bd, img, t); else panelSubscribe(ctx, bd, img, t); }
-  else if (seg === "background") panelSeason(ctx, bd, t);
+  // Only a portal's intro has a panel (the move, with its own subscribe); the
+  // subscribe pitch sits beside everyone else's background card.
+  if (seg === "intro") panelMove(ctx, bd, img, t);
+  else if (seg === "background") { if (portalMode(bd)) panelSeason(ctx, bd, t); else panelSubscribe(ctx, bd, img, t); }
   else if (seg === "strengths" || seg === "weaknesses") panelList(ctx, bd, seg, view.step, t, view.anim === "swap");
   else if (seg === "verdict" || seg === "pickgrade") panelKeyTraits(ctx, bd, t);
   else panelYourTurn(ctx, bd, t);
   ctx.restore();
 }
 
-// Intro: the pitch to subscribe — MORE DRAFT BREAKDOWNS / ALL WEEK, the
+// Background (beside the card): the pitch to subscribe — MORE DRAFT BREAKDOWNS / ALL WEEK, the
 // button, the King Cold Sports logo under it. Animated: the words pop in
 // line by line, ALL WEEK slides in over its underline, the button pops,
 // pulses twice with a shine across it.
@@ -638,7 +782,7 @@ function panelSubscribe(ctx, bd, { kcs }, t) {
   });
 }
 
-// Background: his season — big numbers on navy, each with its national
+// Intro (a portal's background): his season — big numbers on navy, each with its national
 // rank when it's top 50. Animated: the ribbon drops, the rows slide in and
 // count up.
 function panelSeason(ctx, bd, t) {
@@ -834,13 +978,21 @@ function cardTitle(ctx, text, y, p = 1) {
 }
 
 // Background: his cutout on a tile in his school's colors (moved and sized
-// in the editor), measurements, career stats, career path. Animated: the
-// card fills in, the tile slides in and he rises into it, the measurements
-// pop in one by one, the stat rows slide in, the career path draws left to right.
+// in the editor), measurements, career stats, career path. Animated, kept
+// simple: the card fills in and everything on it fades up together. A portal's
+// new school / a reaction's NFL team still lands on the career path last.
 export const BG_TILE = { x: VID.x + 32, y: VID.y + 32, w: 520, h: VID.h - 64 };
 export const DEFAULT_BG_POS = { x: BG_TILE.x + BG_TILE.w / 2, y: BG_TILE.y + BG_TILE.h, s: 1 };
-function cardBackground(ctx, bd, { tileLogo: logo, cutout, career, careerLogos, table, tableLogos, states }, t) {
-  cardShell(ctx, phase(t, 0, 0.25));
+function cardBackground(ctx, bd, { tileLogo: logo, cutout, career, careerLogos, table, tableLogos, states }, tin) {
+  cardShell(ctx, phase(tin, 0, 0.25));
+  // One fade-up for the whole card's contents; inside it, everything is
+  // drawn finished (t undefined) — except the new stop's landing (tl).
+  const landing = portalMode(bd) || reactionMode(bd);
+  const tl = landing ? tin : undefined;
+  animIn(ctx, phase(tin, 0.12, 0.5), 0, 30, () => cardBackgroundBody(ctx, bd, { logo, cutout, career, careerLogos, table, tableLogos, states }, undefined, tl));
+  ctx.restore();
+}
+function cardBackgroundBody(ctx, bd, { logo, cutout, career, careerLogos, table, tableLogos, states }, t, tl) {
   const { x, y, h } = VID;
   const pad = 32;
   const tile = BG_TILE;
@@ -937,7 +1089,7 @@ function cardBackground(ctx, bd, { tileLogo: logo, cutout, career, careerLogos, 
   const room = y + h - pad - ry;
   // A new stop lands last: the portal's new school, a reaction's NFL team.
   const portalOn = portalMode(bd) || reactionMode(bd);
-  const newAt = portalOn ? phase(t, 0.84, 0.9) : 1; // the ring's handover
+  const newAt = portalOn ? phase(tl, 0.84, 0.9) : 1; // the ring's handover
   const disc = (cx, cy, d, r) => {
     ctx.beginPath();
     ctx.arc(cx, cy, d / 2, 0, Math.PI * 2);
@@ -955,7 +1107,7 @@ function cardBackground(ctx, bd, { tileLogo: logo, cutout, career, careerLogos, 
   };
   // The new school's gold burst, rings running out as it lands.
   const burst = (cx, cy, d) => {
-    const b = t == null ? 0 : clamp01((t - 0.86) / 0.14);
+    const b = tl == null ? 0 : clamp01((tl - 0.86) / 0.14);
     if (b <= 0 || b >= 1) return;
     ctx.save();
     ctx.globalAlpha *= 1 - b;
@@ -979,8 +1131,8 @@ function cardBackground(ctx, bd, { tileLogo: logo, cutout, career, careerLogos, 
     // The old stops come in through 0.82; the new school after them.
     const isNew = (i) => portalOn && stops[i]?.[0].isNew;
     const olds = stops.filter(([r]) => !(portalOn && r.isNew)).length;
-    const nodeP = (i) => (isNew(i) ? phase(t, 0.84, 0.96) : stagger(t, i, olds, 0.64, portalOn ? 0.82 : 0.98, 0.45));
-    const nodePop = (i) => (isNew(i) ? pop(t, 0.84, 0.98) : nodeP(i) > 0 ? pop(t, 0.64 + i * (portalOn ? 0.05 : 0.08), 0.78 + i * (portalOn ? 0.05 : 0.08)) : 0);
+    const nodeP = (i) => (isNew(i) ? phase(tl, 0.84, 0.96) : stagger(t, i, olds, 0.64, portalOn ? 0.82 : 0.98, 0.45));
+    const nodePop = (i) => (isNew(i) ? pop(tl, 0.84, 0.98) : nodeP(i) > 0 ? pop(t, 0.64 + i * (portalOn ? 0.05 : 0.08), 0.78 + i * (portalOn ? 0.05 : 0.08)) : 0);
     if (stops.length <= 2) {
       // One or two stops: a big logo with its words beside it, a gold chevron between.
       const d = Math.min(room - 40, 150);
@@ -1026,10 +1178,10 @@ function cardBackground(ctx, bd, { tileLogo: logo, cutout, career, careerLogos, 
         ctx.fillStyle = alpha(GOLD, 0.55);
         const last = isNew(stops.length - 1);
         const span = rw - nw - (last ? nw : 0);
-        ctx.fillRect(rx + nw / 2, top + d / 2 - 3, span * phase(t, 0.64, last ? 0.8 : 0.95), 6);
+        ctx.fillRect(rx + nw / 2, top + d / 2 - 3, span, 6);
         if (last) {
           ctx.fillStyle = GOLD;
-          ctx.fillRect(rx + nw / 2 + span, top + d / 2 - 4, nw * phase(t, 0.8, 0.88), 8);
+          ctx.fillRect(rx + nw / 2 + span, top + d / 2 - 4, nw * phase(tl, 0.8, 0.88), 8);
         }
       }
       stops.forEach(([r, l], i) => {
@@ -1051,7 +1203,6 @@ function cardBackground(ctx, bd, { tileLogo: logo, cutout, career, careerLogos, 
       });
     }
   }
-  ctx.restore();
 }
 
 // The verdict: three chips (those included). step = how many are revealed;
@@ -1320,8 +1471,128 @@ function placeCutout(ctx, img, pos, h0) {
   const w = (img.width / img.height) * h;
   ctx.drawImage(img, pos.x - w / 2, pos.y - h, w, h);
 }
+// The thumbnail's cutout, made to pop: a gold glow behind him (fx.glow) and a
+// white sticker outline with a faint dark edge (fx.outline) — both on unless
+// turned off in the editor (bd.thumbGlow / bd.thumbOutline === false).
+const OUTLINE = 12;
+function silhouette(img, w, h, color, pad) {
+  const c = document.createElement("canvas");
+  c.width = Math.ceil(w + pad * 2);
+  c.height = Math.ceil(h + pad * 2);
+  const x = c.getContext("2d");
+  x.drawImage(img, pad, pad, w, h);
+  x.globalCompositeOperation = "source-in";
+  x.fillStyle = color;
+  x.fillRect(0, 0, c.width, c.height);
+  return c;
+}
+function placeCutoutFx(ctx, img, pos, h0, fx) {
+  if (!img) return;
+  const h = h0 * (pos.s || 1);
+  const w = (img.width / img.height) * h;
+  const x0 = pos.x - w / 2;
+  const y0 = pos.y - h;
+  const pad = 8;
+  // Stamped around a circle: a solid ring of the silhouette r px out.
+  const ring = (sil, r) => {
+    for (let i = 0; i < 24; i += 1) {
+      const a = (i / 24) * Math.PI * 2;
+      ctx.drawImage(sil, x0 - pad + Math.cos(a) * r, y0 - pad + Math.sin(a) * r);
+    }
+  };
+  if (fx.glow) {
+    const sil = silhouette(img, w, h, GOLD, pad);
+    ctx.save();
+    ctx.shadowColor = GOLD;
+    [90, 40].forEach((blur) => { ctx.shadowBlur = blur; ctx.drawImage(sil, x0 - pad, y0 - pad); });
+    ctx.restore();
+  }
+  if (fx.outline) {
+    ring(silhouette(img, w, h, "rgba(0,10,30,0.45)", pad), OUTLINE + 4);
+    ring(silhouette(img, w, h, "#ffffff", pad), OUTLINE);
+  }
+  ctx.drawImage(img, x0, y0, w, h);
+}
+const thumbFx = (bd) => ({ glow: bd.thumbGlow !== false, outline: bd.thumbOutline !== false });
 export const DEFAULT_THUMB_POS = { x: 1390, y: H, s: 1 };
 const THUMB_H = 1000;
+
+// The Draft Breakdown badge: the pro day badge's Combine-style shape
+// (utils/proDayIcon.js SILHOUETTE) in navy with a white sticker edge — DRAFT
+// in the dome, BREAKDOWN (REACTION) on the gold band, the class year in the
+// point. At (ox, oy) — the shape's own (0, 0) — scaled by k. Used on the
+// thumbnail and as the videos' top-right corner bug (its own PNG).
+function drawDraftBadge(ctx, bd, ox, oy, k) {
+  ctx.save();
+  ctx.translate(ox, oy);
+  ctx.scale(k, k);
+  const shape = new Path2D(SILHOUETTE);
+  // White sticker edge with a soft drop shadow.
+  ctx.save();
+  ctx.shadowColor = "rgba(0,10,30,0.5)";
+  ctx.shadowBlur = 50;
+  ctx.shadowOffsetY = 18;
+  ctx.lineJoin = "round";
+  ctx.lineWidth = 40;
+  ctx.strokeStyle = "#ffffff";
+  ctx.stroke(shape);
+  ctx.fillStyle = "#ffffff";
+  ctx.fill(shape);
+  ctx.restore();
+  const sg = ctx.createLinearGradient(0, 145, 0, 862);
+  sg.addColorStop(0, BLUE);
+  sg.addColorStop(1, DEEP);
+  ctx.fillStyle = sg;
+  ctx.fill(shape);
+  // The band: gold, white rules above and below, kept inside the shape.
+  ctx.save();
+  ctx.clip(shape);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, BAND.ruleTop, 1000, BAND.ruleBottom - BAND.ruleTop);
+  ctx.fillStyle = GOLD;
+  ctx.fillRect(0, BAND.top, 1000, BAND.bottom - BAND.top);
+  ctx.restore();
+  ctx.fillStyle = NAVY;
+  ctx.letterSpacing = "6px";
+  fit(ctx, reactionMode(bd) ? "REACTION" : "BREAKDOWN", 500, 583, 790, 200, 80, "center");
+  // The dome: DRAFT (no draft logo — the badge doubles as the videos' corner
+  // bug), big and popping up out of the top of the shape the way the draft
+  // logo did: a navy edge and a drop shadow so it lifts off the white rim.
+  ctx.save();
+  let ds = 330;
+  ctx.font = disp(ds);
+  while (ds > 120 && ctx.measureText("DRAFT").width > 700) { ds -= 2; ctx.font = disp(ds); }
+  ctx.textAlign = "center";
+  ctx.lineJoin = "round";
+  ctx.shadowColor = "rgba(0,10,30,0.55)";
+  ctx.shadowBlur = 30;
+  ctx.shadowOffsetY = 12;
+  ctx.lineWidth = 22;
+  ctx.strokeStyle = NAVY;
+  ctx.strokeText("DRAFT", 500, 392);
+  ctx.shadowColor = "transparent";
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText("DRAFT", 500, 392);
+  ctx.restore();
+  // The point: the class.
+  if (bd.cls) { ctx.fillStyle = GOLD; fit(ctx, String(bd.cls), 500, 770, 380, 140, 60, "center"); }
+  ctx.letterSpacing = "0px";
+  ctx.restore();
+}
+// The videos' corner bug: the badge alone on transparent, room for its edge and shadow.
+export const BADGE_PNG_K = 0.5;
+export async function drawBadgePng(canvas, bd, branding) {
+  await ensureFonts();
+  const k = BADGE_PNG_K;
+  const m = 60;
+  canvas.width = Math.ceil((913 - 87) * k + m * 2);
+  canvas.height = Math.ceil((862 - 145) * k + m * 2);
+  const ctx = canvas.getContext("2d");
+  setTheme(portalMode(bd) && bd.toSchool ? teamTheme(bd.toBrand) : reactionMode(bd) ? nflTheme(branding?.[bd.nflTeam]) : SITE);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.textBaseline = "alphabetic";
+  drawDraftBadge(ctx, bd, m - 87 * k, m - 145 * k, k);
+}
 
 // The title card — the video's thumbnail (a still), built to hit at eye
 // level (user, 2026-11-24, after a "HE'S HOW OLD?!" reference): site blue
@@ -1330,7 +1601,7 @@ const THUMB_H = 1000;
 // (Montserrat Black). Two layouts (bd.thumbMode):
 //   "name" (default)  his name, big — first gold, last white; under it his
 //                     position and school LOGO (not its name); under that
-//                     the draft graphic (the class's draft logo + BREAKDOWN)
+//                     (the NFL Draft logo top right)
 //   "hook"            2–3 typed words (bd.thumbHook), huge, white, one line
 //                     a word (or the lines as typed); his name a gold eyebrow
 // The thumbnail's highlight words (first name, eyebrow): the accent, or —
@@ -1361,7 +1632,7 @@ const hookLines = (text) => {
 // admin — dragged on the preview, sized in the editor (bd.thumbLayout).
 // By default they all fit the left half: he takes up the right.
 export const THUMB_PIECES = {
-  name: "Player name", info: "School logo + position", eyebrow: "Name eyebrow", hook: "Hook words", graphic: "Draft Breakdown graphic",
+  name: "Player name", info: "School logo + position", eyebrow: "Name eyebrow", hook: "Hook words", graphic: "Draft Breakdown graphic", draft: "NFL Draft logo",
 };
 const TEXT_W = 860;
 function drawTitle(ctx, bd, { logo, cutout, draft, wd }) {
@@ -1372,7 +1643,7 @@ function drawTitle(ctx, bd, { logo, cutout, draft, wd }) {
   ctx.fillRect(0, 0, W, H);
   // The diagonal lines the other frames use (no school logo behind him).
   stripes(ctx, 0, 0, W, H);
-  placeCutout(ctx, cutout, { ...DEFAULT_THUMB_POS, ...(bd.thumbPos || {}) }, THUMB_H);
+  placeCutoutFx(ctx, cutout, { ...DEFAULT_THUMB_POS, ...(bd.thumbPos || {}) }, THUMB_H, thumbFx(bd));
   // The gold bar.
   ctx.fillStyle = GOLD;
   ctx.fillRect(0, 0, 26, H);
@@ -1401,56 +1672,30 @@ function drawTitle(ctx, bd, { logo, cutout, draft, wd }) {
     ctx.restore();
     boxes[key] = { x: box.x + L.dx, y: box.y + L.dy, w: w * L.s, h: box.h * L.s };
   };
-  // The draft graphic, as a logo (user, 2026-11-24): the pro day badge's
-  // Combine-style shape (utils/proDayIcon.js SILHOUETTE) in site navy with
-  // a white sticker edge — the class's draft logo (else DRAFT) in the dome,
-  // BREAKDOWN on the gold band, the class year in the point. Sized to sit
-  // under the words, not compete with them.
-  const BADGE_K = 0.34;
-  const badgeW = (913 - 87) * BADGE_K;
-  const badgeH = (862 - 145) * BADGE_K;
-  const graphic = (gy) => piece("graphic", { x, y: gy, h: badgeH }, () => {
-    const k = BADGE_K;
-    ctx.save();
-    ctx.translate(x - 87 * k + 6, gy - 145 * k);
-    ctx.scale(k, k);
-    const shape = new Path2D(SILHOUETTE);
-    // White sticker edge with a soft drop shadow.
-    ctx.save();
-    ctx.shadowColor = "rgba(0,10,30,0.5)";
-    ctx.shadowBlur = 50;
-    ctx.shadowOffsetY = 18;
-    ctx.lineJoin = "round";
-    ctx.lineWidth = 40;
-    ctx.strokeStyle = "#ffffff";
-    ctx.stroke(shape);
-    ctx.fillStyle = "#ffffff";
-    ctx.fill(shape);
-    ctx.restore();
-    const sg = ctx.createLinearGradient(0, 145, 0, 862);
-    sg.addColorStop(0, BLUE);
-    sg.addColorStop(1, DEEP);
-    ctx.fillStyle = sg;
-    ctx.fill(shape);
-    // The band: gold, white rules above and below, kept inside the shape.
-    ctx.save();
-    ctx.clip(shape);
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, BAND.ruleTop, 1000, BAND.ruleBottom - BAND.ruleTop);
-    ctx.fillStyle = GOLD;
-    ctx.fillRect(0, BAND.top, 1000, BAND.bottom - BAND.top);
-    ctx.restore();
-    ctx.fillStyle = NAVY;
-    ctx.letterSpacing = "6px";
-    fit(ctx, reactionMode(bd) ? "REACTION" : "BREAKDOWN", 500, 583, 790, 200, 80, "center");
-    // The dome: the draft logo, else DRAFT.
-    if (draft) contain(ctx, draft, 250, 120, 500, 290);
-    else { ctx.fillStyle = "#ffffff"; fit(ctx, "DRAFT", 500, 375, 560, 170, 60, "center"); }
-    // The point: the class.
-    if (bd.cls) { ctx.fillStyle = GOLD; fit(ctx, String(bd.cls), 500, 770, 380, 140, 60, "center"); }
-    ctx.letterSpacing = "0px";
-    ctx.restore();
-    return badgeW;
+  // (No Draft Breakdown badge on the thumbnail since 2026-11-26 — the NFL
+  // Draft logo in the top-right corner stands in; the badge is the videos'
+  // corner bug, its own download.)
+  // Position and the school's logo (its dark-background version) — under
+  // his name, or under the hook words.
+  const info = (iy, ih) => piece("info", { x, y: iy, h: ih }, () => {
+    let ix = x;
+    if (logo) {
+      const lw = Math.min((logo.width / logo.height) * ih, 400);
+      shadowed(() => contain(ctx, logo, ix, iy, lw, ih));
+      ix += lw + 30;
+    }
+    // A reaction: the NFL team's logo and where he went.
+    const line = (reactionMode(bd) ? [bd.pos, bd.pick && `PICK ${bd.pick}`] : [bd.pos]).filter(Boolean).join(" · ").toUpperCase();
+    if (line) {
+      if (logo) { ctx.fillStyle = alpha("#ffffff", 0.35); ctx.fillRect(ix - 16, iy + 16, 5, ih - 32); ix += 14; }
+      let fs = 78;
+      ctx.font = heavy(fs);
+      while (fs > 36 && ctx.measureText(line).width > maxW - (ix - x)) { fs -= 2; ctx.font = heavy(fs); }
+      ctx.fillStyle = highlight();
+      ctx.fillText(line, ix, iy + ih / 2 + fs * 0.36);
+      ix += ctx.measureText(line).width;
+    }
+    return ix - x;
   });
   const hook = bd.thumbMode === "hook" ? hookLines(bd.thumbHook) : [];
   if (hook.length) {
@@ -1462,7 +1707,7 @@ function drawTitle(ctx, bd, { logo, cutout, draft, wd }) {
     });
     // The words: one size for all, as big as the longest line and the room allow.
     const top = 180;
-    const bottom = 650;
+    const bottom = 700;
     let s = Math.min(250, Math.floor((bottom - top) / (hook.length * 0.96)));
     ctx.font = heavy(s);
     while (s > 60 && hook.some((l) => ctx.measureText(l).width > maxW)) { s -= 4; ctx.font = heavy(s); }
@@ -1477,7 +1722,9 @@ function drawTitle(ctx, bd, { logo, cutout, draft, wd }) {
       });
       return w;
     });
-    graphic(top + hook.length * lh + 30);
+    const iy = top + hook.length * lh + 26;
+    const ih = 100;
+    info(iy, ih);
   } else {
     // His name, big and tight: the last name right under the first (cap
     // heights, not font boxes, set the gap), a touch of negative tracking.
@@ -1508,36 +1755,24 @@ function drawTitle(ctx, bd, { logo, cutout, draft, wd }) {
       });
       return w;
     });
-    // Position and the school's logo (its dark-background version).
     const iy = b2 + 34;
     const ih = 120;
-    piece("info", { x, y: iy, h: ih }, () => {
-      let ix = x;
-      if (logo) {
-        const lw = Math.min((logo.width / logo.height) * ih, 400);
-        shadowed(() => contain(ctx, logo, ix, iy, lw, ih));
-        ix += lw + 30;
-      }
-      // A reaction: the NFL team's logo and where he went.
-      const info = (reactionMode(bd) ? [bd.pos, bd.pick && `PICK ${bd.pick}`] : [bd.pos]).filter(Boolean).join(" · ").toUpperCase();
-      if (info) {
-        if (logo) { ctx.fillStyle = alpha("#ffffff", 0.35); ctx.fillRect(ix - 16, iy + 16, 5, ih - 32); ix += 14; }
-        let fs = 78;
-        ctx.font = heavy(fs);
-        while (fs > 36 && ctx.measureText(info).width > maxW - (ix - x)) { fs -= 2; ctx.font = heavy(fs); }
-        ctx.fillStyle = "#ffffff";
-        ctx.fillText(info, ix, iy + ih / 2 + fs * 0.36);
-        ix += ctx.measureText(info).width;
-      }
-      return ix - x;
-    });
-    graphic(iy + ih + 40);
+    info(iy, ih);
   }
-  // We-Draft.com, anchored to the bottom.
+  // The class's NFL Draft logo, in the top-right corner (movable and sizable
+  // like the words).
+  if (draft) {
+    const dh = 230;
+    const dw = Math.min((draft.width / draft.height) * dh, 380);
+    const dx = W - 44 - dw;
+    piece("draft", { x: dx, y: 40, h: dh }, () => { shadowed(() => contain(ctx, draft, dx, 40, dw, dh)); return dw; });
+  }
+  // We-Draft.com, anchored to the bottom-left corner (kept small — the
+  // player and the words carry the thumbnail), close to the bottom edge.
   if (wd) {
-    const lw = TEXT_W;
+    const lw = Math.round(TEXT_W * 0.6);
     const lh = (wd.height / wd.width) * lw;
-    shadowed(() => ctx.drawImage(wd, x - 6, H - 34 - lh, lw, lh));
+    shadowed(() => ctx.drawImage(wd, x - 6, H - 14 - lh, lw, lh));
   }
   ctx.canvas.titleBoxes = boxes;
 }
@@ -1699,7 +1934,7 @@ function drawTitlePortal(ctx, bd, { cutout, wd, portal, fromLogoDark, fromLogo, 
   ctx.strokeStyle = GOLD;
   ctx.stroke();
   contain(ctx, portal, mx - 42, my - 42, 84, 84);
-  placeCutout(ctx, cutout, { ...DEFAULT_THUMB_POS, ...(bd.thumbPos || {}) }, THUMB_H);
+  placeCutoutFx(ctx, cutout, { ...DEFAULT_THUMB_POS, ...(bd.thumbPos || {}) }, THUMB_H, thumbFx(bd));
   // The words, under the corner.
   const x = 96;
   ctx.font = disp(46);
@@ -2187,11 +2422,11 @@ async function pickRecordOf(p) {
 // number a file: Ousmane-Kromah-01-Intro-Animated.mov, -02-Intro.png… The
 // title card is the thumbnail, downloaded on its own (…-Thumbnail.png).
 const THUMB = { kind: "png", seg: "title", step: 0, label: "Thumbnail", thumb: true, id: "thumb" };
-function sequenceOf(bd) {
+export function sequenceOf(bd) {
   const out = [];
   const png = (seg, step, label) => out.push({ kind: "png", seg, step, label });
   const mov = (seg, step, anim, label) => out.push({ kind: "mov", seg, step, anim, label: `${label} Animated` });
-  mov("intro", 0, "intro", portalMode(bd) ? "Intro The Move" : "Intro");
+  mov("intro", 0, "intro", portalMode(bd) ? "Intro The Move" : "Intro Cold Open");
   png("intro", 0, portalMode(bd) ? "Intro The Move" : "Intro");
   mov("background", 0, "background", reactionMode(bd) ? "Background The Pick" : "Background");
   png("background", 0, "Background");
@@ -2321,7 +2556,7 @@ const DEFAULTS = {
 };
 // What edits may set outright (the rest: facts, verdict merge; lists by title).
 const EDIT_KEYS = ["mode", "fromSchool", "toSchool", "first", "last", "pos", "school", "cls", "photo", "bgPhoto", "thumbPos", "bgPos", "statsTitle", "stats", "measures", "careerCat", "grade", "comp", "compNote", "fits",
-  "lowerThirds", "traitChapters", "times", "subTitle", "subLine", "cta", "celebrateTitle", "thumbMode", "thumbHook", "thumbLayout", "nflTeam", "round", "pick", "pickGrade", "pickNote"];
+  "lowerThirds", "traitChapters", "times", "subTitle", "subLine", "cta", "celebrateTitle", "thumbMode", "thumbHook", "thumbLayout", "thumbGlow", "thumbOutline", "nflTeam", "round", "pick", "pickGrade", "pickNote"];
 
 // The breakdown: live data, then the edits on top. A trait list is its
 // titles (the edited list, else the live one), each with its note and key
@@ -2458,6 +2693,10 @@ export default function AdminDraftBreakdowns({ kind = "draft" }) {
   const [playing, setPlaying] = useState(false);
   // The thumbnail text piece last grabbed (its size slider is shown first).
   const [thumbPiece, setThumbPiece] = useState(null);
+  // The Breakdown Studio open on this player (components/studio/BreakdownStudio.jsx).
+  const [studio, setStudio] = useState(false);
+  // The stream window: this frame with his film in the film window (components/studio/StreamWindow.jsx).
+  const [streamWin, setStreamWin] = useState(false);
   const canvasRef = useRef(null);
   const dragRef = useRef(null);
 
@@ -2576,6 +2815,10 @@ export default function AdminDraftBreakdowns({ kind = "draft" }) {
       setSaved(fresh);
       setPlayer(p);
       setLive(l);
+      // The video's player (and its team: the drafting NFL team, the new
+      // school) — Videos → Graphics → Assets starts on him (AdminVideoAssets.jsx).
+      const team = reactionTab && l.nflTeam ? { nfl: l.nflTeam } : portalTab && l.toSchool ? { school: l.toSchool } : null;
+      try { localStorage.setItem(VIDEO_PLAYER_KEY, JSON.stringify({ id: p.id, team, at: Date.now() })); } catch { /* private window */ }
       setEdits(fresh[p.id]?.edits || {});
       setDirty(false);
       setView({ seg: "title", step: 0 });
@@ -2652,6 +2895,15 @@ export default function AdminDraftBreakdowns({ kind = "draft" }) {
       },
     });
     save$(blob, fileName(bd, e));
+  };
+  const downloadBadge = async () => {
+    const out = document.createElement("canvas");
+    await drawBadgePng(out, bd, branding);
+    const blob = await new Promise((resolve) => out.toBlob(resolve, "image/png"));
+    if (!blob) { setMsg("Couldn't export the badge."); return; }
+    const name = `${bd.cls ? `${bd.cls}-` : ""}Draft-${reactionMode(bd) ? "Reaction" : "Breakdown"}-Badge.png`;
+    save$(blob, name);
+    setMsg(`Downloaded ${name} — the videos' corner badge.`);
   };
   const exportEntry = (e) => (e.kind === "mov" ? exportMov(e) : exportPng(e));
   // The entry on the preview: the picked one, else the still for its frame.
@@ -2785,6 +3037,25 @@ export default function AdminDraftBreakdowns({ kind = "draft" }) {
   };
   const dragEnd = () => { dragRef.current = null; };
 
+  // The studio: the whole video edited here, the frames drawn live (user, 2026-11-25).
+  if (streamWin && bd) {
+    return (
+      <>
+        {player && <CareerFeed player={player} espnId={espnId} onRows={(rows) => setLive((l) => (l ? { ...l, career: rows } : l))} />}
+        <StreamWindow bd={bd} draw={(c, v) => drawBreakdown(c, bd, v, branding)} segs={segsOf(bd)} boxes={(view) => boxesFor(bd, view)} onClose={() => setStreamWin(false)} />
+      </>
+    );
+  }
+  if (studio && bd) {
+    return (
+      <>
+        {player && <CareerFeed player={player} espnId={espnId} onRows={(rows) => setLive((l) => (l ? { ...l, career: rows } : l))} />}
+        <BreakdownStudio bd={bd} branding={branding} draw={(c, v) => drawBreakdown(c, bd, v, branding)} segs={segsOf(bd)} entries={seq}
+          animSec={(a) => animSeconds(bd, a)} boxes={(view) => boxesFor(bd, view)} times={DEFAULT_TIMES} onClose={() => setStudio(false)} />
+      </>
+    );
+  }
+
   return (
     <div style={{ display: "grid", gridTemplateColumns: "420px 1fr", gap: 18, alignItems: "start" }}>
       <datalist id="bd-traits">{traitWords.map((t) => <option key={t} value={t} />)}</datalist>
@@ -2865,8 +3136,16 @@ export default function AdminDraftBreakdowns({ kind = "draft" }) {
                     style={{ ...field, resize: "vertical", textTransform: "uppercase" }} />
                 </div>
               )}
+              <div style={{ display: "flex", gap: 14 }}>
+                {[["thumbOutline", "White outline"], ["thumbGlow", "Gold glow"]].map(([k, l]) => (
+                  <label key={k} style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, fontWeight: 800 }}>
+                    <input type="checkbox" checked={bd[k] !== false} onChange={(e) => { edit({ [k]: e.target.checked ? undefined : false }); setView({ seg: "title", step: 0 }); }} />
+                    {l}{isEdited(k) && editedDot}
+                  </label>
+                ))}
+              </div>
               <div style={lbl}>Text sizes{isEdited("thumbLayout") && editedDot} — drag any of them on the preview to move it</div>
-              {(bd.thumbMode === "hook" ? ["eyebrow", "hook", "graphic"] : ["name", "info", "graphic"]).map((k) => {
+              {(bd.thumbMode === "hook" ? ["eyebrow", "hook", "info", "draft"] : ["name", "info", "draft"]).map((k) => {
                 const L = { dx: 0, dy: 0, s: 1, ...(bd.thumbLayout?.[k] || {}) };
                 const setL = (patch) => { edit((ed) => ({ thumbLayout: { ...(ed.thumbLayout || bd.thumbLayout || {}), [k]: { ...L, ...patch } } })); if (view.seg !== "title") setView({ seg: "title", step: 0 }); };
                 return (
@@ -2913,7 +3192,7 @@ export default function AdminDraftBreakdowns({ kind = "draft" }) {
 
             {!portalTab && (
             <div style={section}>
-              <div style={head}>Intro · subscribe card</div>
+              <div style={head}>Background · subscribe card</div>
               {[["subTitle", "Headline"], ["subLine", "Gold line"]].map(([k, l]) => (
                 <div key={k}><div style={lbl}>{l}{isEdited(k) && editedDot}</div><input value={bd[k] || ""} onChange={(e) => edit({ [k]: e.target.value })} style={field} /></div>
               ))}
@@ -3099,6 +3378,9 @@ export default function AdminDraftBreakdowns({ kind = "draft" }) {
               <button type="button" onClick={downloadOne} disabled={!!busy} style={btn(false)}>{busy === "one" ? "Making it…" : `Download ${current()?.kind === "mov" ? "this clip" : "this still"}`}</button>
               <button type="button" onClick={downloadAll} disabled={!!busy} style={btn(false)}>Download all {seq.length} files</button>
               <button type="button" onClick={() => downloadOne(THUMB)} disabled={!!busy} style={btn(false)}>Download thumbnail</button>
+              {!portalMode(bd) && <button type="button" onClick={downloadBadge} disabled={!!busy} style={btn(false)} title="The DRAFT BREAKDOWN badge alone, transparent — for the videos' corner">Download corner badge</button>}
+              <button type="button" onClick={() => setStudio(true)} disabled={!!busy} style={{ ...btn(true), background: UI_GOLD, borderColor: UI_GOLD, color: "#00264d" }} title="Edit the whole video here: face cam, plays from his Premiere project, the frames — export an MP4">🎬 Studio</button>
+              <button type="button" onClick={() => setStreamWin(true)} disabled={!!busy} style={btn(false)} title="A 1920×1080 stream window: this frame with his film (washed) in the film window — pop it out for OBS">📺 Stream window</button>
               <select value={fps} onChange={(e) => setFps(Number(e.target.value))} style={{ ...field, width: "auto" }} title="The clips' frame rate">
                 {[30, 60].map((n) => <option key={n} value={n}>{n} fps</option>)}
               </select>

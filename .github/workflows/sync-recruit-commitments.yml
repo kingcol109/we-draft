@@ -1,0 +1,33 @@
+name: Sync Recruit Commitments
+
+# Daily at 11:00 UTC: the recruits we have (Admin → Players → Recruits) take
+# CFBD's commitments — commits, flips and decommits — see
+# server/recruits/commitments.js. One CFBD call per open high school class
+# (about 3 a day). Player pages are never written. Also runnable on demand.
+#
+# Needs repo secrets GOOGLE_SERVICE_ACCOUNT_KEY and CFBD_API_KEY.
+on:
+  schedule:
+    - cron: "0 11 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Sync commitments
+        run: node scripts/syncCommitments.js
+        env:
+          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
+          CFBD_API_KEY: ${{ secrets.CFBD_API_KEY }}

@@ -20,6 +20,10 @@
 //                                 pages' rosters, needs and sim targets)
 //   POST { action: "signees", year, dry }  Team Pages "Import signees" —
 //                                 server/portal/signees.js, one CFBD call
+//   POST { action: "commitments", dry }  Recruits "Sync CFBD commitments"
+//                                 (AdminPanel.js RecruitsSection) —
+//                                 server/recruits/commitments.js, one CFBD
+//                                 call per open class; writes recruits only
 // Neither writes to players; the admin applies every change.
 //
 // Auth: the caller's Firebase ID token (Authorization: Bearer <token>),
@@ -70,6 +74,10 @@ module.exports = async function handler(req, res) {
       const { importSignees } = require("../server/portal/signees");
       const r = await importSignees(db, { year: y, dry: !!req.body?.dry });
       return res.status(200).json({ ...r, sampleCreates: undefined, sampleUpdates: undefined });
+    }
+    if (req.body?.action === "commitments") {
+      const { syncCommitments } = require("../server/recruits/commitments");
+      return res.status(200).json(await syncCommitments(db, { dry: !!req.body?.dry }));
     }
     if (req.body?.action === "cfbdIndex") {
       const { buildCfbdIndex } = require("../server/offseason/cfbdIndex");

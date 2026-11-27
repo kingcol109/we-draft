@@ -7,7 +7,7 @@
 // for First Pick, the way RiserGraphic.jsx draws a riser's locally.
 import { useEffect, useState } from "react";
 import WdLogo from "../assets/Logo2.png";
-import { statsTitleOf, PORTAL_NEWS_PATH, portalImageUrl } from "../utils/portalNews";
+import { statsTitleOf, isProjected, PORTAL_NEWS_PATH, portalImageUrl } from "../utils/portalNews";
 
 export const LOCAL = typeof window !== "undefined" && /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname);
 
@@ -24,7 +24,7 @@ export async function drawPortalCover({ entry, player, from, to, shot }) {
     kind: entry.status === "committed" ? "transfer" : "portal", design: entry.design || "welcome",
     player: { ...player, First: player?.First || entry.first, Last: player?.Last || entry.last, Position: player?.Position || entry.pos },
     from: from || {}, fromName: entry.from, to: to || {}, toName: entry.to || "",
-    photo: shot, stats: entry.stats, statsTitle: statsTitleOf(entry),
+    photo: shot, stats: entry.stats, statsTitle: statsTitleOf(entry), projected: isProjected(entry),
     // No WD badge top right on the page: the card's flip hint sits there (the footer carries the brand).
     brandLogo: WdLogo, badgeLogo: "", address: `WE-DRAFT.COM${PORTAL_NEWS_PATH.toUpperCase()}`,
   });
@@ -50,7 +50,7 @@ export function usePortalCover({ entry, photos, player, from, to, served = false
   const [failed, setFailed] = useState(false);
   // Drawn once, with everything in (his players doc: null when there's none).
   const ready = photos !== undefined && player !== undefined && from !== undefined && (entry.status !== "committed" || to !== undefined);
-  const key = `${entry.id}|${entry.status}|${entry.design}|${entry.from}|${entry.to}|${shot?.url}|${ready}`;
+  const key = `${entry.id}|${entry.status}|${isProjected(entry)}|${entry.design}|${entry.from}|${entry.to}|${shot?.url}|${ready}`;
   useEffect(() => {
     setFailed(false);
     if (remote) { setSrc(""); return undefined; }

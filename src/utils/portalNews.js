@@ -29,6 +29,11 @@
 //     destinations: [school, …] (up to 3) — an entered player's potential
 //            landing spots, shown in place of his stats on the page,
 //     prediction: one of them — We-Draft.com's pick ("" for none),
+//     projected: true — (entered only) he ISN'T in the portal yet: the admin
+//            expects him to enter. He sits in the IN list, in its one order,
+//            but is labeled PROJECTED everywhere (pill, card back, graphic
+//            headline), never "in the portal"; the admin drops them in bulk
+//            once the real portal fills up, or flips one to Entered when he goes in.
 //     order: 0… within its section, addedAt (ms),
 //   }
 // No doc yet (the admin hasn't published one): on localhost, or with
@@ -66,8 +71,19 @@ export const newsPath = (pos = "", side = "") => `${PORTAL_NEWS_PATH}${pos ? `/$
 
 export const NEWS_STATUS = {
   entered: { key: "entered", label: "In the Portal", short: "ENTERED", section: "In the Portal", c1: "#f6a21d", c2: "#ffd36b", ink: "#9a5b00", tint: "#fff6e3" },
+  // Not a section of its own: a projected player is an "entered" entry with
+  // projected: true (see above) — this is just how he's labeled.
+  projected: { key: "projected", label: "Projected to Enter", short: "PROJECTED", section: "In the Portal", c1: "#7c5cd6", c2: "#b9a6f2", ink: "#5b3fb5", tint: "#f3effe" },
   committed: { key: "committed", label: "Committed", short: "COMMITTED", section: "Committed", c1: "#16a34a", c2: "#4ade80", ink: "#15803d", tint: "#ecfbf1" },
 };
+
+// Projected to enter the portal (not in it yet) — see the Entry notes above.
+export const isProjected = (e) => e?.status === "entered" && !!e.projected;
+// His label: projected, entered or committed.
+export const newsStatusOf = (e) => NEWS_STATUS[isProjected(e) ? "projected" : e?.status] || NEWS_STATUS.entered;
+// His graphic's headline (in place of IN THE PORTAL): "" for the default.
+export const PROJECTED_HEADLINE = "PROJECTED TO ENTER";
+export const newsHeadlineOf = (e) => (isProjected(e) ? PROJECTED_HEADLINE : "");
 
 // His seasons of eligibility left for the season the portal feeds
 // (utils/eligibility.js seasonsLeft — the portal board's ELIG): "3 years of
@@ -84,6 +100,28 @@ export function newsSection(entries, status) {
   return (entries || []).filter((e) => e.status === status)
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || String(b.date || "").localeCompare(String(a.date || "")) || (b.addedAt ?? 0) - (a.addedAt ?? 0));
 }
+
+// Projected players get a graphic only if they're among the top 3 projected
+// at their position (user, 2026-11-25), in the IN list's order; everyone
+// past that gets a headshot and his stats instead. Players actually in the
+// portal, and committed ones, always get theirs.
+// entries: the WHOLE board (not a position's slice), so a player's graphic is
+// the same on every page. → Set of the projected ids that get one.
+export const PROJECTED_GRAPHICS = 3;
+export function projectedGraphicIds(entries) {
+  const seen = {};
+  const ids = new Set();
+  newsSection(entries, "entered").filter(isProjected).forEach((e) => {
+    const g = newsPosGroup(e.pos);
+    seen[g] = (seen[g] || 0) + 1;
+    if (seen[g] <= PROJECTED_GRAPHICS) ids.add(e.id);
+  });
+  return ids;
+}
+// Does he get a graphic? (ids: projectedGraphicIds of the whole board.)
+export const getsGraphic = (e, ids) => !isProjected(e) || !!ids?.has(e.id);
+// The IN count: the players actually in the portal (not the projected ones).
+export const inPortalCount = (list) => (list || []).filter((e) => e.status === "entered" && !e.projected).length;
 
 // "Nov 18" (opts: other toLocaleDateString fields).
 export const newsDate = (d, opts = { month: "short", day: "numeric" }) =>
@@ -143,9 +181,11 @@ export async function portalNewsItem(player) {
   const when = board.updatedAt || (/^\d{4}-\d{2}-\d{2}$/.test(e.date || "") ? new Date(`${e.date}T12:00:00`) : null);
   const title = committed
     ? `Top Transfer Portal Moves: ${last} to ${e.to}`
-    : e.prediction && (e.destinations || []).includes(e.prediction)
-      ? `Transfer Portal: We-Draft.com Predicts ${last} to ${e.prediction}`
-      : `Top Transfer Portal ${pos ? NEWS_POSITION_PLURAL[pos] : "Players"}: ${last}`;
+    : isProjected(e)
+      ? `Transfer Portal Watch: ${last} Projected to Enter`
+        : e.prediction && (e.destinations || []).includes(e.prediction)
+        ? `Transfer Portal: We-Draft.com Predicts ${last} to ${e.prediction}`
+        : `Top Transfer Portal ${pos ? NEWS_POSITION_PLURAL[pos] : "Players"}: ${last}`;
   return {
     id: `portalNews-${e.id}`, type: "portal", aboutPlayer: true,
     // (Shaped like a Firestore timestamp: the page reads toDate / toMillis.)

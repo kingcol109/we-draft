@@ -59,6 +59,12 @@ export const DEFAULT_CONFIG = {
   // Crazy (user, 2026-11-18): truly crazy — also lets players marked as
   // staying (likeliness 0 / 1) and academy players go (engine transferLeave).
   frequency: { less: 0.6, default: 1, more: 1.6, crazy: 4 },
+  // Crazy (user, 2026-11-22): draft-bound players — a grade that always
+  // goes, or Declared on We-Draft (not anyone out of eligibility) — come
+  // back this often and head into the portal (Jeremiah Smith in the
+  // portal). A retention offer keeps one crazyReturnKeep of the time.
+  crazyNflReturn: 0.3,
+  crazyReturnKeep: 0.4,
   entryCap: 0.97,
   lateEntryWindows: [],
   lateEntryFactor: 0.15,

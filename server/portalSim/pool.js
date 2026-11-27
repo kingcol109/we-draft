@@ -116,10 +116,20 @@ async function buildPortalSimPool(db, { dry = false } = {}) {
 
   // Seasons left: our saved RecruitYear first (the admin's — CFBD often has
   // no class for transfers; user 2026-11-15: class of 2022 or earlier must
-  // leave), then CFBD's recruiting class / class year.
+  // leave), then CFBD's recruiting class / class year, then our draft class
+  // (Eligible — as utils/eligibility.js seasonsLeft). A draft class already
+  // here (Eligible ≤ this season) is out, whatever CFBD says.
+  // null: nothing to go on (no RecruitYear, recruiting class, class year or
+  // draft class) — eligKnown below.
   const eligOf = (p, season) => {
-    const ry = Number(wd.get(wdOf.get(String(p.id)))?.RecruitYear);
-    return ry > 1990 ? eligLeft({ rc: ry }, season) : eligLeft(p, season);
+    const w = wd.get(wdOf.get(String(p.id)));
+    const ry = Number(w?.RecruitYear);
+    const E = Number(w?.Eligible);
+    if (E > 1990 && E <= season) return 0;
+    if (ry > 1990) return eligLeft({ rc: ry }, season);
+    if (p.rc || p.yr) return eligLeft(p, season);
+    if (E > 1990) return Math.max(0, Math.min(4, E - (season + 1)));
+    return null;
   };
 
   const teamList = [];
@@ -135,7 +145,7 @@ async function buildPortalSimPool(db, { dry = false } = {}) {
       const wdId = wdOf.get(String(p.id));
       return !!decodeGrade(locks[String(p.id)] || (wdId && locks[`wd:${wdId}`])).s;
     };
-    if (fcs && !(t.players || []).some((p) => graded(p) && eligOf(p, t.season) > 0)) return;
+    if (fcs && !(t.players || []).some((p) => graded(p) && (eligOf(p, t.season) ?? 1) > 0)) return;
     const slug = fcs ? fcsSlug(t.school) : slugBySchool.get(t.school);
     if (t.season && (!season || t.season > season)) season = t.season;
     if (!teamIdx.has(slug)) {
@@ -172,14 +182,19 @@ async function buildPortalSimPool(db, { dry = false } = {}) {
     });
 
     players.forEach(({ p, pos, role, sub }) => {
-      if (fcs && !(graded(p) && eligOf(p, t.season) > 0)) return;
+      if (fcs && !(graded(p) && (eligOf(p, t.season) ?? 1) > 0)) return;
       const id = String(p.id);
-      const elig = eligOf(p, t.season);
+      // Unknown eligibility: he stays on his roster as a one-year player
+      // (depth), flagged "u" — the sim never puts him in the portal (user,
+      // 2026-11-25: only players with at least one more season go in), unless
+      // he's really in it.
+      const known = eligOf(p, t.season);
+      const elig = known ?? 1;
       const st = String(p.home || "").split(",").pop().trim().toUpperCase();
       const home = Array.isArray(p.hl) ? p.hl : STATE_CENTER[st] || [null, null];
       const wdId = wdOf.get(id) || "";
       const w = wdId ? wd.get(wdId) : null;
-      const flags = `${w?.Declared ? "d" : ""}${w?.InPortal ? "l" : ""}`;
+      const flags = `${w?.Declared ? "d" : ""}${w?.InPortal ? "l" : ""}${known == null ? "u" : ""}`;
       const lock = decodeGrade(locks[id] || (wdId && locks[`wd:${wdId}`]));
       // Stars: the AUTO grade — the admin's locks are applied when a sim
       // loads (utils/portalSim/data.js attachLocks), so a lock or unlock

@@ -533,7 +533,7 @@ function SavedPosts({ version, onOpen, setMsg }) {
   const [posts, setPosts] = useState(null);
   const [mine, setMine] = useState(0);
   useEffect(() => {
-    getDocs(query(collection(db, "instagramPosts"), orderBy("updatedAt", "desc"), limit(60)))
+    getDocs(query(collection(db, "instagramPosts"), orderBy("updatedAt", "desc"), limit(200)))
       .then((snap) => setPosts(snap.docs.map((d) => ({ id: d.id, ...d.data() }))))
       .catch((e) => { setPosts([]); setMsg(`Couldn't load the saved posts: ${e.message}`); });
   }, [version, mine, setMsg]);
@@ -590,16 +590,27 @@ function SavedPosts({ version, onOpen, setMsg }) {
     }
   };
   const when = (ts) => ts?.toDate?.()?.toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) || "";
-  return (
+  // Drafts (anything not on Instagram yet: draft, ready, scheduled, publishing,
+  // failed) and Posted (published from here, or marked posted by hand) are
+  // kept apart; each newest first.
+  const isPosted = (p) => p.status === "published" || p.status === "posted";
+  const drafts = (posts || []).filter((p) => !isPosted(p));
+  const posted = (posts || []).filter(isPosted);
+  const section = (title, list, empty) => (
     <div style={{ border: "1px solid #e3e8ef", borderRadius: "10px", background: "#fff" }}>
       <div style={{ padding: "8px 12px" }}>
-        <span style={{ ...label, marginBottom: 0 }}>Saved posts{posts ? ` · ${posts.length}` : ""}</span>
+        <span style={{ ...label, marginBottom: 0 }}>{title}{posts ? ` · ${list.length}` : ""}</span>
       </div>
       <div style={{ padding: "0 12px 10px" }}>
         {!posts && <div style={{ fontSize: "12px", fontWeight: 700, color: "#8a97ab" }}>Loading…</div>}
-        {posts && !posts.length && <div style={{ fontSize: "12px", fontWeight: 700, color: "#8a97ab" }}>None yet. Make a post under Create and save it.</div>}
+        {posts && !list.length && <div style={{ fontSize: "12px", fontWeight: 700, color: "#8a97ab" }}>{empty}</div>}
         <div style={{ display: "flex", gap: "10px", overflowX: "auto", paddingBottom: "4px" }}>
-          {(posts || []).map((p) => (
+          {list.map(card)}
+        </div>
+      </div>
+    </div>
+  );
+  const card = (p) => (
             <div key={p.id} style={{ flex: "0 0 150px", border: "1px solid #e3e8ef", borderRadius: "8px", overflow: "hidden", background: "#f8fafc" }}>
               <button onClick={() => onOpen(p)} title="Open to edit" style={{ display: "block", width: "100%", border: "none", padding: 0, cursor: "pointer", background: "#0b1426" }}>
                 {p.thumb ? <img src={p.thumb} alt="" style={{ width: "100%", display: "block", aspectRatio: `${IG_W} / ${IG_H}` }} /> : <div style={{ aspectRatio: `${IG_W} / ${IG_H}` }} />}
@@ -664,9 +675,11 @@ function SavedPosts({ version, onOpen, setMsg }) {
                 </div>
               </div>
             </div>
-          ))}
-        </div>
-      </div>
+  );
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+      {section("Drafts", drafts, "No drafts. Make a post under Create and save it.")}
+      {section("Posted", posted, "Nothing posted yet.")}
     </div>
   );
 }

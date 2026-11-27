@@ -8,7 +8,7 @@ import { igApi } from "../utils/instagram/api";
 import { collection, collectionGroup, getDocs, getDoc, addDoc, doc, updateDoc, setDoc, deleteDoc, deleteField, query, where, serverTimestamp, arrayUnion, arrayRemove, writeBatch, increment, Timestamp } from "firebase/firestore";
 import AdminDailyVisitors from "../components/AdminDailyVisitors";
 import AdminUserTiers from "../components/AdminUserTiers";
-import { db } from "../firebase";
+import { auth, db } from "../firebase";
 import { Helmet } from "react-helmet-async";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -61,6 +61,7 @@ import { EARLY_LOOK } from "../utils/earlyLook";
 import AdminCombine from "../components/AdminCombine";
 import AdminSideGraphics from "../components/AdminSideGraphics";
 import AdminDraftBreakdowns from "../components/AdminDraftBreakdowns";
+import AdminVideoAssets from "../components/AdminVideoAssets";
 import FilmManager from "../components/film/FilmManager";
 import AdminProDayIcons from "../components/AdminProDayIcons";
 import AdminEvents from "../components/AdminEvents";
@@ -459,6 +460,7 @@ const MOVED_SECTIONS = {
   breakdowns: ["videos", "breakdowns"],
   portalbreakdowns: ["videos", "portalbreakdowns"],
   reactions: ["videos", "reactions"],
+  videoassets: ["videos", "videoassets"],
   ...Object.fromEntries(CONTENT_SECTION_TABS.map((t) => [t.key, ["content", t.key]])),
   // A WX page's own key (?section=risers) opens Content → WX on it.
   ...Object.fromEntries(WX_TABS.map((t) => [t.key, ["content", t.key]])),
@@ -1603,7 +1605,8 @@ function PlayerDataSection() {
       ) : playerDataTab === "portalManual" ? (
         <AdminPortalManual allPlayers={allPlayers} />
       ) : playerDataTab === "portalNews" ? (
-        <AdminPortalNews allPlayers={allPlayers} />
+        <AdminPortalNews allPlayers={allPlayers} generateSlug={generateSlug} stateNames={STATE_NAME_BY_ABBR}
+          onPlayerAdded={(p) => setAllPlayers((prev) => [...prev, p].sort((a, b) => (a.Last || "").localeCompare(b.Last || "")))} />
       ) : playerDataTab === "eligibility" ? (
         <AdminEligibility allPlayers={allPlayers} setAllPlayers={setAllPlayers} />
       ) : playerDataTab === "recruits" ? (
@@ -5799,6 +5802,21 @@ function DummyPredictionsSection() {
 // result currently inside ACTIVE_YEARS. The recruit doc is marked with
 // promotedPlayerId/Slug/At rather than deleted, so promoting twice is a
 // no-op and the origin record stays intact. ──
+// The recruit editor's two halves (user, 2026-11-24): the evaluation —
+// notes, grade (Flair), flag, film, scouting grades, strengths/weaknesses —
+// saves itself as the admin types; the player data saves with its button.
+const RECRUIT_EVAL_FIELDS = ["AdminNotes", "Flair", "Flag", "Film", "Grades", "Strengths", "Weaknesses"];
+const EVAL_EMPTY = { Grades: {}, Strengths: [], Weaknesses: [] };
+const pickEval = (r) => Object.fromEntries(RECRUIT_EVAL_FIELDS.map((f) => [f, r?.[f] ?? (f in EVAL_EMPTY ? EVAL_EMPTY[f] : "")]));
+const evalKeyOf = (r) => JSON.stringify(pickEval(r));
+// Written by the CFBD commitment sync (server/recruits/commitments.js) —
+// the player-data save leaves them alone (Commitment aside).
+const COMMITMENT_SYNC_FIELDS = ["Commitment", "PrevCommitment", "CommitmentChangedAt", "CommitmentLog", "CFBDCommitment", "CFBDRecruitId", "RecruitStars", "RecruitRank", "RecruitRating"];
+const RECENT_COMMIT_DAYS = 14;
+const tsMs = (t) => (t?.toDate ? t.toDate().getTime() : t instanceof Date ? t.getTime() : t ? Date.parse(t) || 0 : 0);
+const recentCommitChange = (r) => tsMs(r.CommitmentChangedAt) > Date.now() - RECENT_COMMIT_DAYS * 864e5;
+const shortDate = (t) => { const ms = tsMs(t); return ms ? new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : ""; };
+
 function RecruitsSection() {
   const [allRecruits, setAllRecruits] = useState([]);
   const [allPlayers, setAllPlayers] = useState([]); // dup-check only, see fetchAllPlayers below
@@ -5827,12 +5845,25 @@ function RecruitsSection() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [promoting, setPromoting] = useState(false);
   const [duplicateMatches, setDuplicateMatches] = useState(null);
-  const [gradesExpanded, setGradesExpanded] = useState(false);
+  const [gradesExpanded, setGradesExpanded] = useState(true);
   // { "Position Specific": [...], "Generic": [...] } for whichever recruit
   // is currently selected — refetched on Position change, same source
   // (traits/{Position} + traits/Generic) as the Strengths/Weaknesses picker
   // on a real player's PlayerProfile evaluation form.
   const [traitGroups, setTraitGroups] = useState({});
+  // The evaluation half saves itself (see the autosave below).
+  const [evalStatus, setEvalStatus] = useState(""); // "" | "unsaved" | "saving" | "saved" | "error"
+  const evalPending = useRef(null); // { id, fields } waiting on the timer
+  const evalTimer = useRef(null);
+  const notesRef = useRef(null);
+  // CFBD commitments (server/recruits/commitments.js): the last run, and
+  // the list filter for recent changes.
+  const [syncInfo, setSyncInfo] = useState(null);
+  const [syncing, setSyncing] = useState(false);
+  const [recentOnly, setRecentOnly] = useState(false);
+  useEffect(() => {
+    getDoc(doc(db, "offseason", "recruitCommitments")).then((x) => setSyncInfo(x.exists() ? x.data() : false)).catch(() => setSyncInfo(false));
+  }, []);
 
   useEffect(() => {
     const fetchSchools = async () => {
@@ -6001,6 +6032,7 @@ function RecruitsSection() {
       if (selectedStates.length > 0 && !selectedStates.includes(r.State)) return false;
       if (selectedCommitments.length > 0 && !selectedCommitments.includes(r.Commitment)) return false;
       if (selectedGrades.length > 0 && !selectedGrades.includes(r.Flair)) return false;
+      if (recentOnly && !recentCommitChange(r)) return false;
       if (selectedGroups.length > 0) {
         const recruitGroupNames = groupNamesByRecruit.get(r.id) || [];
         if (!selectedGroups.some((n) => recruitGroupNames.includes(n))) return false;
@@ -6019,29 +6051,136 @@ function RecruitsSection() {
       if (ra !== rb) return ra - rb;
       return (a.Last || "").localeCompare(b.Last || "");
     });
-  }, [allRecruits, searchQuery, selectedClasses, selectedPositions, selectedStates, selectedCommitments, selectedGrades, selectedGroups, groupNamesByRecruit]);
+  }, [allRecruits, searchQuery, selectedClasses, selectedPositions, selectedStates, selectedCommitments, selectedGrades, selectedGroups, groupNamesByRecruit, recentOnly]);
 
   const [recruitsShown, setRecruitsShown] = useState(300);
   useEffect(() => { setRecruitsShown(300); }, [filtered]);
 
   const isNew = selectedRecruit?.isNew === true;
 
+  // ── Evaluation autosave: notes, grade, flag, film, scouting grades and
+  // strengths/weaknesses write themselves 1.2s after the last change (or
+  // now, on Ctrl+S / switching recruits / leaving the tab). Only those
+  // fields — the player data has its own Save. ──
+  const saveEval = async (id, fields) => {
+    setEvalStatus("saving");
+    try {
+      await updateDoc(doc(db, "recruits", id), { ...fields, updatedAt: serverTimestamp() });
+      setAllRecruits((prev) => prev.map((r) => (r.id === id ? { ...r, ...fields } : r)));
+      setSelectedRecruit((cur) => (cur?.id === id ? { ...cur, ...fields } : cur));
+      setEvalStatus("saved");
+    } catch (e) {
+      console.error("Admin recruit evaluation save error:", e);
+      setEvalStatus("error");
+    }
+  };
+  const flushEval = () => {
+    clearTimeout(evalTimer.current);
+    const p = evalPending.current;
+    evalPending.current = null;
+    return p ? saveEval(p.id, p.fields) : null;
+  };
+  const evalDirty = !!(formState && selectedRecruit && !isNew && evalKeyOf(formState) !== evalKeyOf(selectedRecruit));
+  useEffect(() => {
+    clearTimeout(evalTimer.current);
+    if (!evalDirty) { evalPending.current = null; return; }
+    evalPending.current = { id: selectedRecruit.id, fields: pickEval(formState) };
+    setEvalStatus("unsaved");
+    evalTimer.current = setTimeout(flushEval, 1200);
+  }, [formState, selectedRecruit]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => { flushEval(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!evalDirty) return undefined;
+    const warn = (e) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [evalDirty]);
+  // The player data's own unsaved changes (everything but the evaluation).
+  const dataDirty = !!(formState && selectedRecruit && !isNew && Object.keys({ ...formState, ...selectedRecruit })
+    .some((k) => k !== "id" && !RECRUIT_EVAL_FIELDS.includes(k) && JSON.stringify(formState[k] ?? "") !== JSON.stringify(selectedRecruit[k] ?? "")));
+
+  const addDatedNote = () => {
+    const stamp = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    const cur = formState.AdminNotes || "";
+    const next = `${cur.trimEnd()}${cur.trim() ? "\n\n" : ""}${stamp}: `;
+    handleFieldChange("AdminNotes", next);
+    requestAnimationFrame(() => {
+      const el = notesRef.current;
+      if (el) { el.focus(); el.setSelectionRange(next.length, next.length); el.scrollTop = el.scrollHeight; }
+    });
+  };
+
+  // A promoted recruit's player page, to compare its School with his commitment.
+  const playersById = useMemo(() => new Map(allPlayers.map((p) => [p.id, p])), [allPlayers]);
+  const pageOutOfDate = (r) => {
+    const p = r?.promotedPlayerId ? playersById.get(r.promotedPlayerId) : null;
+    return p && (p.School || "") !== (r.Commitment || "") ? p : null;
+  };
+  // The admin's call (players are never written by the sync).
+  const updatePageSchool = async (player, school) => {
+    if (!window.confirm(`Change ${player.First} ${player.Last}'s player page school from ${player.School || "none"} to ${school || "none (uncommitted)"}?`)) return;
+    try {
+      await updateDoc(doc(db, "players", player.id), { School: school, updatedAt: serverTimestamp() });
+      setAllPlayers((prev) => prev.map((p) => (p.id === player.id ? { ...p, School: school } : p)));
+      setSaveMessage(`Player page now says ${school || "no school"}.`);
+    } catch (e) {
+      console.error("Admin page school update error:", e);
+      setSaveMessage("Failed to update the player page — check console.");
+    }
+  };
+
+  // Sync now (the daily workflow runs the same thing). Reloads the
+  // recruits after, and brings the open one's commitment up to date
+  // without touching anything typed in the form.
+  const runCommitSync = async () => {
+    setSyncing(true);
+    setClassMessage("");
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const r = await fetch("/api/portal-sync", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ action: "commitments" }) });
+      if (r.status === 404) throw new Error("the sync runs on the live site (locally: node --env-file=.env scripts/syncCommitments.js)");
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.detail || j.error || `HTTP ${r.status}`);
+      const snap = await getDocs(collection(db, "recruits"));
+      const fresh = snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => (a.Last || "").localeCompare(b.Last || ""));
+      setAllRecruits(fresh);
+      const open = selectedRecruit && !selectedRecruit.isNew ? fresh.find((x) => x.id === selectedRecruit.id) : null;
+      if (open) {
+        const synced = Object.fromEntries(COMMITMENT_SYNC_FIELDS.map((f) => [f, open[f] ?? null]));
+        setSelectedRecruit((cur) => ({ ...cur, ...synced }));
+        setFormState((cur) => ({ ...cur, ...synced }));
+      }
+      setSyncInfo({ ...j, at: new Date() });
+      const n = j.changes?.length || 0;
+      setClassMessage(`CFBD commitments synced: ${n ? `${n} changed (${j.changes.map((c) => `${c.name} ${c.from || "uncommitted"} → ${c.to || "uncommitted"}`).join("; ")})` : "no changes"}${j.unmapped?.length ? ` · ${j.unmapped.length} committed to schools we don't have` : ""}${j.locked?.length ? ` · ${j.locked.length} locked` : ""}.`);
+    } catch (e) {
+      setClassMessage(`Commitment sync stopped — ${e.message}`);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const startNewRecruit = () => {
+    flushEval();
+    setEvalStatus("");
     setSelectedRecruit({ isNew: true });
     setFormState({ ...BLANK_RECRUIT_FORM });
     setSaveMessage("");
     setDuplicateMatches(null);
     setConfirmDelete(false);
-    setGradesExpanded(false);
+    setGradesExpanded(true);
   };
 
   const selectRecruit = (r) => {
+    if (r.id === selectedRecruit?.id) return;
+    flushEval();
+    setEvalStatus("");
     setSelectedRecruit(r);
     setFormState({ ...r });
     setSaveMessage("");
     setDuplicateMatches(null);
     setConfirmDelete(false);
-    setGradesExpanded(false);
+    setGradesExpanded(true);
   };
 
   const handleFieldChange = (field, value) => {
@@ -6221,13 +6360,25 @@ function RecruitsSection() {
         setFormState(newRecruit);
         setSaveMessage("Recruit created.");
       } else {
-        const payload = { ...formState, updatedAt: serverTimestamp() };
-        delete payload.id;
+        // The player data only — the evaluation saves itself.
+        const data = { ...formState };
+        delete data.id;
+        RECRUIT_EVAL_FIELDS.forEach((f) => delete data[f]);
+        COMMITMENT_SYNC_FIELDS.forEach((f) => { if (f !== "Commitment") delete data[f]; });
+        const payload = { ...data, updatedAt: serverTimestamp() };
+        const from = selectedRecruit.Commitment || "";
+        const to = data.Commitment || "";
+        if (from !== to) {
+          const entry = { from, to, at: new Date().toISOString().slice(0, 10), by: "admin" };
+          Object.assign(payload, { PrevCommitment: from, CommitmentChangedAt: serverTimestamp(), CommitmentLog: arrayUnion(entry) });
+          Object.assign(data, { PrevCommitment: from, CommitmentChangedAt: new Date(), CommitmentLog: [...(selectedRecruit.CommitmentLog || []), entry] });
+        }
         await updateDoc(doc(db, "recruits", selectedRecruit.id), payload);
-        const updated = { ...selectedRecruit, ...formState };
+        const updated = { ...selectedRecruit, ...data };
         setAllRecruits((prev) => prev.map((r) => (r.id === updated.id ? updated : r)).sort((a, b) => (a.Last || "").localeCompare(b.Last || "")));
         setSelectedRecruit(updated);
-        setSaveMessage("Changes saved.");
+        setFormState((cur) => ({ ...cur, ...data }));
+        setSaveMessage("Player data saved.");
       }
     } catch (e) {
       console.error("Admin recruit save error:", e);
@@ -6259,6 +6410,7 @@ function RecruitsSection() {
     if (!selectedRecruit || isNew || !formState) return;
     if (!PROMOTABLE_RECRUIT_CLASSES.includes(formState.RecruitClass)) return;
     if (selectedRecruit.promotedPlayerId) return;
+    await flushEval(); // the evaluation's pending typing, before the page copies the notes
     setPromoting(true);
     setSaveMessage("");
     try {
@@ -6412,7 +6564,7 @@ function RecruitsSection() {
   };
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: "18px", alignItems: "start" }}>
+    <div style={{ display: "grid", gridTemplateColumns: selectedRecruit ? "minmax(300px, 400px) minmax(0, 1fr)" : "1fr 380px", gap: "18px", alignItems: "start" }}>
       <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
         <div style={{ background: BLUE, padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px" }}>
           <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
@@ -6437,6 +6589,19 @@ function RecruitsSection() {
           </button>
         </div>
 
+        <div style={{ padding: "7px 14px", borderBottom: "1px solid #eee", display: "flex", alignItems: "center", flexWrap: "wrap", gap: "8px", fontSize: "12px", fontWeight: 800, color: "#666", background: "#fafbfd" }}>
+          <span>
+            CFBD commitments{syncInfo ? ` · synced ${shortDate(syncInfo.at)}${syncInfo.changes ? ` · ${syncInfo.changes.length} changed` : ""}` : syncInfo === false ? " · not synced yet" : ""} · daily
+          </span>
+          <button type="button" onClick={() => setRecentOnly((v) => !v)}
+            style={{ border: "2px solid " + (recentOnly ? BLUE : "#ddd"), background: recentOnly ? BLUE : "#fff", color: recentOnly ? "#fff" : "#555", borderRadius: "999px", padding: "3px 10px", fontWeight: 900, fontSize: "11px", cursor: "pointer" }}>
+            Changed in {RECENT_COMMIT_DAYS} days ({allRecruits.filter(recentCommitChange).length})
+          </button>
+          <button type="button" onClick={runCommitSync} disabled={syncing}
+            style={{ marginLeft: "auto", background: BLUE, color: "#fff", border: "none", borderRadius: "6px", padding: "5px 10px", fontWeight: 900, fontSize: "11px", textTransform: "uppercase", cursor: syncing ? "default" : "pointer", opacity: syncing ? 0.6 : 1 }}>
+            {syncing ? "Syncing…" : "Sync now"}
+          </button>
+        </div>
         {classMessage && (
           <div style={{ padding: "8px 14px", borderBottom: "1px solid #eee", fontSize: "13px", fontWeight: 800, color: /stopped/.test(classMessage) ? "#c0392b" : "#2e7d32" }}>
             {classMessage}
@@ -6647,6 +6812,16 @@ function RecruitsSection() {
                           ADDED
                         </span>
                       )}
+                      {recentCommitChange(r) && (
+                        <span title={`${r.PrevCommitment || "uncommitted"} → ${r.Commitment || "uncommitted"}`} style={{ marginLeft: "6px", fontSize: "9px", fontWeight: 900, color: "#fff", background: "#b45309", borderRadius: "10px", padding: "1px 6px" }}>
+                          {!r.PrevCommitment ? "COMMIT" : !r.Commitment ? "DECOMMIT" : "FLIP"}
+                        </span>
+                      )}
+                      {pageOutOfDate(r) && (
+                        <span title="His player page's school doesn't match his commitment" style={{ marginLeft: "6px", fontSize: "9px", fontWeight: 900, color: "#c0392b", border: "1px solid #c0392b", borderRadius: "10px", padding: "1px 6px" }}>
+                          PAGE ≠
+                        </span>
+                      )}
                     </div>
                     <div style={{ fontSize: "12px", fontWeight: 700, color: "#888" }}>
                       {r.Position || "—"} · {r.Commitment || "—"} · Class of {r.RecruitClass || "—"}
@@ -6670,7 +6845,7 @@ function RecruitsSection() {
         )}
       </div>
 
-      <div style={{ border: "2px solid " + GOLD, borderRadius: "10px", overflow: "hidden", position: "sticky", top: "20px" }}>
+      <div style={{ border: "2px solid " + GOLD, borderRadius: "10px", overflow: "hidden", ...(selectedRecruit ? {} : { position: "sticky", top: "20px" }) }}>
         <div style={{ background: GOLD, padding: "10px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
           <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
             {isNew ? "New Recruit" : selectedRecruit ? "Edit Recruit" : "Select a Recruit"}
@@ -6698,7 +6873,10 @@ function RecruitsSection() {
             Click a recruit from the list to edit their record, or "+ Add Recruit" to create one.
           </div>
         ) : (
-          <div style={{ padding: "16px" }}>
+          <div style={{ padding: "16px", display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.25fr)", gap: "18px", alignItems: "start" }}>
+            {/* Player data (left) — saved with its button. */}
+            <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: "12px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "10px" }}>Player Data</div>
             <FieldGroup>
               <FieldRow label="First">
                 <input value={formState.First} onChange={(e) => handleFieldChange("First", e.target.value)} style={inputStyle} />
@@ -6728,6 +6906,35 @@ function RecruitsSection() {
                   <option value="">—</option>
                   {fbsSchoolOptions.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
+                {/* CFBD keeps it current (server/recruits/commitments.js) unless locked. */}
+                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "4px 12px", marginTop: "5px", fontSize: "11px", fontWeight: 700, color: "#888" }}>
+                  {formState.CFBDRecruitId ? (
+                    <span>
+                      CFBD: <b style={{ color: (formState.CFBDCommitment || "") === (formState.Commitment || "") ? "#2e7d32" : "#b45309" }}>{formState.CFBDCommitment || "uncommitted"}</b>
+                      {formState.RecruitStars ? ` · ${formState.RecruitStars}★` : ""}{formState.RecruitRank ? ` · No. ${formState.RecruitRank}` : ""}
+                    </span>
+                  ) : <span>Not linked to CFBD{isNew ? "" : " yet — the sync links him by name when it can"}</span>}
+                  <label style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer", color: formState.CommitmentLocked ? "#b45309" : "#888" }}>
+                    <input type="checkbox" checked={!!formState.CommitmentLocked} onChange={(e) => handleFieldChange("CommitmentLocked", e.target.checked)} />
+                    Lock (the sync won't change it)
+                  </label>
+                </div>
+                {(formState.CommitmentLog || []).length > 0 && (
+                  <div style={{ marginTop: "4px", fontSize: "11px", fontWeight: 700, color: "#888", lineHeight: 1.5 }}>
+                    {[...formState.CommitmentLog].reverse().slice(0, 4).map((l, i) => (
+                      <div key={i}>{l.at}: {l.from || "uncommitted"} → <b style={{ color: "#555" }}>{l.to || "uncommitted"}</b> ({l.by === "cfbd" ? "CFBD" : "admin"})</div>
+                    ))}
+                  </div>
+                )}
+                {!isNew && pageOutOfDate(selectedRecruit) && (
+                  <div style={{ marginTop: "6px", padding: "8px 10px", borderRadius: "6px", background: "#fff3f0", border: "1px solid #f0b8ae", fontSize: "12px", fontWeight: 800, color: "#a52a1e", display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                    <span style={{ flex: 1 }}>His player page still says {pageOutOfDate(selectedRecruit).School || "no school"}.</span>
+                    <button type="button" onClick={() => updatePageSchool(pageOutOfDate(selectedRecruit), selectedRecruit.Commitment || "")}
+                      style={{ background: "#c0392b", color: "#fff", border: "none", borderRadius: "6px", padding: "5px 10px", fontWeight: 900, fontSize: "11px", cursor: "pointer" }}>
+                      Update page to {selectedRecruit.Commitment || "no school"}
+                    </button>
+                  </div>
+                )}
               </FieldRow>
               <FieldRow label="Position">
                 <select value={formState.Position} onChange={(e) => handleFieldChange("Position", e.target.value)} style={inputStyle}>
@@ -6753,6 +6960,275 @@ function RecruitsSection() {
               <FieldRow label="Weight">
                 <input value={formState.Weight} onChange={(e) => handleFieldChange("Weight", e.target.value)} placeholder="e.g. 215" style={inputStyle} />
               </FieldRow>
+              {/* Held here until promotion, which turns it into a Pending
+                  account in Admin → Social (instagramContacts); after that,
+                  Social is where it's managed. */}
+              <FieldRow label="Instagram">
+                <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                  <input
+                    value={formState.InstagramHandle || ""}
+                    onChange={(e) => handleFieldChange("InstagramHandle", e.target.value.trim().replace(/^@+/, ""))}
+                    placeholder="handle (no @)"
+                    disabled={!!selectedRecruit?.promotedPlayerId}
+                    style={{ ...inputStyle, flex: 1 }}
+                  />
+                  {formState.InstagramHandle && (
+                    <a href={`https://www.instagram.com/${formState.InstagramHandle}/`} target="_blank" rel="noopener noreferrer"
+                      style={{ flexShrink: 0, fontSize: "12px", fontWeight: 900, color: "#c13584" }}>@{formState.InstagramHandle} ↗</a>
+                  )}
+                </div>
+                {selectedRecruit?.promotedPlayerId && <div style={{ fontSize: "11px", fontWeight: 700, color: "#888", marginTop: "3px" }}>Promoted: manage it in Admin → Social.</div>}
+              </FieldRow>
+              {/* Carried to the player on promotion (recruitToPlayer); after
+                  that, edit it on the player. */}
+              <FieldRow label="X (Twitter)">
+                <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                  <input
+                    value={formState.XHandle || ""}
+                    onChange={(e) => handleFieldChange("XHandle", cleanXHandle(e.target.value))}
+                    placeholder="handle (no @)"
+                    style={{ ...inputStyle, flex: 1 }}
+                  />
+                  {formState.XHandle && (
+                    <a href={xProfileUrl(formState.XHandle)} target="_blank" rel="noopener noreferrer"
+                      style={{ flexShrink: 0, fontSize: "12px", fontWeight: 900, color: "#111" }}>@{formState.XHandle} ↗</a>
+                  )}
+                </div>
+              </FieldRow>
+              {/* New recruits don't have a Firestore doc id yet to attach
+                  memberships to — save the recruit first, then this appears
+                  on re-opening it. Creating a brand-new group from here
+                  (rather than the filter bar above) adds this recruit to it
+                  immediately, in the same write. */}
+              {!isNew && (
+                <FieldRow label="Groups">
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                    {allGroups.map((g) => {
+                      const active = (g.recruitIds || []).includes(selectedRecruit.id);
+                      return (
+                        <button
+                          key={g.id}
+                          type="button"
+                          onClick={() => handleToggleGroupMembership(g, selectedRecruit.id)}
+                          style={{
+                            padding: "6px 14px", fontWeight: 900, fontSize: "12px",
+                            textTransform: "uppercase", letterSpacing: "0.04em",
+                            border: "2px solid " + BLUE, borderRadius: "20px", cursor: "pointer",
+                            background: active ? BLUE : "#fff",
+                            color: active ? "#fff" : BLUE,
+                          }}
+                        >
+                          {active ? "✓ " : "+ "}{g.name}
+                        </button>
+                      );
+                    })}
+                    {allGroups.length === 0 && (
+                      <div style={{ fontSize: "12px", fontWeight: 700, color: "#999" }}>
+                        No groups yet — create one above the recruit list.
+                      </div>
+                    )}
+                  </div>
+                </FieldRow>
+              )}
+            </FieldGroup>
+
+            {duplicateMatches && duplicateMatches.length > 0 ? (
+              <div style={{ marginTop: "16px", border: "2px solid #c0392b", borderRadius: "8px", padding: "12px", background: "#fff3f0" }}>
+                <div style={{ fontWeight: 900, fontSize: "12px", color: "#a52a1e", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: "8px" }}>
+                  ⚠ Possible Duplicate — {duplicateMatches.length} existing record{duplicateMatches.length !== 1 ? "s" : ""} named "{formState.First} {formState.Last}"
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginBottom: "12px" }}>
+                  {duplicateMatches.map((m) => (
+                    <div key={m._type + "-" + m.id} style={{ fontSize: "12px", fontWeight: 700, color: "#666" }}>
+                      <span style={{ color: m._type === "player" ? "#666" : "#8a6300" }}>
+                        {m._type === "player" ? "Player" : "Recruit"}
+                      </span>
+                      {" · "}
+                      {m._type === "player"
+                        ? (m.Position || "—") + " · " + (m.School || "—") + " · " + (m.Eligible || "—")
+                        : (m.Position || "—") + " · " + (m.HighSchool || "—") + " · Class of " + (m.RecruitClass || "—")}
+                      {m.Slug && (
+                        <a
+                          href={"/player/" + m.Slug} target="_blank" rel="noopener noreferrer"
+                          style={{ marginLeft: "8px", color: BLUE, fontWeight: 900, textDecoration: "none" }}
+                        >
+                          View ↗
+                        </a>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button
+                    onClick={() => setDuplicateMatches(null)}
+                    style={{
+                      flex: 1, background: "#fff", color: "#666", border: "2px solid #ddd",
+                      borderRadius: "6px", padding: "10px", fontWeight: 900, fontSize: "12px",
+                      textTransform: "uppercase", letterSpacing: "0.04em", cursor: "pointer",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => handleSave(true)}
+                    disabled={saving}
+                    style={{
+                      flex: 1, background: "#c0392b", color: "#fff", border: "2px solid #a52a1e",
+                      borderRadius: "6px", padding: "10px", fontWeight: 900, fontSize: "12px",
+                      textTransform: "uppercase", letterSpacing: "0.04em", cursor: saving ? "default" : "pointer",
+                      opacity: saving ? 0.6 : 1,
+                    }}
+                  >
+                    {saving ? "Creating..." : "Yes, Create Anyway"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => handleSave()}
+                disabled={saving || (!isNew && !dataDirty)}
+                style={{
+                  width: "100%", marginTop: "16px",
+                  background: BLUE, color: "#fff", border: "2px solid " + GOLD,
+                  borderRadius: "8px", padding: "12px", fontWeight: 900, fontSize: "13px",
+                  textTransform: "uppercase", letterSpacing: "0.06em", cursor: saving || (!isNew && !dataDirty) ? "default" : "pointer",
+                  opacity: saving || (!isNew && !dataDirty) ? 0.5 : 1,
+                }}
+              >
+                {saving ? "Saving..." : isNew ? "Create Recruit" : dataDirty ? "Save Player Data" : "Player Data Saved"}
+              </button>
+            )}
+
+            {!isNew && (
+              <div style={{ marginTop: "10px" }}>
+                {selectedRecruit.promotedPlayerId ? (
+                  <div style={{
+                    width: "100%", textAlign: "center", background: "#eafaf0", color: "#2e7d32",
+                    border: "2px solid #2e7d32", borderRadius: "8px", padding: "10px",
+                    fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.04em",
+                  }}>
+                    ✅ Added — <a href={"/player/" + selectedRecruit.promotedSlug} target="_blank" rel="noopener noreferrer" style={{ color: "#2e7d32" }}>View Page ↗</a>
+                  </div>
+                ) : (
+                  <button
+                    onClick={handlePromote}
+                    disabled={!canPromote || promoting}
+                    title={canPromote ? "" : "Only " + PROMOTABLE_RECRUIT_CLASSES.join(" and ") + " recruits can be added to We-Draft today."}
+                    style={{
+                      width: "100%", background: canPromote ? GOLD : "#eee", color: canPromote ? "#fff" : "#999",
+                      border: "2px solid " + (canPromote ? BLUE : "#ddd"),
+                      borderRadius: "8px", padding: "12px", fontWeight: 900, fontSize: "13px",
+                      textTransform: "uppercase", letterSpacing: "0.06em",
+                      cursor: canPromote && !promoting ? "pointer" : "default",
+                      opacity: promoting ? 0.6 : 1,
+                    }}
+                  >
+                    {promoting ? "Adding..." : "Add to We-Draft"}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {saveMessage && (
+              <div style={{ marginTop: "10px", textAlign: "center", fontSize: "12px", fontWeight: 800, color: saveMessage.startsWith("Failed") || saveMessage.includes("required") ? "#c0392b" : "#2e7d32" }}>
+                {saveMessage}
+              </div>
+            )}
+
+            {!isNew && (
+              <div style={{ marginTop: "18px", paddingTop: "16px", borderTop: "1px solid #eee" }}>
+                {confirmDelete ? (
+                  <div style={{ border: "2px solid #c0392b", borderRadius: "8px", padding: "12px", background: "#fff3f0" }}>
+                    <div style={{ fontWeight: 900, fontSize: "12px", color: "#a52a1e", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: "8px" }}>
+                      ⚠ Permanently delete {(selectedRecruit.First || "") + " " + (selectedRecruit.Last || "")}?
+                    </div>
+                    <div style={{ fontSize: "12px", fontWeight: 700, color: "#666", marginBottom: "12px" }}>
+                      This removes the recruit record{selectedRecruit.promotedPlayerId ? " (their promoted player page is unaffected)" : ""} and cannot be undone.
+                    </div>
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      <button
+                        onClick={() => setConfirmDelete(false)}
+                        disabled={removing}
+                        style={{
+                          flex: 1, background: "#fff", color: "#666", border: "2px solid #ddd",
+                          borderRadius: "6px", padding: "10px", fontWeight: 900, fontSize: "12px",
+                          textTransform: "uppercase", letterSpacing: "0.04em", cursor: removing ? "default" : "pointer",
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleDelete}
+                        disabled={removing}
+                        style={{
+                          flex: 1, background: "#c0392b", color: "#fff", border: "2px solid #a52a1e",
+                          borderRadius: "6px", padding: "10px", fontWeight: 900, fontSize: "12px",
+                          textTransform: "uppercase", letterSpacing: "0.04em", cursor: removing ? "default" : "pointer",
+                          opacity: removing ? 0.6 : 1,
+                        }}
+                      >
+                        {removing ? "Deleting..." : "Yes, Delete Permanently"}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setConfirmDelete(true)}
+                    style={{
+                      width: "100%", background: "#fff", color: "#c0392b", border: "2px solid #c0392b",
+                      borderRadius: "8px", padding: "10px", fontWeight: 900, fontSize: "12px",
+                      textTransform: "uppercase", letterSpacing: "0.06em", cursor: "pointer",
+                    }}
+                  >
+                    Delete Recruit
+                  </button>
+                )}
+              </div>
+            )}
+            </div>
+
+            {/* Evaluation (right) — saves itself as the admin types. */}
+            <div
+              onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); flushEval(); } }}
+              style={{ minWidth: 0, border: "2px solid #eadfc4", borderRadius: "10px", background: "#fffdf7", padding: "14px", display: "flex", flexDirection: "column", gap: "12px" }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <div style={{ flex: 1, fontSize: "12px", fontWeight: 900, color: "#8a5a00", textTransform: "uppercase", letterSpacing: "0.08em" }}>Evaluation</div>
+                {isNew ? <span style={{ fontSize: "11px", fontWeight: 800, color: "#999" }}>Saved with Create Recruit</span>
+                  : evalStatus === "unsaved" ? <span style={{ fontSize: "11px", fontWeight: 800, color: "#b45309" }}>Unsaved…</span>
+                  : evalStatus === "saving" ? <span style={{ fontSize: "11px", fontWeight: 800, color: "#888" }}>Saving…</span>
+                  : evalStatus === "saved" ? <span style={{ fontSize: "11px", fontWeight: 800, color: "#2e7d32" }}>✓ Saved</span>
+                  : evalStatus === "error" ? <span style={{ fontSize: "11px", fontWeight: 800, color: "#c0392b" }}>Couldn't save</span> : null}
+                {!isNew && (evalStatus === "unsaved" || evalStatus === "error") && (
+                  <button type="button" onClick={() => { if (!evalPending.current && evalDirty) evalPending.current = { id: selectedRecruit.id, fields: pickEval(formState) }; flushEval(); }}
+                    style={{ background: "#8a5a00", color: "#fff", border: "none", borderRadius: "6px", padding: "4px 10px", fontWeight: 900, fontSize: "11px", cursor: "pointer" }}>
+                    Save now
+                  </button>
+                )}
+              </div>
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                  <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em" }}>Notes (internal only)</div>
+                  <button type="button" onClick={addDatedNote}
+                    style={{ background: "#fff", color: "#8a5a00", border: "1px solid #eadfc4", borderRadius: "6px", padding: "2px 8px", fontWeight: 900, fontSize: "11px", cursor: "pointer" }}>
+                    + Dated entry
+                  </button>
+                  <span style={{ marginLeft: "auto", fontSize: "11px", fontWeight: 700, color: "#aaa" }}>
+                    {(formState.AdminNotes || "").trim() ? (formState.AdminNotes || "").trim().split(/\s+/).length : 0} words
+                  </span>
+                </div>
+                <textarea
+                  ref={notesRef}
+                  value={formState.AdminNotes || ""}
+                  onChange={(e) => handleFieldChange("AdminNotes", e.target.value)}
+                  placeholder="Your evaluation: film, camps, visits, offers, anything. Saves as you type."
+                  style={{ ...inputStyle, minHeight: "340px", resize: "vertical", fontFamily: "inherit", fontSize: "14px", lineHeight: 1.5 }}
+                />
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#aaa", marginTop: "3px" }}>
+                  Saves automatically (Ctrl+S saves now). Not shown anywhere public; carried to his player page's admin notes when he's added.
+                </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.4fr)", gap: "12px" }}>
               <FieldRow label="Flair (recruit grade)">
                 <select value={formState.Flair} onChange={(e) => handleFieldChange("Flair", e.target.value)} style={inputStyle}>
                   {RECRUIT_FLAIR_OPTIONS.map((f) => <option key={f} value={f}>{f || "None"}</option>)}
@@ -6796,41 +7272,7 @@ function RecruitsSection() {
                   )}
                 </div>
               </FieldRow>
-              {/* Held here until promotion, which turns it into a Pending
-                  account in Admin → Social (instagramContacts); after that,
-                  Social is where it's managed. */}
-              <FieldRow label="Instagram">
-                <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-                  <input
-                    value={formState.InstagramHandle || ""}
-                    onChange={(e) => handleFieldChange("InstagramHandle", e.target.value.trim().replace(/^@+/, ""))}
-                    placeholder="handle (no @)"
-                    disabled={!!selectedRecruit?.promotedPlayerId}
-                    style={{ ...inputStyle, flex: 1 }}
-                  />
-                  {formState.InstagramHandle && (
-                    <a href={`https://www.instagram.com/${formState.InstagramHandle}/`} target="_blank" rel="noopener noreferrer"
-                      style={{ flexShrink: 0, fontSize: "12px", fontWeight: 900, color: "#c13584" }}>@{formState.InstagramHandle} ↗</a>
-                  )}
-                </div>
-                {selectedRecruit?.promotedPlayerId && <div style={{ fontSize: "11px", fontWeight: 700, color: "#888", marginTop: "3px" }}>Promoted: manage it in Admin → Social.</div>}
-              </FieldRow>
-              {/* Carried to the player on promotion (recruitToPlayer); after
-                  that, edit it on the player. */}
-              <FieldRow label="X (Twitter)">
-                <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-                  <input
-                    value={formState.XHandle || ""}
-                    onChange={(e) => handleFieldChange("XHandle", cleanXHandle(e.target.value))}
-                    placeholder="handle (no @)"
-                    style={{ ...inputStyle, flex: 1 }}
-                  />
-                  {formState.XHandle && (
-                    <a href={xProfileUrl(formState.XHandle)} target="_blank" rel="noopener noreferrer"
-                      style={{ flexShrink: 0, fontSize: "12px", fontWeight: 900, color: "#111" }}>@{formState.XHandle} ↗</a>
-                  )}
-                </div>
-              </FieldRow>
+              </div>
               <FieldRow label="Flag">
                 <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                   {FLAG_COLORS.map((f) => {
@@ -6871,41 +7313,6 @@ function RecruitsSection() {
                   )}
                 </div>
               </FieldRow>
-              {/* New recruits don't have a Firestore doc id yet to attach
-                  memberships to — save the recruit first, then this appears
-                  on re-opening it. Creating a brand-new group from here
-                  (rather than the filter bar above) adds this recruit to it
-                  immediately, in the same write. */}
-              {!isNew && (
-                <FieldRow label="Groups">
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-                    {allGroups.map((g) => {
-                      const active = (g.recruitIds || []).includes(selectedRecruit.id);
-                      return (
-                        <button
-                          key={g.id}
-                          type="button"
-                          onClick={() => handleToggleGroupMembership(g, selectedRecruit.id)}
-                          style={{
-                            padding: "6px 14px", fontWeight: 900, fontSize: "12px",
-                            textTransform: "uppercase", letterSpacing: "0.04em",
-                            border: "2px solid " + BLUE, borderRadius: "20px", cursor: "pointer",
-                            background: active ? BLUE : "#fff",
-                            color: active ? "#fff" : BLUE,
-                          }}
-                        >
-                          {active ? "✓ " : "+ "}{g.name}
-                        </button>
-                      );
-                    })}
-                    {allGroups.length === 0 && (
-                      <div style={{ fontSize: "12px", fontWeight: 700, color: "#999" }}>
-                        No groups yet — create one above the recruit list.
-                      </div>
-                    )}
-                  </div>
-                </FieldRow>
-              )}
               {/* Scouting Grades + Strengths/Weaknesses share one collapsible
                   section (see gradesExpanded, reset collapsed on every
                   select/new) so the form doesn't open with a dozen extra
@@ -7004,169 +7411,7 @@ function RecruitsSection() {
                   </div>
                 );
               })()}
-              <FieldRow label="Admin Notes (internal only)">
-                <textarea
-                  value={formState.AdminNotes}
-                  onChange={(e) => handleFieldChange("AdminNotes", e.target.value)}
-                  placeholder="Internal notes — not shown anywhere public"
-                  style={{ ...inputStyle, height: "80px", resize: "vertical", fontFamily: "inherit" }}
-                />
-              </FieldRow>
-            </FieldGroup>
-
-            {duplicateMatches && duplicateMatches.length > 0 ? (
-              <div style={{ marginTop: "16px", border: "2px solid #c0392b", borderRadius: "8px", padding: "12px", background: "#fff3f0" }}>
-                <div style={{ fontWeight: 900, fontSize: "12px", color: "#a52a1e", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: "8px" }}>
-                  ⚠ Possible Duplicate — {duplicateMatches.length} existing record{duplicateMatches.length !== 1 ? "s" : ""} named "{formState.First} {formState.Last}"
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginBottom: "12px" }}>
-                  {duplicateMatches.map((m) => (
-                    <div key={m._type + "-" + m.id} style={{ fontSize: "12px", fontWeight: 700, color: "#666" }}>
-                      <span style={{ color: m._type === "player" ? "#666" : "#8a6300" }}>
-                        {m._type === "player" ? "Player" : "Recruit"}
-                      </span>
-                      {" · "}
-                      {m._type === "player"
-                        ? (m.Position || "—") + " · " + (m.School || "—") + " · " + (m.Eligible || "—")
-                        : (m.Position || "—") + " · " + (m.HighSchool || "—") + " · Class of " + (m.RecruitClass || "—")}
-                      {m.Slug && (
-                        <a
-                          href={"/player/" + m.Slug} target="_blank" rel="noopener noreferrer"
-                          style={{ marginLeft: "8px", color: BLUE, fontWeight: 900, textDecoration: "none" }}
-                        >
-                          View ↗
-                        </a>
-                      )}
-                    </div>
-                  ))}
-                </div>
-                <div style={{ display: "flex", gap: "8px" }}>
-                  <button
-                    onClick={() => setDuplicateMatches(null)}
-                    style={{
-                      flex: 1, background: "#fff", color: "#666", border: "2px solid #ddd",
-                      borderRadius: "6px", padding: "10px", fontWeight: 900, fontSize: "12px",
-                      textTransform: "uppercase", letterSpacing: "0.04em", cursor: "pointer",
-                    }}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={() => handleSave(true)}
-                    disabled={saving}
-                    style={{
-                      flex: 1, background: "#c0392b", color: "#fff", border: "2px solid #a52a1e",
-                      borderRadius: "6px", padding: "10px", fontWeight: 900, fontSize: "12px",
-                      textTransform: "uppercase", letterSpacing: "0.04em", cursor: saving ? "default" : "pointer",
-                      opacity: saving ? 0.6 : 1,
-                    }}
-                  >
-                    {saving ? "Creating..." : "Yes, Create Anyway"}
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <button
-                onClick={() => handleSave()}
-                disabled={saving}
-                style={{
-                  width: "100%", marginTop: "16px",
-                  background: BLUE, color: "#fff", border: "2px solid " + GOLD,
-                  borderRadius: "8px", padding: "12px", fontWeight: 900, fontSize: "13px",
-                  textTransform: "uppercase", letterSpacing: "0.06em", cursor: saving ? "default" : "pointer",
-                  opacity: saving ? 0.6 : 1,
-                }}
-              >
-                {saving ? "Saving..." : isNew ? "Create Recruit" : "Save Changes"}
-              </button>
-            )}
-
-            {!isNew && (
-              <div style={{ marginTop: "10px" }}>
-                {selectedRecruit.promotedPlayerId ? (
-                  <div style={{
-                    width: "100%", textAlign: "center", background: "#eafaf0", color: "#2e7d32",
-                    border: "2px solid #2e7d32", borderRadius: "8px", padding: "10px",
-                    fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.04em",
-                  }}>
-                    ✅ Added — <a href={"/player/" + selectedRecruit.promotedSlug} target="_blank" rel="noopener noreferrer" style={{ color: "#2e7d32" }}>View Page ↗</a>
-                  </div>
-                ) : (
-                  <button
-                    onClick={handlePromote}
-                    disabled={!canPromote || promoting}
-                    title={canPromote ? "" : "Only " + PROMOTABLE_RECRUIT_CLASSES.join(" and ") + " recruits can be added to We-Draft today."}
-                    style={{
-                      width: "100%", background: canPromote ? GOLD : "#eee", color: canPromote ? "#fff" : "#999",
-                      border: "2px solid " + (canPromote ? BLUE : "#ddd"),
-                      borderRadius: "8px", padding: "12px", fontWeight: 900, fontSize: "13px",
-                      textTransform: "uppercase", letterSpacing: "0.06em",
-                      cursor: canPromote && !promoting ? "pointer" : "default",
-                      opacity: promoting ? 0.6 : 1,
-                    }}
-                  >
-                    {promoting ? "Adding..." : "Add to We-Draft"}
-                  </button>
-                )}
-              </div>
-            )}
-
-            {saveMessage && (
-              <div style={{ marginTop: "10px", textAlign: "center", fontSize: "12px", fontWeight: 800, color: saveMessage.startsWith("Failed") || saveMessage.includes("required") ? "#c0392b" : "#2e7d32" }}>
-                {saveMessage}
-              </div>
-            )}
-
-            {!isNew && (
-              <div style={{ marginTop: "18px", paddingTop: "16px", borderTop: "1px solid #eee" }}>
-                {confirmDelete ? (
-                  <div style={{ border: "2px solid #c0392b", borderRadius: "8px", padding: "12px", background: "#fff3f0" }}>
-                    <div style={{ fontWeight: 900, fontSize: "12px", color: "#a52a1e", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: "8px" }}>
-                      ⚠ Permanently delete {(selectedRecruit.First || "") + " " + (selectedRecruit.Last || "")}?
-                    </div>
-                    <div style={{ fontSize: "12px", fontWeight: 700, color: "#666", marginBottom: "12px" }}>
-                      This removes the recruit record{selectedRecruit.promotedPlayerId ? " (their promoted player page is unaffected)" : ""} and cannot be undone.
-                    </div>
-                    <div style={{ display: "flex", gap: "8px" }}>
-                      <button
-                        onClick={() => setConfirmDelete(false)}
-                        disabled={removing}
-                        style={{
-                          flex: 1, background: "#fff", color: "#666", border: "2px solid #ddd",
-                          borderRadius: "6px", padding: "10px", fontWeight: 900, fontSize: "12px",
-                          textTransform: "uppercase", letterSpacing: "0.04em", cursor: removing ? "default" : "pointer",
-                        }}
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        onClick={handleDelete}
-                        disabled={removing}
-                        style={{
-                          flex: 1, background: "#c0392b", color: "#fff", border: "2px solid #a52a1e",
-                          borderRadius: "6px", padding: "10px", fontWeight: 900, fontSize: "12px",
-                          textTransform: "uppercase", letterSpacing: "0.04em", cursor: removing ? "default" : "pointer",
-                          opacity: removing ? 0.6 : 1,
-                        }}
-                      >
-                        {removing ? "Deleting..." : "Yes, Delete Permanently"}
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => setConfirmDelete(true)}
-                    style={{
-                      width: "100%", background: "#fff", color: "#c0392b", border: "2px solid #c0392b",
-                      borderRadius: "8px", padding: "10px", fontWeight: 900, fontSize: "12px",
-                      textTransform: "uppercase", letterSpacing: "0.06em", cursor: "pointer",
-                    }}
-                  >
-                    Delete Recruit
-                  </button>
-                )}
-              </div>
-            )}
+            </div>
           </div>
         )}
       </div>
@@ -8158,6 +8403,8 @@ const VIDEO_GROUPS = [
       { key: "portalbreakdowns", label: "Portal Breakdowns" },
       // After the draft: Pick Grade in the verdict's place (user, 2026-11-24).
       { key: "reactions", label: "Draft Reactions" },
+      // Small clips for those videos, made on request — Player Identification first (user, 2026-11-25).
+      { key: "videoassets", label: "Assets" },
     ],
   },
 ];
@@ -8668,6 +8915,7 @@ function VideosSection({ initialTab }) {
     {videoTab === "breakdowns" && <AdminDraftBreakdowns key="draft" kind="draft" />}
     {videoTab === "portalbreakdowns" && <AdminDraftBreakdowns key="portal" kind="portal" />}
     {videoTab === "reactions" && <AdminDraftBreakdowns key="reaction" kind="reaction" />}
+    {videoTab === "videoassets" && <AdminVideoAssets />}
     {videoTab === "thumbanalytics" && <AdminThumbAnalytics />}
     {videoTab === "manage" && (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 420px", gap: "18px", alignItems: "start" }}>
