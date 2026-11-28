@@ -10,7 +10,7 @@
 // read from that window and the profile link opens a new tab on this site.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { collection, doc, getDoc, getDocs, limit, query, where } from "firebase/firestore";
-import { db } from "../../firebase";
+import { auth, db } from "../../firebase";
 import { useSchools } from "../DraftArchiveList";
 import { useHeadshot } from "../draftSim/simHeadshots";
 import { CareerStop, useCareerPath } from "../PlayerEligibilityInfo";
@@ -82,6 +82,20 @@ export const loadBox = (gid) => {
   if (!boxCache[gid]) boxCache[gid] = getDoc(doc(db, "compSnapshots", `_filmBox_${gid}`)).then((d) => (d.exists() ? d.data() : null)).catch(() => null);
   return boxCache[gid];
 };
+/** A film just put on its game: save the game's box score if it has none
+ *  (api/portal-sync filmBox — the server holds the CFBD key). Quiet: a game
+ *  not played yet just has none. → the server's answer, or null. */
+export async function ensureFilmBox(gid) {
+  if (!gid) return null;
+  try {
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) return null;
+    const r = await fetch("/api/portal-sync", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ action: "filmBox", gameId: gid }) });
+    const out = r.ok ? await r.json() : null;
+    if (out?.saved) delete boxCache[gid]; // the next look reads the new one
+    return out;
+  } catch { return null; }
+}
 const nameKey = (n) => String(n || "").toLowerCase().replace(/[^a-z]/g, "");
 /** His line in a box score: by CFBD id, else by name. → { team, stats } | null */
 export const boxLineOf = (box, p) => {

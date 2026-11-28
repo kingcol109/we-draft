@@ -24,6 +24,9 @@
 //                                 (AdminPanel.js RecruitsSection) —
 //                                 server/recruits/commitments.js, one CFBD
 //                                 call per open class; writes recruits only
+//   POST { action: "filmBox", gameId }  Film Manager — a film put on its game
+//                                 saves that game's box score (server/film/box.js,
+//                                 one CFBD call; compSnapshots/_filmBox_{id})
 // Neither writes to players; the admin applies every change.
 //
 // Auth: the caller's Firebase ID token (Authorization: Bearer <token>),
@@ -78,6 +81,10 @@ module.exports = async function handler(req, res) {
     if (req.body?.action === "commitments") {
       const { syncCommitments } = require("../server/recruits/commitments");
       return res.status(200).json(await syncCommitments(db, { dry: !!req.body?.dry }));
+    }
+    if (req.body?.action === "filmBox") {
+      const { saveFilmBox } = require("../server/film/box");
+      return res.status(200).json(await saveFilmBox(db, req.body?.gameId, { force: !!req.body?.force }));
     }
     if (req.body?.action === "cfbdIndex") {
       const { buildCfbdIndex } = require("../server/offseason/cfbdIndex");

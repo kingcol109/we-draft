@@ -24,7 +24,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import FilmPlayer, { MARK_SIZES } from "./FilmPlayer";
-import FilmPlayerCard, { BOX_CATS, colsOf, loadBox } from "./FilmPlayerCard";
+import FilmPlayerCard, { BOX_CATS, colsOf, ensureFilmBox, loadBox } from "./FilmPlayerCard";
 import ViewerTab from "./ViewerTab";
 import Timeline from "./Timeline";
 import ScrubRow, { useFastMotion } from "./Scrub";
@@ -1899,6 +1899,8 @@ function ImportTab({ games, setGames, wdPeople, gamePaths }) {
         fresh.push({ id: c.gameId, file: c.file, folder, season: seasonOf(folder), ...parseGameName(c.file) });
       });
       if (fresh.length) { await addGames(fresh); setGames((gs) => [...gs, ...fresh.map((g) => ({ ...g, plays: 0, focus: [] }))]); }
+      // Each new film on its game: its box score (the Side bar's players).
+      fresh.filter((g) => g.cfbdGameId).forEach((g) => ensureFilmBox(g.cfbdGameId));
       const existing = await playsForGames([...new Set(cuts.map((c) => c.gameId))]);
       let made = 0; let tagged = 0; let had = 0;
       for (const c of cuts) {
@@ -2023,6 +2025,8 @@ export default function FilmManager() {
         return { ...out, name: filmName(out) };
       });
       if (fresh.length) { await addGames(fresh); setGames((gs) => [...gs, ...fresh.map((g) => ({ ...g, plays: 0, focus: [] }))]); }
+      // Each new film on its game: its box score (the Side bar's players).
+      fresh.filter((g) => g.cfbdGameId).forEach((g) => ensureFilmBox(g.cfbdGameId));
       const auto = fresh.filter((g) => g.cfbdGameId).length;
       setMsg(`${found.length} film files in the folders${fresh.length ? ` · ${fresh.length} new: ${auto} put on their game${fresh.length - auto ? `, ${fresh.length - auto} in the inbox to place` : ""}` : " · nothing new"}.`);
     } catch (e) { setMsg(`Scan failed: ${e.message}`); }
@@ -2091,6 +2095,7 @@ export default function FilmManager() {
         setGames((gs) => [...gs, { ...patch, plays: 0, focus: [] }]);
       }
       setMsg(`${f.name} → ${patch.name}${path ? "" : " · linked from outside the film folder (remembered in this browser)"}`);
+      ensureFilmBox(patch.cfbdGameId);
       return id;
     } catch (e) { setMsg(`Couldn't add the film: ${e.message}`); return null; }
   };
@@ -2102,6 +2107,7 @@ export default function FilmManager() {
     setGames((gs) => gs.map((y) => (y.id === g.id ? { ...y, ...patch } : y)));
     await saveGame(g.id, patch).catch((e) => setMsg(e.message));
     setMsg(`${g.file} → ${filmName(next)}`);
+    ensureFilmBox(patch.cfbdGameId);
   };
 
   return (

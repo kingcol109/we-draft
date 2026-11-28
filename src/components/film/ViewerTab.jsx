@@ -43,6 +43,7 @@ import { hostDraw, putPlay, putState, watchCmds } from "../../utils/film/remote"
 import WeDraftLogo from "../../assets/Logo2.png";
 import KingColdLogo from "../../assets/KingColdSports.png";
 import { useCareerPath } from "../PlayerEligibilityInfo";
+import DisplayBoard, { DISPLAYS, Scaled, boardHead, boardList, pastWeekOf, useSlate, useWeekGames } from "./DisplayBoard";
 
 const UI_BLUE = "#0055a5";
 const UI_GOLD = "#f6a21d";
@@ -802,7 +803,7 @@ function Scoreboard({ game, box, brands, aw, hm }) {
 }
 
 // ── The YouTube frame (1920×1080, scaled to fit its box — or the screen). ──
-function YouTubeFrame({ who: whoIn, game: gameIn, filmId = "none", side = "stats", center = "film", shotAt = 0, onShots, settling = false, cam = true, children }) {
+function YouTubeFrame({ who: whoIn, game: gameIn, filmId = "none", side = "stats", center = "film", shotAt = 0, onShots, settling = false, cam = true, board = null, head: headIn = null, children }) {
   useFrameFonts();
   const frameRef = useRef(null);
   // Flipping to another player (or game): the wipe sweeps in, what the frame
@@ -810,20 +811,22 @@ function YouTubeFrame({ who: whoIn, game: gameIn, filmId = "none", side = "stats
   // new film is up (settling) — then sweeps out. Only a new FILM wipes
   // (filmId): featuring a player on a game keeps the film as it is, and just
   // the header and side panel change (user, 2026-11-27).
-  const idKey = whoIn?.key || (gameIn?.id ? `g:${gameIn.id}` : "none");
-  const [shown, setShown] = useState({ who: whoIn, game: gameIn, key: idKey, filmId });
+  // A display (Live / Upcoming / Past, DisplayBoard.jsx) has no one on: its
+  // filmId is its key, so a new display / zoomed game wipes like a new film.
+  const idKey = whoIn?.key || (gameIn?.id ? `g:${gameIn.id}` : `f:${filmId}`);
+  const [shown, setShown] = useState({ who: whoIn, game: gameIn, key: idKey, filmId, head: headIn });
   const [wipe, setWipe] = useState(null); // { id, out }
   const wipeN = useRef(0);
   const swapAt = useRef(0);
   const [leaving, setLeaving] = useState(false);
   useEffect(() => {
-    if (idKey === shown.key) { setLeaving(false); if (whoIn !== shown.who || gameIn !== shown.game || filmId !== shown.filmId) setShown({ who: whoIn, game: gameIn, key: idKey, filmId }); return undefined; }
+    if (idKey === shown.key) { setLeaving(false); if (whoIn !== shown.who || gameIn !== shown.game || filmId !== shown.filmId || headIn?.name !== shown.head?.name || headIn?.sub !== shown.head?.sub) setShown({ who: whoIn, game: gameIn, key: idKey, filmId, head: headIn }); return undefined; }
     // A new film: a wipe comes in (one already covering stays put — a quick second flip).
     if (filmId !== shown.filmId) setWipe((w) => (w && !w.out ? w : { id: ++wipeN.current, out: false }));
     setLeaving(true);
-    const t = setTimeout(() => { swapAt.current = performance.now(); setShown({ who: whoIn, game: gameIn, key: idKey, filmId }); setLeaving(false); }, SWAP_MS);
+    const t = setTimeout(() => { swapAt.current = performance.now(); setShown({ who: whoIn, game: gameIn, key: idKey, filmId, head: headIn }); setLeaving(false); }, SWAP_MS);
     return () => clearTimeout(t);
-  }, [idKey, whoIn, gameIn, filmId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [idKey, whoIn, gameIn, filmId, headIn?.name, headIn?.sub]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!wipe || wipe.out || leaving) return undefined;
     const wait = settling ? Math.max(0, HOLD_MAX_MS - (performance.now() - swapAt.current)) : HOLD_MS;
@@ -838,6 +841,9 @@ function YouTubeFrame({ who: whoIn, game: gameIn, filmId = "none", side = "stats
   const heldFilm = useRef(children);
   if (!switching) heldFilm.current = children;
   const film = switching ? heldFilm.current : children;
+  const heldBoard = useRef(board);
+  if (!switching) heldBoard.current = board;
+  const boardUp = switching ? heldBoard.current : board;
   const who = shown.who;
   const game = shown.game;
   const info = usePlayerData(who);
@@ -875,10 +881,10 @@ function YouTubeFrame({ who: whoIn, game: gameIn, filmId = "none", side = "stats
   const [aw, hm] = sidesOf(game);
   const logo = headWho ? info.brand?.LogoDark || info.brand?.Logo1 || "" : "";
   // Nothing up: the site's own header, so the frame never sits half empty.
-  const name = headWho ? headWho.name : game ? `${aw || ""}${hm ? ` ${game?.home && !game?.neutral ? "at" : "vs"} ${hm}` : ""}` : "We-Draft.com";
-  const sub = headWho ? [info.pos, mine, info.cls].filter(Boolean).join("  ·  ") : game ? [dateOf(game?.date), seasonFor(game) && `${seasonFor(game)} season`].filter(Boolean).join("  ·  ") : "NFL Draft breakdowns";
+  const name = shown.head ? shown.head.name : headWho ? headWho.name : game ? `${aw || ""}${hm ? ` ${game?.home && !game?.neutral ? "at" : "vs"} ${hm}` : ""}` : "We-Draft.com";
+  const sub = shown.head ? shown.head.sub : headWho ? [info.pos, mine, info.cls].filter(Boolean).join("  ·  ") : game ? [dateOf(game?.date), seasonFor(game) && `${seasonFor(game)} season`].filter(Boolean).join("  ·  ") : "NFL Draft breakdowns";
   const x0 = logo ? 160 : VID.x;
-  const headKey = gameView ? `h:${shown.filmId}` : `h:${shown.key}`;
+  const headKey = gameView || shown.head ? `h:${shown.filmId}` : `h:${shown.key}`;
   const headLeaving = leaving && (!gameView || filmId !== shown.filmId);
   return (
     <div ref={frameRef} style={{ position: "relative", width: "100%", height: "100%", background: "#000", overflow: "hidden" }}>
@@ -904,6 +910,8 @@ function YouTubeFrame({ who: whoIn, game: gameIn, filmId = "none", side = "stats
         {/* The film window. */}
         <div style={{ position: "absolute", left: VID.x, top: VID.y, width: VID.w, height: VID.h, background: "#000", boxShadow: "0 18px 40px rgba(0,10,30,0.45)", overflow: "hidden" }}>
           {film || <IdleFilm />}
+          {/* A display (Live / Upcoming / Past) over the film — the film waits under it, paused. */}
+          {boardUp && <div style={{ position: "absolute", inset: 0, zIndex: 2 }}>{boardUp}</div>}
           {/* The center card over the film: the breakdowns' background, or the We-Draft.com card. */}
           {card && (
             <div key={card} style={{ position: "absolute", inset: 0, zIndex: 3, ...(cardOut ? anim("wdvFadeOut", 280, 0, "ease-in") : null) }}>
@@ -979,6 +987,18 @@ export default function ViewerTab({ games, fileFor, gate, ready, filmPool }) {
   // The center window: film · background (the breakdowns' card) · logo (the We-Draft.com card).
   // Always opens on the film (a card left up last time paused the film under it — "film not playing").
   const [center, setCenter] = useState("film");
+  // The display (user, 2026-11-27): Film, or the college football slate —
+  // Live / Upcoming / Past (DisplayBoard.jsx); dGame = the game blown up, dWeek = Past's week.
+  const [display, setDisplay] = useState("film");
+  const [dGame, setDGame] = useState(null);
+  const [dWeek, setDWeek] = useState(null);
+  const pickDisplay = (v) => { setDisplay(v); setDGame(null); if (v !== "past") setDWeek(null); };
+  const slate = useSlate(display !== "film");
+  const pastWeek = display === "past" ? pastWeekOf(slate, dWeek) : null;
+  const pastGames = useWeekGames(display === "past" ? slate : null, pastWeek);
+  const boardGames = display === "film" ? [] : boardList(display, slate?.games, pastGames);
+  const zoomGame = dGame ? (slate?.games || []).concat(pastGames || []).find((g) => String(g.id) === String(dGame)) || null : null;
+  const onBoard = display !== "film";
   // The background's action shot: which of his center / right-facing shots (the card reports how many).
   const [shotAt, setShotAt] = useState(0);
   const [shotCount, setShotCount] = useState(0);
@@ -1077,7 +1097,7 @@ export default function ViewerTab({ games, fileFor, gate, ready, filmPool }) {
   // A card over the center: the film waits under it (paused) and plays when
   // the card comes down — always (a film that loaded under the card was never
   // "playing", so remembering that left it stopped).
-  const cardUp = layout === "youtube" && (center === "logo" || center === "screen" || (PLAYER_CENTERS.includes(center) && !!(who || feat)));
+  const cardUp = onBoard || (layout === "youtube" && (center === "logo" || center === "screen" || (PLAYER_CENTERS.includes(center) && !!(who || feat))));
   const wasUp = useRef(cardUp);
   useEffect(() => {
     const a = api.current;
@@ -1087,6 +1107,7 @@ export default function ViewerTab({ games, fileFor, gate, ready, filmPool }) {
   }, [cardUp]);
   useEffect(() => { setShotAt(0); }, [(who || feat)?.key]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const board = onBoard ? <DisplayBoard display={display} games={boardGames} zoom={zoomGame} loading={slate === undefined || (display === "past" && pastGames === null)} week={display === "past" ? pastWeek : slate?.week} onOpen={(id) => setDGame(String(id))} /> : null;
   const player = filmGame && (
     <FilmPlayer key={layout} file={file} gate={gate} apiRef={api} inkRef={inkRef} autoPlay={!cardUp} bare={layout === "youtube"} hud={false} onTime={game ? (x) => timeSub.current?.(x) : undefined}
       stageRef={screenRef}
@@ -1214,6 +1235,9 @@ export default function ViewerTab({ games, fileFor, gate, ready, filmPool }) {
       case "feature": featureById(x.id); break;
       case "side": if (["stats", "info", "site", "subscribe"].includes(x.v)) setSide(x.v); break;
       case "center": if (CENTERS.some(([k]) => k === x.v)) setCenter(x.v); break;
+      case "display": if (DISPLAYS.some(([k]) => k === x.v)) pickDisplay(x.v); break;
+      case "dgame": setDGame(x.id ? String(x.id) : null); break;
+      case "dweek": setDGame(null); setDWeek(Number(x.w) || null); break;
       case "photo": setShotAt((i) => i + (Number(x.d) || 1)); break;
       case "fast": fastStart(Number(x.dir) < 0 ? -1 : 1); break;
       case "fastEnd": fastEnd(); break;
@@ -1267,6 +1291,7 @@ export default function ViewerTab({ games, fileFor, gate, ready, filmPool }) {
     list: list.slice(0, 400).map((p) => ({ id: p.id, g: gameById[p.gameId] ? filmName(gameById[p.gameId]) : p.gameId, o: oppOf(gameById[p.gameId], who?.team), y: seasonFor(gameById[p.gameId]), l: labelOf(p), w: !!tagOf(p).wash?.keys?.length, t: Math.round(p.in) })),
     curId: cur?.id || null, idx, count: list.length,
     washed, marks, layout, labelF, side, center, cam,
+    display, dGame: dGame || null, dWeek: pastWeek || null,
     canBg: !!featured, shots: shotCount, shot: shotCount ? ((shotAt % shotCount) + shotCount) % shotCount : 0,
     feat: feat?.cfbd ? String(feat.cfbd) : null,
     featOptions: featOptions.map((tm) => ({ team: tm.team, players: tm.players.map((pl) => ({ id: String(pl.id), name: pl.name })) })),
@@ -1357,6 +1382,19 @@ export default function ViewerTab({ games, fileFor, gate, ready, filmPool }) {
               )}
               <button type="button" style={{ ...btn(true), background: UI_GOLD, borderColor: UI_GOLD, color: "#00264d" }} onClick={fullScreen} disabled={layout !== "youtube" && !filmGame}>⛶ Full screen</button>
             </div>
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+              <span style={head}>Display</span>
+              {DISPLAYS.map(([k, l]) => <button key={k} type="button" style={chip(display === k, k === "live" ? "#c0262d" : UI_BLUE)} onClick={() => pickDisplay(k)}>{k === "live" ? "● " : ""}{l}</button>)}
+              {onBoard && dGame && <button type="button" style={chip(false)} onClick={() => setDGame(null)}>◂ All games</button>}
+              {display === "past" && pastWeek && (
+                <>
+                  <button type="button" style={chip(false)} disabled={pastWeek <= 1} onClick={() => { setDGame(null); setDWeek(pastWeek - 1); }}>‹</button>
+                  <span style={{ fontSize: 12, fontWeight: 900 }}>Week {pastWeek}</span>
+                  <button type="button" style={chip(false)} disabled={pastWeek >= (slate?.week || 0)} onClick={() => { setDGame(null); setDWeek(pastWeek + 1); }}>›</button>
+                </>
+              )}
+              {onBoard && <span style={{ fontSize: 11, fontWeight: 800, color: "#8494ad" }}>{slate === undefined ? "Loading the slate…" : dGame ? (zoomGame ? "" : "That game is not on this slate") : `${boardGames.length} game${boardGames.length === 1 ? "" : "s"} · click one to blow it up`}</span>}
+            </div>
             {layout === "youtube" && (
               <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                 <span style={head}>Face cam</span>
@@ -1376,12 +1414,17 @@ export default function ViewerTab({ games, fileFor, gate, ready, filmPool }) {
               </div>
             )}
             {/* The screen: YouTube mode is always up (a broadcast never breaks); Big screen once something's picked. */}
-            {layout === "youtube" || who || game ? (
+            {layout === "youtube" || who || game || onBoard ? (
               <div ref={screenRef} style={{ position: "relative", width: "100%", background: "#000", borderRadius: 10, overflow: "hidden", ...(layout === "youtube" ? { aspectRatio: "16 / 9" } : { minHeight: 200 }) }}>
                 {layout === "youtube"
-                  ? <YouTubeFrame who={featured} game={filmGame || game} filmId={who ? `p:${who.key}` : game ? `g:${game.id}` : "none"} side={side} center={center} shotAt={shotAt} onShots={setShotCount} cam={cam}
+                  ? <YouTubeFrame who={onBoard ? null : featured} game={onBoard ? null : filmGame || game} filmId={onBoard ? `d:${display}:${dGame || ""}:${pastWeek || ""}` : who ? `p:${who.key}` : game ? `g:${game.id}` : "none"}
+                    side={side} center={onBoard ? "film" : center} shotAt={shotAt} onShots={setShotCount} cam={cam}
+                    head={onBoard ? boardHead(display, zoomGame, display === "past" ? pastWeek : slate?.week) : null} board={board}
                     settling={!cardUp && (who ? plays === null || fileBusy : !!game && fileBusy)}>{player}</YouTubeFrame>
-                  : player}
+                  : <>
+                    {player}
+                    {onBoard && <div style={{ position: player ? "absolute" : "relative", inset: 0, zIndex: 4, aspectRatio: "16 / 9", width: "100%", background: "#000" }}><Scaled>{board}</Scaled></div>}
+                  </>}
                 {layout !== "youtube" && !filmGame && who && plays !== null && <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", fontSize: 14, fontWeight: 800, color: "#9fb0c8", pointerEvents: "none" }}>No plays{labelF !== "all" ? " with that label" : ""}.</div>}
               </div>
             ) : (

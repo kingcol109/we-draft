@@ -16,6 +16,11 @@
 // screen too. A small see-through bar at the bottom: clear / undo, pen ·
 // arrow · circle, colors, and slow-mo / play / fast-forward. Nothing is
 // configured or saved; ✕ pops back out and wipes it.
+// Displays (user, 2026-11-27): Film · Live · Upcoming · Past — the PC's
+// middle shows the slate instead of film (components/film/DisplayBoard.jsx);
+// the games list here, tap one to blow it up on the PC (its live box score, its
+// preview, its final box), ◂ All games to go back; Past steps week by week.
+// Hiding the film list puts the remote full screen (user, 2026-11-27).
 // Later (user): YouTube live chat on the iPad, picked comments shown on screen.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Helmet } from "react-helmet-async";
@@ -25,6 +30,8 @@ import { seasonOf } from "../utils/film/library";
 import { drawInk, INK_COLORS } from "../utils/film/ink";
 import { joinDraw, newSid, sendCmd, watchPlay, watchState } from "../utils/film/remote";
 import { useSchools } from "../components/DraftArchiveList";
+import { DISPLAYS, DISPLAY_TITLES, boardList, pastWeekOf, useSlate, useWeekGames } from "../components/film/DisplayBoard";
+import { darkLogo, kickoffLabel, statusLabel, teamShort } from "../utils/live";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -477,6 +484,84 @@ function DrawMode({ s, dev, playing, rate, onToggle, onRate, cmd, linkRef, onClo
   );
 }
 
+// The Display switch + (off Film) the games on the PC's board: tap one to blow it up.
+function DisplayPanel({ s, cmd, dev }) {
+  const display = s.display || "film";
+  const on = display !== "film";
+  const slate = useSlate(on);
+  const week = display === "past" ? s.dWeek || pastWeekOf(slate, null) : null;
+  const pastGames = useWeekGames(display === "past" ? slate : null, week);
+  const list = on ? boardList(display, slate?.games, pastGames) : [];
+  const team = (t, side, g) => {
+    const final = g.status === "final";
+    const hp = Number(g.home?.points);
+    const ap = Number(g.away?.points);
+    const lost = final && (side === "home" ? hp < ap : ap < hp);
+    return (
+      <span style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, opacity: lost ? 0.55 : 1 }}>
+        {darkLogo(t) ? <img src={darkLogo(t)} alt="" style={{ width: 30, height: 30, objectFit: "contain", flexShrink: 0 }} /> : <span style={{ width: 30, flexShrink: 0 }} />}
+        {t.rank ? <span style={{ fontSize: 13, fontWeight: 900, color: GOLD }}>{t.rank}</span> : null}
+        <span style={{ ...ellipsis, fontSize: 17, fontWeight: 900 }}>{teamShort(t)}</span>
+        <span style={{ flex: 1 }} />
+        <span style={{ fontSize: g.status === "scheduled" ? 13 : 20, fontWeight: 900, color: g.status === "scheduled" ? MUTED : "#fff", fontVariantNumeric: "tabular-nums" }}>{g.status === "scheduled" ? t.record || "" : t.points ?? 0}</span>
+      </span>
+    );
+  };
+  return (
+    <div style={{ ...card, gridTemplateColumns: "minmax(0, 1fr)", gap: 10 }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <span style={{ ...head, minWidth: 70 }}>Display</span>
+        {DISPLAYS.map(([k, l]) => <button key={k} type="button" style={pill(display === k, k === "live" ? "#c0262d" : BLUE)} onClick={() => cmd("display", { v: k })}>{k === "live" ? "● " : ""}{l}</button>)}
+      </div>
+      {on && (
+        <>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            {s.dGame ? <button type="button" style={pill(true, GOLD)} onClick={() => cmd("dgame", { id: null })}>◂ All games</button>
+              : <span style={{ fontSize: 15, fontWeight: 900 }}>{DISPLAY_TITLES[display]}</span>}
+            {display === "past" && week && (
+              <>
+                <span style={{ flex: 1 }} />
+                <button type="button" style={pill()} disabled={week <= 1} onClick={() => cmd("dweek", { w: week - 1 })}>‹</button>
+                <span style={{ fontSize: 16, fontWeight: 900 }}>Week {week}</span>
+                <button type="button" style={pill()} disabled={week >= (slate?.week || 0)} onClick={() => cmd("dweek", { w: week + 1 })}>›</button>
+              </>
+            )}
+            {display !== "past" && <span style={{ fontSize: 13, fontWeight: 800, color: MUTED }}>{slate === undefined ? "Loading…" : `${list.length} game${list.length === 1 ? "" : "s"}`}</span>}
+          </div>
+          <div style={{ display: "grid", gap: 8, alignContent: "start", ...(dev.phone ? null : { maxHeight: "62vh", overflowY: "auto", WebkitOverflowScrolling: "touch" }) }}>
+            {list.map((g) => {
+              const sel = String(s.dGame || "") === String(g.id);
+              const foot = g.status === "scheduled" ? [kickoffLabel(g.startDate, g.startTimeTBD), g.tv].filter(Boolean).join(" · ")
+                : g.status === "in_progress" ? [statusLabel(g), g.situation].filter(Boolean).join(" · ") : statusLabel(g);
+              return (
+                <button key={g.id} type="button" onClick={() => cmd("dgame", { id: sel ? null : String(g.id) })}
+                  style={{ textAlign: "left", borderRadius: 12, border: `2px solid ${sel ? GOLD : LINE}`, background: sel ? "#2a2410" : "#0f1726", color: "#e8edf5", padding: "8px 14px", cursor: "pointer", display: "grid", gap: 4, minWidth: 0 }}>
+                  {team(g.away || {}, "away", g)}
+                  {team(g.home || {}, "home", g)}
+                  <span style={{ ...ellipsis, fontSize: 12, fontWeight: 800, color: g.status === "in_progress" ? "#ff9b8f" : MUTED, textTransform: "uppercase", letterSpacing: 0.5 }}>{foot}</span>
+                </button>
+              );
+            })}
+            {slate !== undefined && !list.length && (display !== "past" || pastGames !== null) && (
+              <div style={{ color: MUTED, fontWeight: 700 }}>{display === "live" ? "No games live right now." : display === "upcoming" ? "No games left to kick off this week." : `No finals in Week ${week}.`}</div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// Full screen (user, 2026-11-27: hiding the film list puts the remote full screen).
+const fsEl = () => document.fullscreenElement || document.webkitFullscreenElement;
+function goFull(on) {
+  try {
+    const el = document.documentElement;
+    if (on && !fsEl()) (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el)?.catch?.(() => {});
+    else if (!on && fsEl()) (document.exitFullscreen || document.webkitExitFullscreen)?.call(document)?.catch?.(() => {});
+  } catch { /* not allowed here (an iPhone) */ }
+}
+
 export default function FilmRemote() {
   useWakeLock();
   useBareBody();
@@ -766,7 +851,7 @@ export default function FilmRemote() {
   // time, each fitting the short screen: Now (what's up on the left, the big
   // buttons on the right) · Screen · Plays (a game: Cut) · Pick. ──
   if (dev.phone) {
-    const tabs = [["now", "Now"], ["screen", "Screen"], ...(isPlayer ? [["plays", "Plays"]] : isGame ? [["cut", "✂ Cut"]] : []), ["pick", "Pick"]];
+    const tabs = [["now", "Now"], ["display", s.display && s.display !== "film" ? "● Display" : "Display"], ["screen", "Screen"], ...(isPlayer ? [["plays", "Plays"]] : isGame ? [["cut", "✂ Cut"]] : []), ["pick", "Pick"]];
     const at = tabs.some(([k]) => k === tab) ? tab : "now";
     const tabBtn = (on) => ({ minHeight: 40, borderRadius: 10, border: "none", background: on ? GOLD : "transparent", color: on ? "#00264d" : "#c4cfdf", fontSize: 15, fontWeight: 900, padding: "0 12px", cursor: "pointer", flexShrink: 0 });
     return (
@@ -787,6 +872,7 @@ export default function FilmRemote() {
         <div className="frp-body">
           {at === "pick" ? pickCard
             : at === "screen" ? screenCard
+              : at === "display" || (at === "now" && s.display && s.display !== "film") ? <DisplayPanel s={s} cmd={cmd} dev={dev} />
               : state === undefined ? <div style={{ ...card, color: MUTED, fontWeight: 800 }}>Connecting…</div>
                 : !s.mode ? (
                   <div style={{ ...card, color: MUTED, fontWeight: 800, fontSize: 16 }}>
@@ -823,7 +909,7 @@ export default function FilmRemote() {
         {!live && <span style={{ fontSize: 13, fontWeight: 700, color: MUTED }}>On the PC: Admin → Film Manager → Viewer (keep it open).</span>}
         {err && <span style={{ fontSize: 12, fontWeight: 700, color: "#ff7a6b" }}>{err}</span>}
         <span style={{ flex: 1 }} />
-        <button type="button" className="fr-collapse" style={pill(pickOpen)} onClick={() => setPickOpen((x) => !x)}>{pickOpen ? "◂ Hide film list" : "▸ Film list"}</button>
+        <button type="button" className="fr-collapse" style={pill(pickOpen)} onClick={() => { const next = !pickOpen; setPickOpen(next); goFull(!next); }}>{pickOpen ? "◂ Hide film list" : "▸ Film list"}</button>
         <div className="fr-tabs" style={{ gap: 6 }}>
           <button type="button" style={pill(tab === "now", GOLD)} onClick={() => setTab("now")}>Now playing</button>
           <button type="button" style={pill(tab === "pick", GOLD)} onClick={() => setTab("pick")}>Pick film</button>
@@ -842,13 +928,20 @@ export default function FilmRemote() {
 
         {/* What's playing, and moving around in it */}
         <div className="fr-now" style={{ display: "grid", gap: 14, minWidth: 0 }}>
-          {state === undefined ? <div style={{ ...card, color: MUTED, fontWeight: 800 }}>Connecting…</div> : !s.mode ? (
+          {state === undefined ? <div style={{ ...card, color: MUTED, fontWeight: 800 }}>Connecting…</div> : s.display && s.display !== "film" ? (
             <>
+              <DisplayPanel s={s} cmd={cmd} dev={dev} />
+              {screenCard}
+            </>
+          ) : !s.mode ? (
+            <>
+              <DisplayPanel s={s} cmd={cmd} dev={dev} />
               <div style={{ ...card, color: MUTED, fontWeight: 800, fontSize: 16 }}>Nothing playing — pick a player or a game.</div>
               {screenCard}
             </>
           ) : (
             <>
+              <DisplayPanel s={s} cmd={cmd} dev={dev} />
               <div style={card}>
                 {nowHead}
                 {progress}
