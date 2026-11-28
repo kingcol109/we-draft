@@ -127,7 +127,10 @@ const leadersOf = (box) => LEADERS.map(([cat, stat, label, fmt]) => {
 // The side panel's choices (the iPad remote shows the same).
 export const SIDES = [["stats", "Stats"], ["info", "Info"], ["site", "We-Draft.com"], ["subscribe", "Subscribe"]];
 // The center window's choices (the iPad remote shows the same).
-export const CENTERS = [["film", "Film"], ["background", "Background"], ["community", "Community"], ["logo", "We-Draft.com"]];
+export const CENTERS = [["film", "Film"], ["background", "Background"], ["community", "Community"], ["logo", "We-Draft.com"], ["screen", "Screen share"]];
+// "Screen share" (user, 2026-11-27): the film window turns the OBS key color,
+// same magenta as the face cam — the one Color Key filter on the Viewer
+// capture lets a screen share (a source under it) show through the center.
 const PLAYER_CENTERS = ["background", "community"]; // need someone featured
 const markOf = (tg) => (tg?.spot ? { ...tg.spot, kind: tg.spot.kind || (tg.legacy?.mark === "arrow" ? "arrow" : "circle") } : null);
 // A game's away / home (neutral: as filed), for the header.
@@ -840,7 +843,7 @@ function YouTubeFrame({ who: whoIn, game: gameIn, filmId = "none", side = "stats
   const info = usePlayerData(who);
   // The center card (Background needs someone featured): it fades in over the
   // film, and out when the film comes back.
-  const cardWant = center === "logo" ? "logo" : PLAYER_CENTERS.includes(center) && who ? center : null;
+  const cardWant = center === "logo" || center === "screen" ? center : PLAYER_CENTERS.includes(center) && who ? center : null;
   const [card, setCard] = useState(cardWant);
   const [cardOut, setCardOut] = useState(false);
   useEffect(() => {
@@ -904,7 +907,8 @@ function YouTubeFrame({ who: whoIn, game: gameIn, filmId = "none", side = "stats
           {/* The center card over the film: the breakdowns' background, or the We-Draft.com card. */}
           {card && (
             <div key={card} style={{ position: "absolute", inset: 0, zIndex: 3, ...(cardOut ? anim("wdvFadeOut", 280, 0, "ease-in") : null) }}>
-              {card === "logo" ? <IdleFilm />
+              {card === "screen" ? <div style={{ position: "absolute", inset: 0, background: CAM_KEY }} />
+                : card === "logo" ? <IdleFilm />
                 : !who ? null
                   : card === "community" ? <CommunityCard key={shown.key} info={info} />
                     : <BackgroundCard key={shown.key} who={who} info={info} shotAt={shotAt} onShots={onShots} />}
@@ -1073,7 +1077,7 @@ export default function ViewerTab({ games, fileFor, gate, ready, filmPool }) {
   // A card over the center: the film waits under it (paused) and plays when
   // the card comes down — always (a film that loaded under the card was never
   // "playing", so remembering that left it stopped).
-  const cardUp = layout === "youtube" && (center === "logo" || (PLAYER_CENTERS.includes(center) && !!(who || feat)));
+  const cardUp = layout === "youtube" && (center === "logo" || center === "screen" || (PLAYER_CENTERS.includes(center) && !!(who || feat)));
   const wasUp = useRef(cardUp);
   useEffect(() => {
     const a = api.current;
@@ -1362,7 +1366,7 @@ export default function ViewerTab({ games, fileFor, gate, ready, filmPool }) {
                 {SIDES.map(([k, l]) => <button key={k} type="button" style={chip(side === k, UI_GOLD)} onClick={() => setSide(k)}>{l}</button>)}
                 <span style={{ ...head, marginLeft: 10 }}>Center</span>
                 {CENTERS.map(([k, l]) => (
-                  <button key={k} type="button" disabled={PLAYER_CENTERS.includes(k) && !featured} title={PLAYER_CENTERS.includes(k) && !featured ? "Feature a player first" : k === "background" ? "The breakdowns' background card (B)" : undefined}
+                  <button key={k} type="button" disabled={PLAYER_CENTERS.includes(k) && !featured} title={PLAYER_CENTERS.includes(k) && !featured ? "Feature a player first" : k === "background" ? "The breakdowns' background card (B)" : k === "screen" ? "The window turns the OBS key color (magenta) — a screen share under the capture shows through" : undefined}
                     style={{ ...chip(center === k, UI_BLUE), opacity: PLAYER_CENTERS.includes(k) && !featured ? 0.45 : 1 }} onClick={() => setCenter(k)}>{l}</button>
                 ))}
                 {center === "background" && featured && shotCount > 1 && (

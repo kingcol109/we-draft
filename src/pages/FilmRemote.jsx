@@ -596,7 +596,7 @@ export default function FilmRemote() {
       {(
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <span style={{ ...head, minWidth: 70 }}>Center</span>
-          {[["film", "Film"], ["background", "Background"], ["community", "Community"], ["logo", "We-Draft.com"]].map(([k, l]) => {
+          {[["film", "Film"], ["background", "Background"], ["community", "Community"], ["logo", "We-Draft.com"], ["screen", "Screen share"]].map(([k, l]) => {
             const off = (k === "background" || k === "community") && !s.canBg;
             return <button key={k} type="button" disabled={off} style={{ ...pill((s.center || "film") === k, BLUE), opacity: off ? 0.4 : 1 }} onClick={() => cmd("center", { v: k })}>{l}</button>;
           })}
